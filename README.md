@@ -21,7 +21,7 @@
 ## Quick Start (Docker)
 
 ```bash
-git clone https://github.com/yourname/hermod.git
+git clone https://github.com/Wampafan1/Hermod.git
 cd hermod
 cp .env.example .env
 # Edit .env with your Google OAuth, SMTP, and encryption key
