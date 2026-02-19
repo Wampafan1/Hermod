@@ -1,0 +1,160 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth ────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String       @id @default(cuid())
+  name          String?
+  email         String?      @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  reports       Report[]
+  connections   DataSource[]
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Data Sources ────────────────────────────────────
+
+model DataSource {
+  id       String         @id @default(cuid())
+  name     String
+  type     DataSourceType
+  host     String?
+  port     Int?
+  database String?
+  username String?
+  password String?        // Encrypted at rest with AES-256-GCM
+  extras   Json?          // BigQuery credentials JSON, SSL certs, etc.
+  userId   String
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reports  Report[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+enum DataSourceType {
+  POSTGRES
+  MSSQL
+  MYSQL
+  BIGQUERY
+}
+
+// ─── Reports ─────────────────────────────────────────
+
+model Report {
+  id           String     @id @default(cuid())
+  name         String
+  description  String?
+  sqlQuery     String     @db.Text
+  formatting   Json?      // Column widths, colors, number formats, etc.
+  dataSourceId String
+  dataSource   DataSource @relation(fields: [dataSourceId], references: [id])
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schedule     Schedule?
+  runHistory   RunLog[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+// ─── Schedules ───────────────────────────────────────
+
+model Schedule {
+  id         String          @id @default(cuid())
+  reportId   String          @unique
+  report     Report          @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  enabled    Boolean         @default(true)
+  frequency  ScheduleFrequency
+  daysOfWeek Int[]           // 0=Sun, 1=Mon, ... 6=Sat
+  dayOfMonth Int?            // 1-31 for monthly
+  timeHour   Int             // 0-23
+  timeMinute Int             // 0-59
+  timezone     String          @default("America/Chicago")
+  emailSubject String          @default("{report_name} — {date}")
+  emailBody    String          @db.Text @default("")
+  monthsOfYear Int[]           // For quarterly: which months (1-12)
+  recipients   Recipient[]
+  nextRunAt    DateTime?
+  pgBossJobId String?        // pg-boss job reference
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+}
+
+enum ScheduleFrequency {
+  DAILY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+// ─── Recipients ──────────────────────────────────────
+
+model Recipient {
+  id         String   @id @default(cuid())
+  email      String
+  name       String?
+  scheduleId String
+  schedule   Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+}
+
+// ─── Run History ─────────────────────────────────────
+
+model RunLog {
+  id         String    @id @default(cuid())
+  reportId   String
+  report     Report    @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  status     RunStatus
+  rowCount   Int?
+  error      String?   @db.Text
+  startedAt  DateTime  @default(now())
+  completedAt DateTime?
+}
+
+enum RunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
