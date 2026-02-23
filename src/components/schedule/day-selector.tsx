@@ -17,16 +17,16 @@ export function DaySelector({ selected, onChange }: DaySelectorProps) {
   }
 
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-1">
       {DAYS.map((label, index) => (
         <button
           key={index}
           type="button"
           onClick={() => toggle(index)}
-          className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+          className={`px-3 py-1.5 text-xs tracking-widest uppercase transition-colors ${
             selected.includes(index)
-              ? "bg-blue-600 text-white"
-              : "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
+              ? "bg-gold-dim border border-gold text-gold-bright"
+              : "bg-surface-raised border border-border text-text-dim hover:text-text hover:border-border-mid"
           }`}
         >
           {label}

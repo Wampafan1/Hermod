@@ -1,12 +1,33 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
-import { SqlEditor } from "./sql-editor";
-import { ResultsGrid, FormattingConfig } from "./results-grid";
+import type { SheetTemplate } from "./univer-sheet";
+import { ColumnConfigPanel } from "./column-config-panel";
 import { ReportConfig } from "./report-config";
 import { useToast } from "@/components/toast";
+import { useHermodLoading } from "@/components/hermod-loading-context";
+import type { ColumnConfig } from "@/lib/column-config";
+
+const SqlEditor = dynamic(
+  () => import("./sql-editor").then((m) => m.SqlEditor),
+  { ssr: false, loading: () => <div className="h-full bg-deep border border-border" /> }
+);
+
+const UniverSheet = dynamic(
+  () => import("./univer-sheet").then((m) => m.UniverSheet),
+  { ssr: false, loading: () => <div className="flex-1 flex items-center justify-center bg-deep border border-border"><div className="spinner-norse" /></div> }
+);
+import {
+  generateColumnConfig,
+  reconcileColumnConfig,
+  applyColumnConfig,
+  migrateConfigWidths,
+} from "@/lib/column-config";
+
+const PREVIEW_ROW_LIMIT = 20;
 
 interface Connection {
   id: string;
@@ -14,28 +35,14 @@ interface Connection {
   type: string;
 }
 
-interface ReportData {
-  id?: string;
-  name: string;
-  description: string;
-  sqlQuery: string;
-  dataSourceId: string;
-  formatting: FormattingConfig;
-}
-
 interface ReportEditorProps {
-  reportId?: string; // undefined = new report
+  reportId?: string;
 }
-
-const DEFAULT_FORMATTING: FormattingConfig = {
-  columns: {},
-  headerStyle: { bold: true, bgColor: "#1e3a5f", fontColor: "#ffffff" },
-  cellStyles: {},
-};
 
 export function ReportEditor({ reportId }: ReportEditorProps) {
   const router = useRouter();
   const toast = useToast();
+  const hermod = useHermodLoading();
   const isNew = !reportId;
 
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -43,26 +50,52 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
   const [description, setDescription] = useState("");
   const [sql, setSql] = useState("SELECT 1;");
   const [connectionId, setConnectionId] = useState("");
-  const [formatting, setFormatting] = useState<FormattingConfig>(DEFAULT_FORMATTING);
+  const [template, setTemplate] = useState<SheetTemplate | null>(null);
 
-  const [columns, setColumns] = useState<string[]>([]);
-  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  // Raw query results (before column config mapping)
+  const [rawColumns, setRawColumns] = useState<string[]>([]);
+  const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
+
+  // Column config state
+  const [columnConfig, setColumnConfig] = useState<ColumnConfig[]>([]);
+  const [configWarnings, setConfigWarnings] = useState<string[]>([]);
+
+  // Mapped data (after column config)
+  const [mappedColumns, setMappedColumns] = useState<string[]>([]);
+  const [mappedRows, setMappedRows] = useState<Record<string, unknown>[]>([]);
+  const [mappedConfigIds, setMappedConfigIds] = useState<string[]>([]);
+
   const [running, setRunning] = useState(false);
   const [runInfo, setRunInfo] = useState<{ rowCount: number; time: number } | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [startRow, setStartRow] = useState(0);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [loaded, setLoaded] = useState(isNew);
 
-  // Fetch connections
+  const templateRef = useRef<SheetTemplate | null>(null);
+  const columnConfigRef = useRef<ColumnConfig[]>([]);
+  const rawColumnsRef = useRef<string[]>([]);
+  const rawRowsRef = useRef<Record<string, unknown>[]>([]);
+  const sheetExtractRef = useRef<(() => SheetTemplate | null) | null>(null);
+
+  // Keep refs in sync
+  useEffect(() => {
+    columnConfigRef.current = columnConfig;
+  }, [columnConfig]);
+  useEffect(() => {
+    rawColumnsRef.current = rawColumns;
+    rawRowsRef.current = rawRows;
+  }, [rawColumns, rawRows]);
+
   useEffect(() => {
     fetch("/api/connections")
       .then((r) => r.json())
       .then(setConnections)
       .catch(() => toast.error("Failed to load connections"));
-  }, [toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Load existing report
   useEffect(() => {
     if (!reportId) return;
     fetch(`/api/reports/${reportId}`)
@@ -75,19 +108,62 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
         setDescription(report.description ?? "");
         setSql(report.sqlQuery);
         setConnectionId(report.dataSourceId);
-        setFormatting(report.formatting ?? DEFAULT_FORMATTING);
+        if (report.formatting?.snapshot) {
+          const tmpl = report.formatting as SheetTemplate;
+          setTemplate(tmpl);
+          templateRef.current = tmpl;
+          setStartRow(tmpl.startRow ?? 0);
+        }
+        if (report.columnConfig && Array.isArray(report.columnConfig)) {
+          const migrated = migrateConfigWidths(report.columnConfig as ColumnConfig[]);
+          setColumnConfig(migrated);
+          columnConfigRef.current = migrated;
+        }
         setLoaded(true);
       })
       .catch(() => {
         toast.error("Report not found");
         router.push("/reports");
       });
-  }, [reportId, router, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportId]);
 
-  // Track unsaved changes
   useEffect(() => {
     if (loaded && !isNew) setHasChanges(true);
-  }, [name, description, sql, connectionId, formatting]);
+  }, [name, description, sql, connectionId]);
+
+  // Helper: compute and set mapped data from column config + raw data
+  function updateMappedData(config: ColumnConfig[], cols: string[], rws: Record<string, unknown>[]) {
+    if (cols.length === 0 || config.length === 0) {
+      setMappedColumns([]);
+      setMappedRows([]);
+      setMappedConfigIds([]);
+      return;
+    }
+    const { columns, rows, configIds } = applyColumnConfig(config, cols, rws);
+    setMappedColumns(columns);
+    setMappedRows(rows);
+    setMappedConfigIds(configIds);
+  }
+
+  const handleTemplateChange = useCallback((tmpl: SheetTemplate) => {
+    templateRef.current = tmpl;
+    // Don't setHasChanges here — template auto-save fires every 5s and would
+    // immediately re-dirty after every save. The extract-before-save ensures
+    // template formatting is always captured. Only explicit user actions
+    // (name, SQL, connection, column config, startRow) should mark dirty.
+  }, []);
+
+  const handleColumnConfigChange = useCallback(
+    (newConfig: ColumnConfig[]) => {
+      setColumnConfig(newConfig);
+      setHasChanges(true);
+      // Recompute mapped data synchronously using refs for raw data
+      updateMappedData(newConfig, rawColumnsRef.current, rawRowsRef.current);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
   const handleRun = useCallback(async () => {
     if (!connectionId) {
@@ -97,6 +173,7 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
     setRunning(true);
     setQueryError(null);
     setRunInfo(null);
+    hermod.showLoading("Forging the query results...");
     try {
       const res = await fetch("/api/query/execute", {
         method: "POST",
@@ -106,24 +183,58 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
       const data = await res.json();
       if (!res.ok) {
         setQueryError(data.error || "Query failed");
-        setColumns([]);
-        setRows([]);
+        setRawColumns([]);
+        setRawRows([]);
         return;
       }
-      setColumns(data.columns);
-      setRows(data.rows);
+
+      setRawColumns(data.columns);
+      setRawRows(data.rows);
       setRunInfo({ rowCount: data.rowCount, time: data.executionTime });
+
+      // Reconcile or generate column config
+      let finalConfig: ColumnConfig[];
+      const currentConfig = columnConfigRef.current;
+      if (currentConfig.length === 0) {
+        // First run — auto-generate config
+        finalConfig = generateColumnConfig(data.columns);
+        setColumnConfig(finalConfig);
+        columnConfigRef.current = finalConfig;
+      } else {
+        // Subsequent run — reconcile
+        const { config: reconciled, warnings } = reconcileColumnConfig(
+          currentConfig,
+          data.columns
+        );
+        finalConfig = reconciled;
+        setColumnConfig(reconciled);
+        columnConfigRef.current = reconciled;
+        setConfigWarnings(warnings);
+        if (warnings.length > 0) {
+          toast.error(`Column changes detected: ${warnings.length} warning(s)`);
+        }
+      }
+
+      // Compute mapped data synchronously — avoids double-render from derived-state effect
+      updateMappedData(finalConfig, data.columns, data.rows);
     } catch {
       setQueryError("Network error");
     } finally {
       setRunning(false);
+      hermod.hideLoading();
     }
-  }, [connectionId, sql, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionId, sql]);
 
   async function handleSave() {
     if (!name || !connectionId) {
       toast.error("Name and connection are required");
       return;
+    }
+    // Force-extract live template before saving (covers <5s auto-save gap)
+    if (sheetExtractRef.current) {
+      const tmpl = sheetExtractRef.current();
+      if (tmpl) templateRef.current = tmpl;
     }
     setSaving(true);
     try {
@@ -132,7 +243,8 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
         description: description || undefined,
         sqlQuery: sql,
         dataSourceId: connectionId,
-        formatting,
+        formatting: templateRef.current,
+        columnConfig: columnConfigRef.current.length > 0 ? columnConfigRef.current : undefined,
       };
       const url = isNew ? "/api/reports" : `/api/reports/${reportId}`;
       const method = isNew ? "POST" : "PUT";
@@ -164,16 +276,38 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
     });
   }
 
+  async function handleTestSend(recipients: string[], emailConnectionId: string) {
+    if (!reportId) return;
+    hermod.showLoading("Dispatching the raven...");
+    try {
+      const res = await fetch(`/api/reports/${reportId}/test-send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipients, emailConnectionId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Send failed");
+        return;
+      }
+      toast.success(`Sent to ${recipients.length} recipient${recipients.length !== 1 ? "s" : ""}`);
+    } catch {
+      toast.error("Network error");
+    } finally {
+      hermod.hideLoading();
+    }
+  }
+
   if (!loaded) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
-        <div className="text-gray-500">Loading report...</div>
+        <div className="spinner-norse" />
       </div>
     );
   }
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] gap-4">
+    <div className="flex h-[calc(100vh-5.5rem)] gap-4">
       {/* Main editor area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toolbar */}
@@ -184,7 +318,7 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
               setConnectionId(e.target.value);
               setHasChanges(true);
             }}
-            className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500"
+            className="select-norse w-auto"
           >
             <option value="">Select connection...</option>
             {connections.map((c) => (
@@ -196,50 +330,97 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
           <button
             onClick={handleRun}
             disabled={running || !connectionId}
-            className="px-4 py-1.5 bg-green-600 rounded-lg text-sm font-medium text-white hover:bg-green-500 transition-colors disabled:opacity-50"
+            className="btn-primary text-xs"
           >
-            {running ? "Running..." : "Run Query"}
+            <span>{running ? "Running..." : "Run Query"}</span>
           </button>
-          <span className="text-xs text-gray-500">Ctrl+Enter</span>
+          <span className="text-[0.625rem] text-text-dim tracking-widest">CTRL+ENTER</span>
           {runInfo && (
-            <span className="text-xs text-gray-400">
+            <span className="text-[0.625rem] text-text-dim tracking-wide">
               {runInfo.rowCount} rows in {runInfo.time}ms
             </span>
           )}
         </div>
 
-        {/* Resizable panels */}
+        {/* Resizable panels: SQL → Column Config → Spreadsheet */}
         <PanelGroup orientation="vertical" className="flex-1">
-          <Panel defaultSize={40} minSize={20}>
+          <Panel defaultSize={35} minSize={15}>
             <SqlEditor value={sql} onChange={(v) => { setSql(v); setHasChanges(true); }} onRun={handleRun} />
           </Panel>
-          <PanelResizeHandle className="h-2 flex items-center justify-center group cursor-row-resize">
-            <div className="w-8 h-1 rounded-full bg-gray-700 group-hover:bg-gray-500 transition-colors" />
+          <PanelResizeHandle className="h-px flex items-center justify-center group cursor-row-resize">
+            <div className="w-12 h-px bg-border group-hover:bg-gold-dim transition-colors" />
           </PanelResizeHandle>
-          <Panel defaultSize={60} minSize={20}>
-            <div className="h-full flex flex-col">
-              {queryError && (
-                <div className="px-3 py-2 bg-red-500/10 text-red-400 text-sm rounded-lg mb-2">
-                  {queryError}
-                </div>
-              )}
-              {columns.length > 0 ? (
-                <ResultsGrid
-                  columns={columns}
-                  rows={rows}
-                  formatting={formatting}
-                  onFormattingChange={(f) => {
-                    setFormatting(f);
-                    setHasChanges(true);
-                  }}
+          <Panel defaultSize={65} minSize={20}>
+            <div className="flex flex-col h-full gap-0">
+              {/* Column config panel — only show after first query run */}
+              {columnConfig.length > 0 && rawColumns.length > 0 && (
+                <ColumnConfigPanel
+                  config={columnConfig}
+                  queryColumns={rawColumns}
+                  onChange={handleColumnConfigChange}
+                  warnings={configWarnings}
                 />
-              ) : (
-                <div className="flex-1 flex items-center justify-center bg-gray-900 border border-gray-800 rounded-lg">
-                  <p className="text-gray-500 text-sm">
-                    Run a query to see results
-                  </p>
-                </div>
               )}
+
+              {/* Spreadsheet */}
+              <div className="flex-1 min-h-0 flex flex-col">
+                {queryError && (
+                  <div className="px-3 py-2 bg-error-dim border border-error/30 text-error text-xs mb-2 shrink-0">
+                    {queryError}
+                  </div>
+                )}
+                {mappedColumns.length > 0 && (
+                  <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border bg-deep shrink-0">
+                    <span className="text-[0.5625rem] text-text-dim tracking-[0.35em] uppercase">Header Row</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={startRow + 1}
+                      onChange={(e) => {
+                        const v = Math.max(0, Math.min(19, (parseInt(e.target.value) || 1) - 1));
+                        setStartRow(v);
+                        setHasChanges(true);
+                      }}
+                      className="w-12 input-norse text-center text-xs py-0.5"
+                    />
+                    {startRow > 0 && (
+                      <span className="text-[0.5625rem] text-text-dim tracking-wide">
+                        {startRow} preamble row{startRow !== 1 ? "s" : ""} above data
+                      </span>
+                    )}
+                  </div>
+                )}
+                {mappedColumns.length > 0 ? (
+                  <div className="flex-1 min-h-0 flex flex-col">
+                    {mappedRows.length > PREVIEW_ROW_LIMIT && (
+                      <div className="px-3 py-1 border-b border-border bg-deep shrink-0">
+                        <span className="text-[0.5625rem] text-text-dim tracking-[0.2em] uppercase">
+                          Showing {PREVIEW_ROW_LIMIT} of {mappedRows.length} rows — full data used in export
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex-1 min-h-0">
+                      <UniverSheet
+                        columns={mappedColumns}
+                        rows={mappedRows.slice(0, PREVIEW_ROW_LIMIT)}
+                        configIds={mappedConfigIds}
+                        startRow={startRow}
+                        template={template}
+                        onTemplateChange={handleTemplateChange}
+                        extractRef={sheetExtractRef}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center bg-deep border border-border">
+                    <span className="text-gold/10 text-4xl font-cinzel mb-3">ᚱ</span>
+                    <p className="text-text-dim text-xs tracking-wide">
+                      Run a query to see results
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           </Panel>
         </PanelGroup>
@@ -257,6 +438,7 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
           onConnectionChange={(v) => { setConnectionId(v); setHasChanges(true); }}
           onSave={handleSave}
           onSaveAndSchedule={handleSaveAndSchedule}
+          onTestSend={handleTestSend}
           saving={saving}
           hasChanges={hasChanges}
           isNew={isNew}

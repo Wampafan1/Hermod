@@ -2,6 +2,7 @@ import { getBoss } from "./pg-boss";
 import { PrismaClient } from "@prisma/client";
 import { runReport } from "./report-runner";
 import { advanceNextRun } from "./schedule-utils";
+import { startSftpWatcher } from "./sftp-watcher";
 
 const prisma = new PrismaClient();
 const POLL_INTERVAL = 60_000; // 60 seconds
@@ -96,6 +97,9 @@ async function main() {
   // Poll every 60 seconds
   setInterval(schedulerTick, POLL_INTERVAL);
   console.log(`[Worker] Scheduler polling every ${POLL_INTERVAL / 1000}s`);
+
+  // Start SFTP file watcher
+  startSftpWatcher(prisma);
 }
 
 main().catch((error) => {

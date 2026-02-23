@@ -4,6 +4,11 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ["pg-boss", "mssql", "pg", "mysql2"],
   },
+  async rewrites() {
+    return [
+      { source: "/", destination: "/hermod.html" },
+    ];
+  },
 };
 
 module.exports = nextConfig;

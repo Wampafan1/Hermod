@@ -20,7 +20,7 @@ export default async function DashboardPage() {
           enabled: true,
           report: { userId: session.user.id },
           nextRunAt: {
-            lte: new Date(Date.now() + 24 * 60 * 60 * 1000), // next 24 hours
+            lte: new Date(Date.now() + 24 * 60 * 60 * 1000),
             gte: new Date(),
           },
         },
@@ -32,54 +32,48 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-gray-400 mt-1">
+      <div className="animate-fade-up">
+        <h1 className="heading-norse text-xl">Dashboard</h1>
+        <p className="text-text-dim text-xs tracking-wide mt-1">
           Welcome back, {session.user.name?.split(" ")[0]}
         </p>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-px animate-fade-up" style={{ animationDelay: "0.05s" }}>
         <Link href="/reports">
-          <StatCard label="Reports" value={reportCount} />
+          <StatCard label="Reports" value={reportCount} rune="ᚱ" />
         </Link>
         <Link href="/connections">
-          <StatCard label="Connections" value={connectionCount} />
+          <StatCard label="Connections" value={connectionCount} rune="ᚷ" />
         </Link>
         <Link href="/history">
-          <StatCard label="Runs (last 30d)" value={recentRuns.length} />
+          <StatCard label="Runs (30d)" value={recentRuns.length} rune="ᚺ" />
         </Link>
       </div>
 
       {/* Quick Actions */}
-      <div className="flex gap-3">
-        <Link
-          href="/reports/new"
-          className="px-4 py-2 bg-blue-600 rounded-lg text-sm font-medium text-white hover:bg-blue-500 transition-colors"
-        >
-          New Report
+      <div className="flex gap-3 animate-fade-up" style={{ animationDelay: "0.1s" }}>
+        <Link href="/reports/new" className="btn-primary">
+          <span>New Report</span>
         </Link>
-        <Link
-          href="/connections"
-          className="px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:border-gray-600 transition-colors"
-        >
+        <Link href="/connections" className="btn-ghost">
           Add Connection
         </Link>
       </div>
 
       {/* Upcoming Runs */}
       {upcomingSchedules.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold mb-3">Upcoming (24h)</h2>
-          <div className="space-y-2">
+        <div className="animate-fade-up" style={{ animationDelay: "0.15s" }}>
+          <h2 className="heading-norse text-sm mb-3">Upcoming (24h)</h2>
+          <div className="space-y-px">
             {upcomingSchedules.map((s) => (
               <div
                 key={s.id}
-                className="flex items-center justify-between px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg text-sm"
+                className="flex items-center justify-between px-4 py-3 bg-deep border border-border text-sm"
               >
-                <span className="text-white">{s.report.name}</span>
-                <span className="text-gray-400">
+                <span className="text-text">{s.report.name}</span>
+                <span className="text-text-dim text-xs">
                   {s.nextRunAt
                     ? relativeTimeServer(s.nextRunAt)
                     : "—"}
@@ -91,34 +85,37 @@ export default async function DashboardPage() {
       )}
 
       {/* Recent Runs */}
-      <div>
-        <h2 className="text-lg font-semibold mb-3">Recent Runs</h2>
+      <div className="animate-fade-up" style={{ animationDelay: "0.2s" }}>
+        <h2 className="heading-norse text-sm mb-3">Recent Runs</h2>
         {recentRuns.length === 0 ? (
-          <p className="text-gray-500 text-sm">
-            No report runs yet. Create your first report to get started.
-          </p>
+          <div className="text-center py-16 bg-deep border border-border">
+            <span className="text-gold/20 text-3xl font-cinzel block mb-3">ᚱ</span>
+            <p className="text-text-dim text-xs tracking-wide">
+              No report runs yet. Create your first report to get started.
+            </p>
+          </div>
         ) : (
-          <div className="bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
+          <div className="bg-deep border border-border overflow-hidden">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-800 text-gray-400">
-                  <th className="text-left px-4 py-3 font-medium">Report</th>
-                  <th className="text-left px-4 py-3 font-medium">Status</th>
-                  <th className="text-left px-4 py-3 font-medium">Rows</th>
-                  <th className="text-left px-4 py-3 font-medium">Time</th>
+                <tr className="border-b border-border">
+                  <th className="label-norse text-left px-4 py-3">Report</th>
+                  <th className="label-norse text-left px-4 py-3">Status</th>
+                  <th className="label-norse text-left px-4 py-3">Rows</th>
+                  <th className="label-norse text-left px-4 py-3">Time</th>
                 </tr>
               </thead>
               <tbody>
                 {recentRuns.map((run) => (
-                  <tr key={run.id} className="border-b border-gray-800/50">
-                    <td className="px-4 py-3">{run.report.name}</td>
+                  <tr key={run.id} className="border-b border-border hover:bg-gold/[0.02]">
+                    <td className="px-4 py-3 text-text">{run.report.name}</td>
                     <td className="px-4 py-3">
                       <StatusBadge status={run.status} />
                     </td>
-                    <td className="px-4 py-3 text-gray-400">
+                    <td className="px-4 py-3 text-text-dim">
                       {run.rowCount ?? "—"}
                     </td>
-                    <td className="px-4 py-3 text-gray-400">
+                    <td className="px-4 py-3 text-text-dim">
                       {relativeTimeServer(run.startedAt)}
                     </td>
                   </tr>
@@ -132,27 +129,28 @@ export default async function DashboardPage() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({ label, value, rune }: { label: string; value: number; rune: string }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-gray-700 transition-colors">
-      <p className="text-sm text-gray-400">{label}</p>
-      <p className="text-3xl font-bold mt-1">{value}</p>
+    <div className="stat-card-norse">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="label-norse">{label}</p>
+          <p className="text-3xl font-cinzel text-gold-bright mt-1">{value}</p>
+        </div>
+        <span className="text-gold/10 text-2xl font-cinzel">{rune}</span>
+      </div>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    SUCCESS: "bg-green-500/10 text-green-400",
-    FAILED: "bg-red-500/10 text-red-400",
-    RUNNING: "bg-yellow-500/10 text-yellow-400",
+  const classMap: Record<string, string> = {
+    SUCCESS: "badge-success",
+    FAILED: "badge-error",
+    RUNNING: "badge-running",
   };
   return (
-    <span
-      className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-        styles[status] ?? "bg-gray-700 text-gray-300"
-      }`}
-    >
+    <span className={classMap[status] ?? "badge-neutral"}>
       {status}
     </span>
   );

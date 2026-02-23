@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createConnectionSchema } from "@/lib/validations/connections";
 import { createReportSchema, executeQuerySchema } from "@/lib/validations/reports";
 import { createScheduleSchema } from "@/lib/validations/schedules";
+import { createEmailConnectionSchema } from "@/lib/validations/email-connections";
 
 describe("connection validation", () => {
   it("accepts valid postgres connection", () => {
@@ -143,6 +144,7 @@ describe("schedule validation", () => {
       timezone: "America/Chicago",
       recipients: [{ email: "test@example.com" }],
       emailSubject: "{report_name} — {date}",
+      emailConnectionId: "ec123",
     });
     expect(result.success).toBe(true);
   });
@@ -157,6 +159,7 @@ describe("schedule validation", () => {
       timezone: "America/Chicago",
       recipients: [{ email: "test@example.com" }],
       emailSubject: "Report",
+      emailConnectionId: "ec123",
     });
     expect(result.success).toBe(false);
   });
@@ -171,6 +174,7 @@ describe("schedule validation", () => {
       timezone: "America/Chicago",
       recipients: [{ email: "test@example.com" }],
       emailSubject: "Report",
+      emailConnectionId: "ec123",
     });
     expect(result.success).toBe(false);
   });
@@ -184,6 +188,7 @@ describe("schedule validation", () => {
       timezone: "America/Chicago",
       recipients: [],
       emailSubject: "Report",
+      emailConnectionId: "ec123",
     });
     expect(result.success).toBe(false);
   });
@@ -197,7 +202,119 @@ describe("schedule validation", () => {
       timezone: "America/Chicago",
       recipients: [{ email: "not-an-email" }],
       emailSubject: "Report",
+      emailConnectionId: "ec123",
     });
     expect(result.success).toBe(false);
+  });
+
+  it("rejects schedule without emailConnectionId", () => {
+    const result = createScheduleSchema.safeParse({
+      reportId: "rep123",
+      frequency: "DAILY",
+      timeHour: 8,
+      timeMinute: 0,
+      timezone: "America/Chicago",
+      recipients: [{ email: "test@example.com" }],
+      emailSubject: "Report",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("email connection validation", () => {
+  it("accepts valid PLAIN auth email connection", () => {
+    const result = createEmailConnectionSchema.safeParse({
+      name: "Gmail SMTP",
+      host: "smtp.gmail.com",
+      port: 587,
+      secure: false,
+      authType: "PLAIN",
+      username: "user@gmail.com",
+      password: "app-password",
+      fromAddress: "Hermod <reports@gmail.com>",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts NONE auth without credentials", () => {
+    const result = createEmailConnectionSchema.safeParse({
+      name: "Internal Relay",
+      host: "relay.company.com",
+      port: 25,
+      secure: false,
+      authType: "NONE",
+      fromAddress: "reports@company.com",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects PLAIN auth without username", () => {
+    const result = createEmailConnectionSchema.safeParse({
+      name: "Bad Config",
+      host: "smtp.example.com",
+      port: 587,
+      authType: "PLAIN",
+      fromAddress: "test@test.com",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects PLAIN auth without password", () => {
+    const result = createEmailConnectionSchema.safeParse({
+      name: "Bad Config",
+      host: "smtp.example.com",
+      port: 587,
+      authType: "PLAIN",
+      username: "user@test.com",
+      fromAddress: "test@test.com",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty name", () => {
+    const result = createEmailConnectionSchema.safeParse({
+      name: "",
+      host: "smtp.example.com",
+      port: 587,
+      authType: "NONE",
+      fromAddress: "test@test.com",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty host", () => {
+    const result = createEmailConnectionSchema.safeParse({
+      name: "Test",
+      host: "",
+      port: 587,
+      authType: "NONE",
+      fromAddress: "test@test.com",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty fromAddress", () => {
+    const result = createEmailConnectionSchema.safeParse({
+      name: "Test",
+      host: "smtp.example.com",
+      port: 587,
+      authType: "NONE",
+      fromAddress: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("defaults port to 587 and secure to false", () => {
+    const result = createEmailConnectionSchema.safeParse({
+      name: "Test",
+      host: "smtp.example.com",
+      authType: "NONE",
+      fromAddress: "test@test.com",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.port).toBe(587);
+      expect(result.data.secure).toBe(false);
+    }
   });
 });

@@ -29,6 +29,7 @@ export const createScheduleSchema = z
       .min(1, "At least one recipient is required"),
     emailSubject: z.string().min(1, "Email subject is required").max(500),
     emailBody: z.string().max(5000).default(""),
+    emailConnectionId: z.string().min(1, "Email connection is required"),
   })
   .refine(
     (data) => {
@@ -67,6 +68,7 @@ export const updateScheduleSchema = z.object({
   recipients: z.array(recipientSchema).min(1).optional(),
   emailSubject: z.string().min(1).max(500).optional(),
   emailBody: z.string().max(5000).optional(),
+  emailConnectionId: z.string().min(1).optional(),
 });
 
 export type CreateScheduleInput = z.infer<typeof createScheduleSchema>;

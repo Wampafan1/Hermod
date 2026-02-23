@@ -49,16 +49,16 @@ export function RecipientInput({
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-2 p-2 bg-gray-800 border border-gray-700 rounded-lg min-h-[42px]">
+      <div className="flex flex-wrap gap-2 p-2 bg-surface border border-border min-h-[42px]">
         {recipients.map((r) => (
           <span
             key={r.email}
-            className="inline-flex items-center gap-1 px-2 py-1 bg-blue-600/20 text-blue-300 rounded text-sm"
+            className="inline-flex items-center gap-1 px-2 py-1 bg-gold-dim/50 border border-gold-dim text-gold-bright text-xs tracking-wide"
           >
             {r.email}
             <button
               onClick={() => removeEmail(r.email)}
-              className="text-blue-400 hover:text-white ml-0.5"
+              className="text-gold hover:text-gold-bright ml-0.5"
             >
               &times;
             </button>
@@ -70,7 +70,7 @@ export function RecipientInput({
           onKeyDown={handleKeyDown}
           onBlur={() => input && addEmail(input)}
           placeholder={recipients.length === 0 ? "Enter email addresses..." : ""}
-          className="flex-1 min-w-[150px] bg-transparent text-white text-sm outline-none placeholder:text-gray-500"
+          className="flex-1 min-w-[150px] bg-transparent text-text text-xs outline-none placeholder:text-text-dim tracking-wide"
         />
       </div>
 
@@ -79,12 +79,12 @@ export function RecipientInput({
           <button
             type="button"
             onClick={() => setShowPrevious(!showPrevious)}
-            className="text-xs text-gray-400 hover:text-gray-300"
+            className="btn-subtle text-[0.625rem]"
           >
             Add from previous ({unusedPrevious.length})
           </button>
           {showPrevious && (
-            <div className="absolute top-6 left-0 z-10 bg-gray-800 border border-gray-700 rounded-lg shadow-lg p-2 space-y-1">
+            <div className="absolute top-6 left-0 z-10 bg-deep border border-border-mid p-2 space-y-0.5">
               {unusedPrevious.map((email) => (
                 <button
                   key={email}
@@ -92,7 +92,7 @@ export function RecipientInput({
                     addEmail(email);
                     setShowPrevious(false);
                   }}
-                  className="block w-full text-left px-2 py-1 text-sm text-gray-300 hover:bg-gray-700 rounded"
+                  className="block w-full text-left px-2 py-1 text-xs text-text-dim hover:bg-gold/[0.05] hover:text-text tracking-wide"
                 >
                   {email}
                 </button>

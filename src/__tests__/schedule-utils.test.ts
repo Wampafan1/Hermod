@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { calculateNextRun, advanceNextRun, describeSchedule } from "@/lib/schedule-utils";
+import { calculateNextRun, advanceNextRun } from "@/lib/schedule-utils";
+import { describeSchedule } from "@/lib/schedule-describe";
 
 describe("calculateNextRun", () => {
   const baseDate = new Date("2026-02-18T12:00:00Z"); // Wednesday noon UTC

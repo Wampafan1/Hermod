@@ -121,7 +121,6 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
       const method = isEditing ? "PUT" : "POST";
       const payload = buildPayload();
 
-      // For edit, only send password if user entered a new one
       if (isEditing && !password && !isBigQuery) {
         delete (payload as any).password;
       }
@@ -147,170 +146,174 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-lg mx-4 p-6 space-y-5">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">
+      <div className="bg-deep border border-border-mid w-full max-w-lg mx-4">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <h2 className="heading-norse text-sm">
             {isEditing ? "Edit Connection" : "Add Connection"}
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white text-xl leading-none"
+            className="text-text-dim hover:text-text text-xl leading-none"
           >
             &times;
           </button>
         </div>
 
-        {/* Name */}
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Name</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-            placeholder="Production Database"
-          />
-        </div>
-
-        {/* Type */}
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Type</label>
-          <select
-            value={type}
-            onChange={(e) => handleTypeChange(e.target.value as DbType)}
-            disabled={isEditing}
-            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-          >
-            {(Object.keys(TYPE_LABELS) as DbType[]).map((t) => (
-              <option key={t} value={t}>
-                {TYPE_LABELS[t]}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* SQL Connection Fields */}
-        {!isBigQuery && (
-          <>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2">
-                <label className="block text-sm text-gray-400 mb-1">Host</label>
-                <input
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-                  placeholder="localhost"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Port</label>
-                <input
-                  type="number"
-                  value={port}
-                  onChange={(e) => setPort(Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm text-gray-400 mb-1">Database</label>
-              <input
-                value={database}
-                onChange={(e) => setDatabase(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-                placeholder="my_database"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Username</label>
-                <input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-                  placeholder="postgres"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">
-                  Password{isEditing ? " (leave blank to keep)" : ""}
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-                  placeholder="••••••••"
-                />
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* BigQuery Fields */}
-        {isBigQuery && (
+        {/* Body */}
+        <div className="p-5 space-y-4">
+          {/* Name */}
           <div>
-            <label className="block text-sm text-gray-400 mb-1">
-              Service Account JSON
-            </label>
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full px-4 py-8 bg-gray-800 border-2 border-dashed border-gray-600 rounded-lg text-center cursor-pointer hover:border-blue-500 transition-colors"
-            >
-              {bqFileName ? (
-                <p className="text-sm text-green-400">{bqFileName}</p>
-              ) : (
-                <p className="text-sm text-gray-400">
-                  Click to upload service account JSON file
-                </p>
-              )}
-            </div>
+            <label className="label-norse">Name</label>
             <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={handleFileUpload}
-              className="hidden"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="input-norse"
+              placeholder="Production Database"
             />
           </div>
-        )}
 
-        {/* Test Result */}
-        {testResult && (
-          <div
-            className={`text-sm px-3 py-2 rounded-lg ${
-              testResult.success
-                ? "bg-green-500/10 text-green-400"
-                : "bg-red-500/10 text-red-400"
-            }`}
-          >
-            {testResult.success
-              ? "Connection successful!"
-              : testResult.error || "Connection failed"}
+          {/* Type */}
+          <div>
+            <label className="label-norse">Type</label>
+            <select
+              value={type}
+              onChange={(e) => handleTypeChange(e.target.value as DbType)}
+              disabled={isEditing}
+              className="select-norse"
+            >
+              {(Object.keys(TYPE_LABELS) as DbType[]).map((t) => (
+                <option key={t} value={t}>
+                  {TYPE_LABELS[t]}
+                </option>
+              ))}
+            </select>
           </div>
-        )}
 
-        {/* Actions */}
-        <div className="flex gap-3 pt-2">
+          {/* SQL Connection Fields */}
+          {!isBigQuery && (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="label-norse">Host</label>
+                  <input
+                    value={host}
+                    onChange={(e) => setHost(e.target.value)}
+                    className="input-norse"
+                    placeholder="localhost"
+                  />
+                </div>
+                <div>
+                  <label className="label-norse">Port</label>
+                  <input
+                    type="number"
+                    value={port}
+                    onChange={(e) => setPort(Number(e.target.value))}
+                    className="input-norse"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label-norse">Database</label>
+                <input
+                  value={database}
+                  onChange={(e) => setDatabase(e.target.value)}
+                  className="input-norse"
+                  placeholder="my_database"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label-norse">Username</label>
+                  <input
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="input-norse"
+                    placeholder="postgres"
+                  />
+                </div>
+                <div>
+                  <label className="label-norse">
+                    Password{isEditing ? " (blank = keep)" : ""}
+                  </label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="input-norse"
+                    placeholder="••••••••"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* BigQuery Fields */}
+          {isBigQuery && (
+            <div>
+              <label className="label-norse">
+                Service Account JSON
+              </label>
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full px-4 py-8 bg-deep border-2 border-dashed border-gold-dim text-center cursor-pointer hover:border-gold transition-colors"
+              >
+                {bqFileName ? (
+                  <p className="text-xs text-success tracking-wide">{bqFileName}</p>
+                ) : (
+                  <p className="text-xs text-text-dim tracking-wide">
+                    Click to upload service account JSON file
+                  </p>
+                )}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </div>
+          )}
+
+          {/* Test Result */}
+          {testResult && (
+            <div
+              className={`text-xs px-3 py-2 ${
+                testResult.success
+                  ? "bg-success-dim border border-success/30 text-success"
+                  : "bg-error-dim border border-error/30 text-error"
+              }`}
+            >
+              {testResult.success
+                ? "Connection successful!"
+                : testResult.error || "Connection failed"}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex gap-3 px-5 py-4 border-t border-border bg-surface">
           <button
             onClick={handleTest}
             disabled={testing}
-            className="px-4 py-2 text-sm bg-gray-800 border border-gray-600 rounded-lg text-gray-300 hover:text-white hover:border-gray-500 transition-colors disabled:opacity-50"
+            className="btn-ghost text-xs"
           >
             {testing ? "Testing..." : "Test Connection"}
           </button>
           <div className="flex-1" />
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
+            className="btn-subtle"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-4 py-2 text-sm bg-blue-600 rounded-lg text-white hover:bg-blue-500 transition-colors disabled:opacity-50"
+            className="btn-primary text-xs"
           >
-            {saving ? "Saving..." : "Save"}
+            <span>{saving ? "Saving..." : "Save"}</span>
           </button>
         </div>
       </div>

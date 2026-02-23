@@ -1,10 +1,9 @@
 "use client";
 
-import { describeSchedule } from "@/lib/schedule-utils";
-import { ScheduleFrequency } from "@prisma/client";
+import { describeSchedule } from "@/lib/schedule-describe";
 
 interface SchedulePreviewProps {
-  frequency: ScheduleFrequency;
+  frequency: "DAILY" | "WEEKLY" | "BIWEEKLY" | "MONTHLY" | "QUARTERLY";
   daysOfWeek: number[];
   dayOfMonth: number | null;
   monthsOfYear: number[];
@@ -34,9 +33,10 @@ export function SchedulePreview(props: SchedulePreviewProps) {
         : `${props.firstRecipient} and ${props.recipientCount - 1} other${props.recipientCount > 2 ? "s" : ""}`;
 
   return (
-    <div className="px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-lg text-sm text-gray-300">
-      This report will send <strong className="text-white">{description}</strong>{" "}
-      to <strong className="text-white">{recipientText}</strong>
+    <div className="px-4 py-3 bg-void border border-border text-xs text-text-dim tracking-wide leading-relaxed">
+      This report will send{" "}
+      <strong className="text-gold-bright">{description}</strong> to{" "}
+      <strong className="text-gold-bright">{recipientText}</strong>
     </div>
   );
 }

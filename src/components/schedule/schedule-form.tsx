@@ -14,6 +14,11 @@ interface Recipient {
   name?: string;
 }
 
+interface EmailConnection {
+  id: string;
+  name: string;
+}
+
 interface ScheduleFormProps {
   reportId: string;
   reportName: string;
@@ -29,6 +34,7 @@ interface ScheduleFormProps {
     timezone: string;
     emailSubject: string;
     emailBody: string;
+    emailConnectionId: string | null;
     recipients: Recipient[];
   };
 }
@@ -55,7 +61,7 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
 
   const [enabled, setEnabled] = useState(existingSchedule?.enabled ?? true);
   const [frequency, setFrequency] = useState<Frequency>(existingSchedule?.frequency ?? "WEEKLY");
-  const [daysOfWeek, setDaysOfWeek] = useState<number[]>(existingSchedule?.daysOfWeek ?? [1]); // Monday
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>(existingSchedule?.daysOfWeek ?? [1]);
   const [dayOfMonth, setDayOfMonth] = useState<number>(existingSchedule?.dayOfMonth ?? 1);
   const [monthsOfYear, setMonthsOfYear] = useState<number[]>(existingSchedule?.monthsOfYear ?? [1, 4, 7, 10]);
   const [timeHour, setTimeHour] = useState(existingSchedule?.timeHour ?? 8);
@@ -64,17 +70,30 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
   const [recipients, setRecipients] = useState<Recipient[]>(existingSchedule?.recipients ?? []);
   const [emailSubject, setEmailSubject] = useState(existingSchedule?.emailSubject ?? `{report_name} — {date}`);
   const [emailBody, setEmailBody] = useState(existingSchedule?.emailBody ?? "");
+  const [emailConnectionId, setEmailConnectionId] = useState(existingSchedule?.emailConnectionId ?? "");
+  const [emailConnections, setEmailConnections] = useState<EmailConnection[]>([]);
   const [previousEmails, setPreviousEmails] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // Auto-detect timezone
   useEffect(() => {
     if (!timezone) {
       setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
     }
   }, [timezone]);
 
-  // Fetch previous recipient emails
+  useEffect(() => {
+    fetch("/api/email-connections")
+      .then((r) => r.json())
+      .then((conns: EmailConnection[]) => {
+        setEmailConnections(conns);
+        // Auto-select if only one and none pre-selected
+        if (!emailConnectionId && conns.length === 1) {
+          setEmailConnectionId(conns[0].id);
+        }
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     fetch("/api/schedules")
       .then((r) => r.json())
@@ -86,7 +105,6 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
       .catch(() => {});
   }, []);
 
-  // 12-hour display helpers
   const display12Hour = timeHour % 12 || 12;
   const displayAmPm = timeHour < 12 ? "AM" : "PM";
 
@@ -101,6 +119,10 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
     : COMMON_TIMEZONES;
 
   async function handleSave() {
+    if (!emailConnectionId) {
+      toast.error("Select an email connection");
+      return;
+    }
     if (recipients.length === 0) {
       toast.error("Add at least one recipient");
       return;
@@ -120,6 +142,7 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
         recipients,
         emailSubject,
         emailBody,
+        emailConnectionId,
       };
 
       const url = isEditing
@@ -151,20 +174,24 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
       {/* Header with toggle */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">
+          <h1 className="heading-norse text-xl">
             {isEditing ? "Edit Schedule" : "Schedule Report"}
           </h1>
-          <p className="text-gray-400 mt-1">{reportName}</p>
+          <p className="text-text-dim text-xs tracking-wide mt-1">{reportName}</p>
         </div>
         <button
           onClick={() => setEnabled(!enabled)}
-          className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
-            enabled ? "bg-blue-600" : "bg-gray-700"
+          className={`relative inline-flex h-6 w-11 items-center transition-colors ${
+            enabled
+              ? "bg-gold-dim border border-gold"
+              : "bg-deep border border-border-mid"
           }`}
         >
           <span
-            className={`inline-block h-5 w-5 rounded-full bg-white transition-transform ${
-              enabled ? "translate-x-6" : "translate-x-1"
+            className={`inline-block h-4 w-4 rounded-full transition-transform ${
+              enabled
+                ? "translate-x-[22px] bg-gold-bright"
+                : "translate-x-1 bg-text-dim"
             }`}
           />
         </button>
@@ -172,11 +199,11 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
 
       {/* Frequency */}
       <div>
-        <label className="block text-sm text-gray-400 mb-2">Frequency</label>
+        <label className="label-norse">Frequency</label>
         <select
           value={frequency}
           onChange={(e) => setFrequency(e.target.value as Frequency)}
-          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+          className="select-norse"
         >
           <option value="DAILY">Daily</option>
           <option value="WEEKLY">Weekly</option>
@@ -189,18 +216,18 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
       {/* Day selector */}
       {(frequency === "WEEKLY" || frequency === "BIWEEKLY") && (
         <div>
-          <label className="block text-sm text-gray-400 mb-2">Days</label>
+          <label className="label-norse">Days</label>
           <DaySelector selected={daysOfWeek} onChange={setDaysOfWeek} />
         </div>
       )}
 
       {(frequency === "MONTHLY" || frequency === "QUARTERLY") && (
         <div>
-          <label className="block text-sm text-gray-400 mb-2">Day of Month</label>
+          <label className="label-norse">Day of Month</label>
           <select
             value={dayOfMonth}
             onChange={(e) => setDayOfMonth(Number(e.target.value))}
-            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+            className="select-norse"
           >
             {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
               <option key={d} value={d}>
@@ -214,8 +241,8 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
 
       {frequency === "QUARTERLY" && (
         <div>
-          <label className="block text-sm text-gray-400 mb-2">Months</label>
-          <div className="flex flex-wrap gap-2">
+          <label className="label-norse">Months</label>
+          <div className="flex flex-wrap gap-1">
             {MONTH_NAMES.map((name, index) => {
               const month = index + 1;
               const selected = monthsOfYear.includes(month);
@@ -230,10 +257,10 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
                         : [...monthsOfYear, month]
                     )
                   }
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                  className={`px-3 py-1 text-xs tracking-widest uppercase transition-colors ${
                     selected
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-800 text-gray-400 hover:text-white"
+                      ? "bg-gold-dim border border-gold text-gold-bright"
+                      : "bg-surface-raised border border-border text-text-dim hover:text-text"
                   }`}
                 >
                   {name.slice(0, 3)}
@@ -246,12 +273,12 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
 
       {/* Time */}
       <div>
-        <label className="block text-sm text-gray-400 mb-2">Time</label>
+        <label className="label-norse">Time</label>
         <div className="flex gap-2">
           <select
             value={display12Hour}
             onChange={(e) => setTime12(Number(e.target.value), displayAmPm)}
-            className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+            className="select-norse w-auto"
           >
             {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
               <option key={h} value={h}>
@@ -262,7 +289,7 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
           <select
             value={timeMinute}
             onChange={(e) => setTimeMinute(Number(e.target.value))}
-            className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+            className="select-norse w-auto"
           >
             {[0, 15, 30, 45].map((m) => (
               <option key={m} value={m}>
@@ -273,7 +300,7 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
           <select
             value={displayAmPm}
             onChange={(e) => setTime12(display12Hour, e.target.value)}
-            className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+            className="select-norse w-auto"
           >
             <option value="AM">AM</option>
             <option value="PM">PM</option>
@@ -283,11 +310,11 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
 
       {/* Timezone */}
       <div>
-        <label className="block text-sm text-gray-400 mb-2">Timezone</label>
+        <label className="label-norse">Timezone</label>
         <select
           value={timezone}
           onChange={(e) => setTimezone(e.target.value)}
-          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+          className="select-norse"
         >
           <optgroup label="Common">
             {COMMON_TIMEZONES.map((tz) => (
@@ -308,9 +335,35 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
         </select>
       </div>
 
+      {/* Email Connection */}
+      <div>
+        <label className="label-norse">Email Connection</label>
+        {emailConnections.length === 0 ? (
+          <p className="text-xs text-text-dim tracking-wide">
+            No email connections configured.{" "}
+            <a href="/connections/new" className="text-gold hover:text-gold-bright underline">
+              Add one
+            </a>
+          </p>
+        ) : (
+          <select
+            value={emailConnectionId}
+            onChange={(e) => setEmailConnectionId(e.target.value)}
+            className="select-norse"
+          >
+            <option value="">Select email connection...</option>
+            {emailConnections.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
       {/* Recipients */}
       <div>
-        <label className="block text-sm text-gray-400 mb-2">Recipients</label>
+        <label className="label-norse">Recipients</label>
         <RecipientInput
           recipients={recipients}
           onChange={setRecipients}
@@ -320,27 +373,25 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
 
       {/* Email Subject */}
       <div>
-        <label className="block text-sm text-gray-400 mb-2">Email Subject</label>
+        <label className="label-norse">Email Subject</label>
         <input
           value={emailSubject}
           onChange={(e) => setEmailSubject(e.target.value)}
-          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+          className="input-norse"
           placeholder="{report_name} — {date}"
         />
-        <p className="text-xs text-gray-500 mt-1">
+        <p className="text-[0.625rem] text-text-dim mt-1 tracking-wide">
           Variables: {"{report_name}"}, {"{date}"}, {"{day_of_week}"}, {"{row_count}"}, {"{run_time}"}, {"{connection_name}"}
         </p>
       </div>
 
       {/* Email Body */}
       <div>
-        <label className="block text-sm text-gray-400 mb-2">
-          Email Body (optional)
-        </label>
+        <label className="label-norse">Email Body (optional)</label>
         <textarea
           value={emailBody}
           onChange={(e) => setEmailBody(e.target.value)}
-          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500 resize-none"
+          className="input-norse resize-none"
           rows={4}
           placeholder="Please find the attached report."
         />
@@ -363,9 +414,9 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
       <button
         onClick={handleSave}
         disabled={saving}
-        className="w-full px-4 py-3 bg-blue-600 rounded-lg text-sm font-medium text-white hover:bg-blue-500 transition-colors disabled:opacity-50"
+        className="btn-primary w-full py-3"
       >
-        {saving ? "Saving..." : "Save Schedule"}
+        <span>{saving ? "Saving..." : "Save Schedule"}</span>
       </button>
     </div>
   );

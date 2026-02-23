@@ -50,6 +50,55 @@ npm run db:migrate   # Run Prisma migrations
 - TypeScript strict mode. Avoid `any` except for driver interop.
 - API routes preferred over server actions (worker needs the same endpoints).
 
+## Hermod Design System
+
+All UI must match the established Hermod aesthetic exactly. Key rules:
+
+### Fonts
+- Display/headings: `Cinzel` (serif, Google Fonts) — weights 400, 700, 900
+- Body/mono/labels: `Inconsolata` (monospace, Google Fonts) — weights 300, 400
+
+### Color Palette (CSS variables)
+--void: #04060f        /* page background */
+--deep: #080c1a        /* card/panel background */
+--gold: #c9933a        /* primary accent */
+--gold-bright: #f0b84a /* hover states, highlights */
+--gold-dim: rgba(201,147,58,0.3)  /* borders, subtle accents */
+--ember: #e85d20       /* warnings / alerts */
+--frost: #7eb8d4       /* secondary accent / info */
+--text: #d4c4a0        /* primary text */
+--text-dim: rgba(212,196,160,0.4) /* secondary text, labels */
+
+### Aesthetic Rules
+- Dark background always — never light mode
+- All borders: 1px solid rgba(201,147,58,0.1) or rgba(201,147,58,0.3)
+- Panels: background rgba(4,6,15,0.9), hover rgba(201,147,58,0.04)
+- Grid gaps replaced with 1px lines using the panel background color trick
+- Buttons: no border-radius — sharp corners only
+- Primary button: gold fill, gold-bright on hover using sliding ::after pseudo-element
+- Ghost button: transparent with gold border, subtle gold bg on hover
+- Typography labels: 9-11px, letter-spacing 0.35-0.5em, uppercase
+- Section headings: Cinzel, letter-spacing 0.25em, uppercase, gold-bright color
+- Body copy: Inconsolata, 12-13px, letter-spacing 0.04-0.06em, line-height 2, text-dim color
+
+### Motion
+- Page load: fadeUp (translateY 24px → 0, opacity 0 → 1) staggered with animation-delay
+- Hover transitions: 0.3-0.4s, use cubic-bezier(0.76,0,0.24,1) for sliding effects
+- No bounce, no spring — everything is deliberate and weighted
+- Pulse animations for status indicators only
+
+### Norse Flavor
+- Use Elder Futhark runes (ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗᛚᛜᛞᛟ) as decorative icons
+- Dividers: thin horizontal lines with a centered rune character
+- Terminology: "realms" for environments, "forged" for generated, "scrolls" for docs
+
+### Don't
+- No rounded corners (border-radius: 0 everywhere)
+- No purple, no gradients on white backgrounds
+- No Inter, Roboto, or system fonts
+- No card shadows — use borders instead
+- No emojis in UI
+
 ## Plan Mode Guidelines
 
 Review this plan thoroughly before making any code changes. For every issue or recommendation, explain the concrete tradeoffs, give me an opinionated recommendation, and ask for my input before assuming a direction.

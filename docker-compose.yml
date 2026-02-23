@@ -15,9 +15,22 @@ services:
     build: .
     command: npm run worker
     env_file: .env
+    volumes:
+      - sftp-data:/app/sftp-data
     depends_on:
       db:
         condition: service_healthy
+      sftp:
+        condition: service_started
+    restart: unless-stopped
+
+  sftp:
+    image: atmoz/sftp:alpine
+    ports:
+      - "2222:22"
+    volumes:
+      - sftp-data:/home
+      - ./sftp-data/users.conf:/etc/sftp/users.conf:ro
     restart: unless-stopped
 
   db:
@@ -39,3 +52,4 @@ services:
 
 volumes:
   pgdata:
+  sftp-data:

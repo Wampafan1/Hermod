@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HERMOD — Deliver Across Realms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Inconsolata:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --void: #04060f;
+  --deep: #080c1a;
+  --gold: #c9933a;
+  --gold-bright: #f0b84a;
+  --gold-dim: rgba(201,147,58,0.3);
+  --gold-glow: rgba(201,147,58,0.5);
+  --ember: #e85d20;
+  --frost: #7eb8d4;
+  --rune-glow: rgba(201,147,58,0.15);
+  --text: #d4c4a0;
+  --text-dim: rgba(212,196,160,0.4);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  width: 100%;
+  background: var(--void);
+  overflow-x: hidden;
+  cursor: none;
+  font-family: 'Inconsolata', monospace;
+  color: var(--text);
+}
+
+/* ── Custom cursor ── */
+.cursor {
+  position: fixed; width: 6px; height: 6px;
+  background: var(--gold-bright);
+  border-radius: 50%;
+  pointer-events: none; z-index: 9999;
+  transform: translate(-50%,-50%);
+  box-shadow: 0 0 14px var(--gold), 0 0 50px var(--gold-glow);
+  transition: width 0.15s, height 0.15s, background 0.15s;
+}
+.cursor.active {
+  width: 10px; height: 10px;
+  background: var(--ember);
+  box-shadow: 0 0 20px var(--ember), 0 0 60px rgba(232,93,32,0.5);
+}
+.cursor-trail {
+  position: fixed; width: 36px; height: 36px;
+  border: 1px solid rgba(201,147,58,0.45);
+  border-radius: 50%;
+  pointer-events: none; z-index: 9998;
+  transform: translate(-50%,-50%);
+  transition: width 0.2s ease, height 0.2s ease, border-color 0.2s;
+}
+.cursor-trail.hover {
+  width: 64px; height: 64px;
+  border-color: var(--gold);
+  border-width: 2px;
+}
+
+/* ── Canvas layers ── */
+canvas#aurora {
+  position: fixed; inset: 0; z-index: 0;
+}
+
+/* ── Rune field ── */
+.rune-field {
+  position: fixed; inset: 0; z-index: 1;
+  overflow: hidden; pointer-events: none;
+}
+.rune {
+  position: absolute;
+  font-family: 'Cinzel', serif;
+  color: rgba(201,147,58,0.08);
+  animation: runeFloat linear infinite;
+  user-select: none;
+  text-shadow: 0 0 20px rgba(201,147,58,0.3);
+}
+
+/* ── Overlays ── */
+.vignette {
+  position: fixed; inset: 0; z-index: 2;
+  background: radial-gradient(ellipse at 50% 30%, transparent 20%, rgba(4,6,15,0.88) 100%);
+  pointer-events: none;
+}
+.grain {
+  position: fixed; inset: -100%;
+  width: 300%; height: 300%;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.03; z-index: 3; pointer-events: none;
+  animation: grain 0.5s steps(1) infinite;
+}
+.scanline {
+  position: fixed; inset: 0; z-index: 4;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 3px,
+    rgba(201,147,58,0.008) 3px, rgba(201,147,58,0.008) 6px
+  );
+  pointer-events: none;
+}
+
+/* ── Corner runes ── */
+.corner-rune {
+  position: fixed; z-index: 20;
+  font-family: 'Cinzel', serif;
+  font-size: 28px;
+  color: rgba(201,147,58,0.15);
+  pointer-events: none;
+  opacity: 0;
+  animation: fadeIn 2s 2.5s forwards;
+}
+.corner-rune.tl { top: 28px; left: 32px; }
+.corner-rune.tr { top: 28px; right: 32px; }
+.corner-rune.bl { bottom: 56px; left: 32px; }
+.corner-rune.br { bottom: 56px; right: 32px; }
+
+/* ── Corner L-brackets ── */
+.bracket {
+  position: fixed; z-index: 20;
+  width: 50px; height: 50px;
+  pointer-events: none;
+  opacity: 0;
+  animation: fadeIn 1.8s 2.2s forwards;
+}
+.bracket::before, .bracket::after {
+  content: ''; position: absolute;
+  background: var(--gold);
+  opacity: 0.25;
+}
+.bracket::before { width: 1px; height: 30px; }
+.bracket::after { width: 30px; height: 1px; }
+.bracket.tl { top: 20px; left: 20px; }
+.bracket.tl::before { top: 0; left: 0; }
+.bracket.tl::after { top: 0; left: 0; }
+.bracket.tr { top: 20px; right: 20px; }
+.bracket.tr::before { top: 0; right: 0; }
+.bracket.tr::after { top: 0; right: 0; }
+.bracket.bl { bottom: 48px; left: 20px; }
+.bracket.bl::before { bottom: 0; left: 0; }
+.bracket.bl::after { bottom: 0; left: 0; }
+.bracket.br { bottom: 48px; right: 20px; }
+.bracket.br::before { bottom: 0; right: 0; }
+.bracket.br::after { bottom: 0; right: 0; }
+
+/* ── Rune divider ── */
+.rune-divider {
+  display: flex; align-items: center; gap: 1.5rem;
+  margin: 0 auto;
+  max-width: 600px;
+  opacity: 0.6;
+}
+.rune-divider::before, .rune-divider::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+.rune-divider span {
+  font-family: 'Cinzel', serif;
+  color: var(--gold);
+  font-size: 22px;
+  text-shadow: 0 0 20px rgba(201,147,58,0.5);
+}
+
+/* ── Main scroll container ── */
+.page {
+  position: relative; z-index: 10;
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center;
+}
+
+/* ── Nav ── */
+nav {
+  width: 100%; padding: 2rem 3rem;
+  display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid rgba(201,147,58,0.08);
+  opacity: 0; animation: fadeIn 1s 0.3s forwards;
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 100;
+  background: rgba(4,6,15,0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.nav-brand {
+  font-family: 'Cinzel', serif;
+  font-size: 14px; letter-spacing: 0.4em;
+  color: var(--gold); text-transform: uppercase;
+  text-shadow: 0 0 30px rgba(201,147,58,0.4);
+}
+.nav-links {
+  display: flex; gap: 3rem; list-style: none;
+}
+.nav-links a {
+  font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase;
+  color: var(--text-dim); text-decoration: none;
+  transition: color 0.3s, text-shadow 0.3s;
+  position: relative;
+}
+.nav-links a::after {
+  content: ''; position: absolute;
+  bottom: -4px; left: 0; right: 0;
+  height: 1px; background: var(--gold);
+  transform: scaleX(0);
+  transition: transform 0.3s cubic-bezier(0.76,0,0.24,1);
+}
+.nav-links a:hover { color: var(--gold); text-shadow: 0 0 20px rgba(201,147,58,0.4); }
+.nav-links a:hover::after { transform: scaleX(1); }
+
+/* ── Hero ── */
+.hero {
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 6rem 2rem 4rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Sleipnir — now visible */
+.sleipnir-wrap {
+  position: absolute;
+  right: -20px; top: 50%;
+  transform: translateY(-55%);
+  width: 500px;
+  pointer-events: none;
+  opacity: 0;
+  animation: sleipnirReveal 3s 1.8s forwards;
+}
+.sleipnir-wrap svg {
+  width: 100%;
+  filter: drop-shadow(0 0 40px rgba(201,147,58,0.2));
+}
+
+.eyebrow {
+  font-size: 11px; letter-spacing: 0.6em; text-transform: uppercase;
+  color: var(--gold); margin-bottom: 2rem;
+  opacity: 0; animation: fadeUp 1s 0.6s forwards;
+  text-shadow: 0 0 30px rgba(201,147,58,0.5);
+}
+
+/* ── Title with rune shimmer ── */
+.hero-title {
+  font-family: 'Cinzel', serif;
+  font-size: clamp(80px, 16vw, 240px);
+  font-weight: 900;
+  line-height: 0.85;
+  letter-spacing: 0.08em;
+  position: relative;
+  opacity: 0;
+  animation: titleReveal 1.5s 0.8s forwards;
+}
+.hero-title .title-main {
+  background: linear-gradient(180deg, #f5d280 0%, var(--gold) 40%, #7a5520 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 80px rgba(201,147,58,0.4));
+  position: relative;
+}
+/* Glitch layers */
+.hero-title .title-glitch {
+  position: absolute; top: 0; left: 0; width: 100%;
+  background: linear-gradient(180deg, var(--ember) 0%, rgba(232,93,32,0.5) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+  opacity: 0;
+  animation: runeGlitch1 6s 2s infinite;
+  clip-path: polygon(0 0, 100% 0, 100% 40%, 0 40%);
+}
+.hero-title .title-glitch2 {
+  position: absolute; top: 0; left: 0; width: 100%;
+  background: linear-gradient(180deg, var(--frost) 0%, rgba(126,184,212,0.5) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+  opacity: 0;
+  animation: runeGlitch2 6s 2s infinite;
+  clip-path: polygon(0 60%, 100% 60%, 100% 100%, 0 100%);
+}
+
+.hero-subtitle {
+  font-family: 'Cinzel', serif;
+  font-size: clamp(11px, 1.8vw, 18px);
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-top: 1.5rem;
+  opacity: 0; animation: fadeUp 1s 1.2s forwards;
+}
+
+.hero-line {
+  width: 1px; height: 80px;
+  background: linear-gradient(180deg, transparent, var(--gold), transparent);
+  margin: 2.5rem auto;
+  opacity: 0; animation: lineGrow 1.5s 1.5s forwards;
+  position: relative;
+}
+.hero-line::after {
+  content: '✦'; position: absolute;
+  bottom: -8px; left: 50%; transform: translateX(-50%);
+  font-size: 8px; color: var(--gold);
+  text-shadow: 0 0 10px var(--gold);
+}
+
+.hero-sub {
+  font-size: clamp(12px, 1.4vw, 16px);
+  color: rgba(212,196,160,0.55);
+  max-width: 580px;
+  line-height: 2.2;
+  letter-spacing: 0.06em;
+  opacity: 0; animation: fadeUp 1s 1.8s forwards;
+}
+.hero-sub strong {
+  color: var(--gold);
+  font-weight: 600;
+}
+
+/* ── CTA ── */
+.cta-group {
+  display: flex; gap: 1.5rem; flex-wrap: wrap; justify-content: center;
+  margin-top: 0.5rem;
+  opacity: 0; animation: fadeUp 1s 2.2s forwards;
+}
+.btn {
+  font-family: 'Inconsolata', monospace;
+  font-size: 11px; letter-spacing: 0.35em; text-transform: uppercase;
+  padding: 1.1rem 3rem;
+  cursor: none; position: relative; overflow: hidden;
+  border: none; transition: all 0.3s;
+}
+.btn-primary {
+  background: var(--gold);
+  color: var(--void);
+}
+.btn-primary::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(135deg, var(--gold-bright), var(--ember));
+  transform: translateX(-101%);
+  transition: transform 0.45s cubic-bezier(0.76,0,0.24,1);
+}
+.btn-primary:hover::before { transform: translateX(0); }
+.btn-primary:hover { box-shadow: 0 0 40px rgba(201,147,58,0.4); }
+.btn-primary span { position: relative; z-index: 1; }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--gold);
+  border: 1px solid rgba(201,147,58,0.35);
+  transition: all 0.3s;
+}
+.btn-ghost:hover {
+  border-color: var(--gold);
+  background: rgba(201,147,58,0.06);
+  box-shadow: 0 0 30px rgba(201,147,58,0.15);
+}
+
+/* ── Section reveal (scroll-triggered) ── */
+.reveal {
+  opacity: 0;
+  transform: translateY(40px);
+  transition: opacity 0.9s cubic-bezier(0.16,1,0.3,1),
+              transform 0.9s cubic-bezier(0.16,1,0.3,1);
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Features ── */
+.features {
+  width: 100%; max-width: 1100px;
+  padding: 4rem 2rem 6rem;
+}
+.section-label {
+  font-family: 'Cinzel', serif;
+  font-size: 10px; letter-spacing: 0.6em;
+  text-transform: uppercase; color: var(--gold);
+  text-align: center;
+  margin-bottom: 4rem;
+  text-shadow: 0 0 20px rgba(201,147,58,0.3);
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: rgba(201,147,58,0.08);
+  border: 1px solid rgba(201,147,58,0.08);
+}
+
+.feature {
+  background: rgba(4,6,15,0.92);
+  padding: 3rem 2.5rem;
+  position: relative;
+  transition: all 0.5s cubic-bezier(0.16,1,0.3,1);
+  overflow: hidden;
+}
+.feature::before {
+  content: ''; position: absolute;
+  top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  transform: scaleX(0);
+  transition: transform 0.6s cubic-bezier(0.76,0,0.24,1);
+}
+.feature::after {
+  content: ''; position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 0%, rgba(201,147,58,0.08) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.5s;
+}
+.feature:hover {
+  background: rgba(201,147,58,0.03);
+  transform: translateY(-2px);
+}
+.feature:hover::before { transform: scaleX(1); }
+.feature:hover::after { opacity: 1; }
+.feature:hover .feature-rune {
+  opacity: 1;
+  text-shadow: 0 0 40px rgba(201,147,58,0.6), 0 0 80px rgba(201,147,58,0.3);
+  transform: scale(1.1);
+}
+
+.feature-rune {
+  font-family: 'Cinzel', serif;
+  font-size: 36px;
+  color: var(--gold);
+  margin-bottom: 1.5rem;
+  display: block;
+  opacity: 0.5;
+  transition: all 0.5s;
+  text-shadow: 0 0 20px rgba(201,147,58,0.2);
+}
+.feature-title {
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--gold-bright);
+  margin-bottom: 1rem;
+  position: relative; z-index: 1;
+}
+.feature-text {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 2;
+  letter-spacing: 0.04em;
+  position: relative; z-index: 1;
+}
+
+/* ── Delivery flow ── */
+.flow {
+  width: 100%; max-width: 1000px;
+  padding: 2rem 2rem 8rem;
+  text-align: center;
+}
+.flow-title {
+  font-family: 'Cinzel', serif;
+  font-size: 11px; letter-spacing: 0.5em;
+  text-transform: uppercase; color: var(--gold);
+  margin-bottom: 4rem;
+  text-shadow: 0 0 20px rgba(201,147,58,0.3);
+}
+.flow-steps {
+  display: flex; align-items: center; justify-content: center;
+  gap: 0; flex-wrap: wrap;
+}
+.flow-step {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1.2rem; padding: 0 1.2rem;
+}
+.step-icon {
+  width: 64px; height: 64px;
+  border: 1px solid rgba(201,147,58,0.25);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Cinzel', serif;
+  font-size: 22px; color: var(--gold);
+  position: relative;
+  transition: all 0.5s;
+  background: rgba(201,147,58,0.02);
+}
+.step-icon::before {
+  content: ''; position: absolute; inset: -5px;
+  border: 1px solid rgba(201,147,58,0.08);
+  transition: all 0.5s;
+}
+.step-icon::after {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(circle, rgba(201,147,58,0.1), transparent);
+  opacity: 0;
+  transition: opacity 0.5s;
+}
+.flow-step:hover .step-icon {
+  border-color: var(--gold);
+  box-shadow: 0 0 40px rgba(201,147,58,0.2);
+  transform: translateY(-4px);
+}
+.flow-step:hover .step-icon::before {
+  border-color: rgba(201,147,58,0.3);
+  inset: -8px;
+}
+.flow-step:hover .step-icon::after { opacity: 1; }
+
+.step-label {
+  font-size: 9px; letter-spacing: 0.4em;
+  text-transform: uppercase; color: var(--text-dim);
+  max-width: 100px; text-align: center;
+  transition: color 0.3s;
+}
+.flow-step:hover .step-label { color: var(--gold); }
+
+.flow-arrow {
+  color: rgba(201,147,58,0.2);
+  font-size: 24px; padding: 0 0.3rem;
+  flex-shrink: 0;
+  font-family: 'Cinzel', serif;
+  animation: arrowPulse 3s ease-in-out infinite;
+}
+.flow-arrow:nth-child(4) { animation-delay: 0.5s; }
+.flow-arrow:nth-child(6) { animation-delay: 1s; }
+.flow-arrow:nth-child(8) { animation-delay: 1.5s; }
+
+/* ── Status bar ── */
+.statusbar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  padding: 1rem 3rem;
+  border-top: 1px solid rgba(201,147,58,0.08);
+  background: rgba(4,6,15,0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex; justify-content: space-between; align-items: center;
+  z-index: 100;
+  font-size: 9px; letter-spacing: 0.35em;
+  text-transform: uppercase; color: var(--text-dim);
+  opacity: 0; animation: fadeIn 1s 3s forwards;
+}
+.status-dot {
+  width: 5px; height: 5px;
+  background: var(--gold); border-radius: 50%;
+  animation: pulse 2s infinite;
+  display: inline-block; margin-right: 0.8rem;
+  box-shadow: 0 0 10px var(--gold);
+}
+.status-right { display: flex; gap: 3rem; }
+
+/* ── Animations ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; } to { opacity: 1; }
+}
+@keyframes titleReveal {
+  0% { opacity: 0; transform: translateY(40px) scale(0.95); filter: blur(8px); }
+  60% { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes lineGrow {
+  from { opacity: 0; height: 0; }
+  to { opacity: 1; height: 80px; }
+}
+@keyframes sleipnirReveal {
+  0% { opacity: 0; transform: translateY(-55%) translateX(60px); }
+  100% { opacity: 0.07; transform: translateY(-55%) translateX(0); }
+}
+@keyframes runeFloat {
+  0% { transform: translateY(110vh) rotate(0deg); opacity: 0; }
+  5% { opacity: 1; }
+  95% { opacity: 1; }
+  100% { transform: translateY(-20vh) rotate(180deg); opacity: 0; }
+}
+@keyframes runeGlitch1 {
+  0%, 88%, 100% { transform: translate(0); opacity: 0; }
+  89% { transform: translate(-5px, 2px); opacity: 0.8; }
+  91% { transform: translate(4px, -1px); opacity: 0.6; }
+  93% { transform: translate(-3px, 3px); opacity: 0.4; }
+  95% { transform: translate(0); opacity: 0; }
+}
+@keyframes runeGlitch2 {
+  0%, 88%, 100% { transform: translate(0); opacity: 0; }
+  89% { transform: translate(5px, -2px); opacity: 0.6; }
+  91% { transform: translate(-4px, 1px); opacity: 0.5; }
+  93% { transform: translate(3px, -3px); opacity: 0.3; }
+  95% { transform: translate(0); opacity: 0; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 10px var(--gold); }
+  50% { opacity: 0.3; box-shadow: 0 0 4px var(--gold); }
+}
+@keyframes arrowPulse {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.7; color: var(--gold); }
+}
+@keyframes grain {
+  0%, 100% { transform: translate(0,0); }
+  10% { transform: translate(-2%,-3%); }
+  30% { transform: translate(3%,-1%); }
+  50% { transform: translate(-1%,3%); }
+  70% { transform: translate(2%,1%); }
+  90% { transform: translate(-3%,2%); }
+}
+
+@media (max-width: 768px) {
+  .features-grid { grid-template-columns: 1fr; }
+  .flow-steps { flex-direction: column; gap: 1rem; }
+  .flow-arrow { transform: rotate(90deg); }
+  .sleipnir-wrap { display: none; }
+  nav { padding: 1.5rem; }
+  .nav-links { display: none; }
+  .hero-title { font-size: clamp(60px, 18vw, 160px); }
+  .corner-rune, .bracket { display: none; }
+  .statusbar { padding: 0.8rem 1.5rem; }
+  .status-right { gap: 1.5rem; }
+}
+</style>
+</head>
+<body>
+
+<div class="cursor" id="cursor"></div>
+<div class="cursor-trail" id="trail"></div>
+
+<canvas id="aurora"></canvas>
+
+<div class="rune-field" id="runeField"></div>
+<div class="vignette"></div>
+<div class="scanline"></div>
+<div class="grain"></div>
+
+<!-- Corner decorations -->
+<div class="bracket tl"></div>
+<div class="bracket tr"></div>
+<div class="bracket bl"></div>
+<div class="bracket br"></div>
+<div class="corner-rune tl">ᚺ</div>
+<div class="corner-rune tr">ᛗ</div>
+<div class="corner-rune bl">ᚱ</div>
+<div class="corner-rune br">ᛊ</div>
+
+<div class="page">
+
+  <nav>
+    <div class="nav-brand">⟡ Hermod</div>
+    <ul class="nav-links">
+      <li><a href="#">How It Works</a></li>
+      <li><a href="#">Destinations</a></li>
+      <li><a href="#">The Scrolls</a></li>
+      <li><a href="#">Deploy</a></li>
+    </ul>
+  </nav>
+
+  <!-- ═══════════════ HERO ═══════════════ -->
+  <section class="hero">
+
+    <div class="sleipnir-wrap">
+      <svg viewBox="0 0 400 350" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M320 60 C340 40 370 50 380 70 C390 90 375 110 355 105 C370 120 365 145 345 140 C350 160 330 175 310 165 L295 200 L310 260 L285 265 L280 210 L265 200 L255 270 L230 272 L235 205 L210 195 L200 265 L175 268 L185 200 L165 190 L160 260 L135 262 L145 185 L120 175 C100 165 80 140 85 115 C60 120 40 105 45 85 C50 65 75 58 95 68 C105 45 130 35 155 45 C170 25 200 20 220 35 C240 20 270 25 285 45 C300 30 320 35 320 60Z" fill="url(#sleipGrad)"/>
+        <defs>
+          <linearGradient id="sleipGrad" x1="200" y1="20" x2="200" y2="280" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#f0b84a"/>
+            <stop offset="1" stop-color="#7a5520"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+
+    <p class="eyebrow">Norse · Messenger · Engine</p>
+
+    <h1 class="hero-title">
+      <span class="title-main">HERMOD</span>
+      <span class="title-glitch" aria-hidden="true">HERMOD</span>
+      <span class="title-glitch2" aria-hidden="true">HERMOD</span>
+    </h1>
+
+    <p class="hero-subtitle">Swift as Sleipnir · Sharp as Odin's Ravens</p>
+
+    <div class="hero-line"></div>
+
+    <p class="hero-sub">
+      <strong>Query</strong> any database. <strong>Forge</strong> it into Excel.<br>
+      <strong>Deliver</strong> across realms — inbox, FTP, SharePoint — on any schedule you command.
+    </p>
+
+    <div class="hero-line"></div>
+
+    <div class="cta-group">
+      <button class="btn btn-primary" onclick="window.location.href='/login'"><span>Begin the Ride</span></button>
+      <button class="btn btn-ghost">Read the Scrolls</button>
+    </div>
+  </section>
+
+  <!-- ═══════════════ DIVIDER ═══════════════ -->
+  <div class="reveal" style="width:100%; max-width:600px; padding: 0 2rem;">
+    <div class="rune-divider"><span>ᚺ</span></div>
+  </div>
+
+  <!-- ═══════════════ FEATURES ═══════════════ -->
+  <section class="features reveal">
+    <div class="section-label">Powers of the Messenger</div>
+    <div class="features-grid">
+
+      <div class="feature">
+        <span class="feature-rune">ᛊ</span>
+        <div class="feature-title">SQL Sorcery</div>
+        <p class="feature-text">Write once. Connect to any SQL Server, PostgreSQL, or MySQL realm. Parameterized, scheduled, unstoppable.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-rune">ᚠ</span>
+        <div class="feature-title">Excel Forged</div>
+        <p class="feature-text">Results rendered into beautifully formatted .xlsx workbooks — styled headers, auto-widths, multiple sheets, frozen panes.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-rune">ᚱ</span>
+        <div class="feature-title">Realm Delivery</div>
+        <p class="feature-text">Email, FTP, SharePoint, network paths. Hermod rides to wherever your recipients dwell. No realm is too far.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-rune">ᛏ</span>
+        <div class="feature-title">Clock Scheduling</div>
+        <p class="feature-text">Set it like a clock — Monday at 7:00 AM, last day of the month at 6:00 PM. Human-readable schedules, no arcane cron syntax required.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-rune">ᛗ</span>
+        <div class="feature-title">Multi-Tenant</div>
+        <p class="feature-text">One Hermod instance. Many clients. Manage reports across every organization you serve — all from a single command post.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-rune">ᚢ</span>
+        <div class="feature-title">Run Log</div>
+        <p class="feature-text">Every delivery logged. Success, failure, duration. Full audit trail — Hermod never forgets where he's been.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════ DIVIDER ═══════════════ -->
+  <div class="reveal" style="width:100%; max-width:600px; padding: 0 2rem;">
+    <div class="rune-divider"><span>ᛉ</span></div>
+  </div>
+
+  <!-- ═══════════════ FLOW ═══════════════ -->
+  <section class="flow reveal">
+    <div class="flow-title">The Path of Every Report</div>
+    <div class="flow-steps">
+
+      <div class="flow-step">
+        <div class="step-icon">⚙</div>
+        <div class="step-label">Schedule Defined</div>
+      </div>
+      <div class="flow-arrow">→</div>
+
+      <div class="flow-step">
+        <div class="step-icon">⌗</div>
+        <div class="step-label">SQL Executed</div>
+      </div>
+      <div class="flow-arrow">→</div>
+
+      <div class="flow-step">
+        <div class="step-icon">⬡</div>
+        <div class="step-label">Excel Forged</div>
+      </div>
+      <div class="flow-arrow">→</div>
+
+      <div class="flow-step">
+        <div class="step-icon">ᛉ</div>
+        <div class="step-label">Hermod Rides</div>
+      </div>
+      <div class="flow-arrow">→</div>
+
+      <div class="flow-step">
+        <div class="step-icon">✦</div>
+        <div class="step-label">Delivered</div>
+      </div>
+
+    </div>
+  </section>
+
+</div>
+
+<!-- ═══════════════ STATUS BAR ═══════════════ -->
+<div class="statusbar">
+  <div>
+    <span class="status-dot"></span>
+    <span>Hermod — Operational</span>
+  </div>
+  <div class="status-right">
+    <span id="coords">ᛉ 000° / 000°</span>
+    <span id="clock">--:--:--</span>
+    <span>All Realms Reachable</span>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// CURSOR SYSTEM
+// ═══════════════════════════════════════════════════════════
+const cursor = document.getElementById('cursor');
+const trail = document.getElementById('trail');
+let mx = 0, my = 0, tx = 0, ty = 0;
+
+document.addEventListener('mousemove', e => {
+  mx = e.clientX; my = e.clientY;
+  cursor.style.left = mx + 'px';
+  cursor.style.top = my + 'px';
+  document.getElementById('coords').textContent =
+    'ᛉ ' + (mx / innerWidth * 360).toFixed(1) + '° / ' +
+    (my / innerHeight * 180).toFixed(1) + '°';
+});
+
+// Hover states
+document.querySelectorAll('button, a, .feature, .flow-step').forEach(el => {
+  el.addEventListener('mouseenter', () => trail.classList.add('hover'));
+  el.addEventListener('mouseleave', () => trail.classList.remove('hover'));
+});
+
+// Click pulse
+document.addEventListener('mousedown', () => cursor.classList.add('active'));
+document.addEventListener('mouseup', () => cursor.classList.remove('active'));
+
+(function animTrail() {
+  tx += (mx - tx) * 0.09;
+  ty += (my - ty) * 0.09;
+  trail.style.left = tx + 'px';
+  trail.style.top = ty + 'px';
+  requestAnimationFrame(animTrail);
+})();
+
+// ═══════════════════════════════════════════════════════════
+// CLOCK
+// ═══════════════════════════════════════════════════════════
+function tick() {
+  const n = new Date();
+  document.getElementById('clock').textContent =
+    String(n.getHours()).padStart(2,'0') + ':' +
+    String(n.getMinutes()).padStart(2,'0') + ':' +
+    String(n.getSeconds()).padStart(2,'0');
+}
+tick(); setInterval(tick, 1000);
+
+// ═══════════════════════════════════════════════════════════
+// SCROLL REVEAL
+// ═══════════════════════════════════════════════════════════
+const reveals = document.querySelectorAll('.reveal');
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.15, rootMargin: '0px 0px -60px 0px' });
+reveals.forEach(el => observer.observe(el));
+
+// ═══════════════════════════════════════════════════════════
+// RUNE FIELD
+// ═══════════════════════════════════════════════════════════
+const ELDER_FUTHARK = 'ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗᛚᛜᛞᛟ';
+const field = document.getElementById('runeField');
+
+function spawnRune() {
+  const r = document.createElement('div');
+  r.className = 'rune';
+  r.textContent = ELDER_FUTHARK[Math.floor(Math.random() * ELDER_FUTHARK.length)];
+  r.style.left = Math.random() * 100 + 'vw';
+  r.style.fontSize = (16 + Math.random() * 24) + 'px';
+  const dur = 16 + Math.random() * 22;
+  r.style.animationDuration = dur + 's';
+  r.style.animationDelay = -(Math.random() * dur) + 's';
+  r.style.opacity = (0.04 + Math.random() * 0.1).toString();
+  field.appendChild(r);
+  setTimeout(() => r.remove(), dur * 1000);
+}
+for (let i = 0; i < 50; i++) spawnRune();
+setInterval(spawnRune, 900);
+
+// ═══════════════════════════════════════════════════════════
+// AURORA + PARTICLE FIELD CANVAS
+// ═══════════════════════════════════════════════════════════
+const canvas = document.getElementById('aurora');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
+resize(); window.addEventListener('resize', () => { resize(); initParticles(); });
+
+// ── Aurora bands ──
+const bands = Array.from({ length: 8 }, (_, i) => ({
+  y: H * (0.05 + i * 0.07),
+  amp: 35 + Math.random() * 70,
+  freq: 0.002 + Math.random() * 0.004,
+  speed: 0.0003 + Math.random() * 0.0005,
+  phase: Math.random() * Math.PI * 2,
+  hue: [42, 38, 50, 180, 200, 35, 160, 45][i],
+  sat: [65, 55, 60, 50, 45, 70, 40, 60][i],
+  alpha: 0.03 + Math.random() * 0.05
+}));
+
+// ── Particle system (VOID-level) ──
+const PARTICLE_COUNT = 200;
+let particles = [];
+
+class Particle {
+  constructor(initial) {
+    this.reset(initial);
+  }
+  reset(initial) {
+    this.x = Math.random() * W;
+    this.y = initial ? Math.random() * H : (Math.random() > 0.5 ? -10 : H + 10);
+    this.size = Math.random() * 1.8 + 0.3;
+    this.speedX = (Math.random() - 0.5) * 0.35;
+    this.speedY = (Math.random() - 0.5) * 0.35 - 0.15; // slight upward drift
+    this.life = 0;
+    this.maxLife = 250 + Math.random() * 500;
+    // Most particles gold, some frost, rare ember
+    const roll = Math.random();
+    if (roll > 0.92) this.type = 'ember';
+    else if (roll > 0.82) this.type = 'frost';
+    else this.type = 'gold';
+  }
+  update() {
+    this.life++;
+    // Mouse repulsion
+    const dx = this.x - mouseX, dy = this.y - mouseY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 140) {
+      const force = (140 - dist) / 140;
+      this.x += (dx / dist) * force * 3;
+      this.y += (dy / dist) * force * 3;
+    }
+    this.x += this.speedX;
+    this.y += this.speedY;
+    if (this.x < 0) this.x = W;
+    if (this.x > W) this.x = 0;
+    if (this.y < -20) this.y = H + 10;
+    if (this.y > H + 20) this.y = -10;
+    if (this.life > this.maxLife) this.reset(false);
+  }
+  draw() {
+    const alpha = Math.sin((this.life / this.maxLife) * Math.PI);
+    if (this.type === 'gold') {
+      ctx.fillStyle = `rgba(201,147,58,${alpha * 0.7})`;
+    } else if (this.type === 'frost') {
+      ctx.fillStyle = `rgba(126,184,212,${alpha * 0.6})`;
+    } else {
+      ctx.fillStyle = `rgba(232,93,32,${alpha * 0.7})`;
+    }
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function initParticles() {
+  particles = Array.from({ length: PARTICLE_COUNT }, () => new Particle(true));
+}
+initParticles();
+
+// ── Stars ──
+const stars = Array.from({ length: 350 }, () => ({
+  x: Math.random(), y: Math.random(),
+  r: Math.random() * 1.1 + 0.1,
+  a: Math.random() * 0.5 + 0.1,
+  twinkle: Math.random() * Math.PI * 2,
+  speed: 0.008 + Math.random() * 0.025
+}));
+
+// ── Mouse ──
+let mouseX = W / 2, mouseY = H / 2;
+document.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+
+// ── Connection lines ──
+function drawConnections() {
+  const MAX_DIST = 110;
+  for (let i = 0; i < particles.length; i++) {
+    for (let j = i + 1; j < particles.length; j++) {
+      const a = particles[i], b = particles[j];
+      const dx = a.x - b.x, dy = a.y - b.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < MAX_DIST) {
+        const alpha = (1 - d / MAX_DIST) * 0.1;
+        ctx.strokeStyle = `rgba(201,147,58,${alpha})`;
+        ctx.lineWidth = 0.4;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+// ── Shockwaves ──
+const shocks = [];
+document.addEventListener('click', e => {
+  shocks.push({ x: e.clientX, y: e.clientY, r: 0, a: 0.9 });
+  // Spawn extra particles at click
+  for (let i = 0; i < 12; i++) {
+    const p = new Particle(true);
+    p.x = e.clientX + (Math.random() - 0.5) * 40;
+    p.y = e.clientY + (Math.random() - 0.5) * 40;
+    p.speedX = (Math.random() - 0.5) * 2.5;
+    p.speedY = (Math.random() - 0.5) * 2.5;
+    p.maxLife = 60 + Math.random() * 80;
+    p.size = 0.8 + Math.random() * 1.5;
+    p.type = Math.random() > 0.5 ? 'ember' : 'gold';
+    particles.push(p);
+  }
+});
+
+// ── Draw functions ──
+function drawStars(t) {
+  stars.forEach(s => {
+    s.twinkle += s.speed;
+    const alpha = s.a * (0.5 + 0.5 * Math.sin(s.twinkle));
+    ctx.fillStyle = `rgba(212,196,160,${alpha})`;
+    ctx.beginPath();
+    ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawAurora(t) {
+  bands.forEach(b => {
+    b.phase += b.speed;
+    const mx_shift = (mouseX / W - 0.5) * 25;
+
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x <= W; x += 3) {
+      const wave = Math.sin(x * b.freq + b.phase) * b.amp +
+                   Math.sin(x * b.freq * 1.8 + b.phase * 1.4) * (b.amp * 0.5) +
+                   mx_shift;
+      ctx.lineTo(x, b.y + wave);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+
+    const grad = ctx.createLinearGradient(0, b.y - b.amp * 1.5, 0, b.y + b.amp + 200);
+    grad.addColorStop(0, `hsla(${b.hue},${b.sat}%,55%,0)`);
+    grad.addColorStop(0.3, `hsla(${b.hue},${b.sat}%,55%,${b.alpha})`);
+    grad.addColorStop(0.6, `hsla(${b.hue},${b.sat}%,40%,${b.alpha * 0.5})`);
+    grad.addColorStop(1, `hsla(${b.hue},${b.sat}%,25%,0)`);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  });
+}
+
+function drawMouseGlow() {
+  const grd = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, 400);
+  grd.addColorStop(0, 'rgba(201,147,58,0.06)');
+  grd.addColorStop(0.5, 'rgba(201,147,58,0.02)');
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawShockwaves() {
+  for (let i = shocks.length - 1; i >= 0; i--) {
+    const s = shocks[i];
+    s.r += 6; s.a -= 0.02;
+    if (s.a <= 0) { shocks.splice(i, 1); continue; }
+
+    // Outer ring
+    ctx.strokeStyle = `rgba(201,147,58,${s.a})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Inner rune ring
+    if (s.r < 100) {
+      ctx.strokeStyle = `rgba(240,184,74,${s.a * 0.5})`;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r * 0.55, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Ember ring
+    if (s.r < 60) {
+      ctx.strokeStyle = `rgba(232,93,32,${s.a * 0.3})`;
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+}
+
+// ── Main loop ──
+function loop(t) {
+  ctx.fillStyle = 'rgba(4,6,15,0.2)';
+  ctx.fillRect(0, 0, W, H);
+
+  drawStars(t);
+  drawAurora(t);
+  drawMouseGlow();
+  drawConnections();
+
+  particles.forEach(p => { p.update(); p.draw(); });
+
+  // Remove excess click particles
+  while (particles.length > PARTICLE_COUNT + 60) {
+    particles.splice(PARTICLE_COUNT, 1);
+  }
+
+  drawShockwaves();
+
+  requestAnimationFrame(loop);
+}
+loop(0);
+</script>
+</body>
+</html>

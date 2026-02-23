@@ -11,6 +11,7 @@ export const GET = withAuth(async (_req, session) => {
     include: {
       report: { select: { id: true, name: true } },
       recipients: { select: { email: true, name: true } },
+      emailConnection: { select: { id: true, name: true } },
     },
     orderBy: { nextRunAt: "asc" },
   });
@@ -36,6 +37,14 @@ export const POST = withAuth(async (req, session) => {
   });
   if (!report) {
     return NextResponse.json({ error: "Report not found" }, { status: 404 });
+  }
+
+  // Verify user owns the email connection
+  const emailConn = await prisma.emailConnection.findFirst({
+    where: { id: data.emailConnectionId, userId: session.user.id },
+  });
+  if (!emailConn) {
+    return NextResponse.json({ error: "Email connection not found" }, { status: 404 });
   }
 
   // Check if report already has a schedule
@@ -74,6 +83,7 @@ export const POST = withAuth(async (req, session) => {
       timezone: data.timezone,
       emailSubject: data.emailSubject,
       emailBody: data.emailBody,
+      emailConnectionId: data.emailConnectionId,
       nextRunAt,
       recipients: {
         create: data.recipients.map((r) => ({

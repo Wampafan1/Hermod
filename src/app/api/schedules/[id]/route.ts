@@ -44,6 +44,16 @@ export const PUT = withAuth(async (req, session) => {
   const enabled = data.enabled ?? existing.enabled;
   const nextRunAt = enabled ? calculateNextRun(merged) : null;
 
+  // Validate emailConnectionId ownership if provided
+  if (data.emailConnectionId) {
+    const emailConn = await prisma.emailConnection.findFirst({
+      where: { id: data.emailConnectionId, userId: session.user.id },
+    });
+    if (!emailConn) {
+      return NextResponse.json({ error: "Email connection not found" }, { status: 404 });
+    }
+  }
+
   // Handle recipients update
   if (data.recipients) {
     await prisma.recipient.deleteMany({ where: { scheduleId: id } });
@@ -63,7 +73,10 @@ export const PUT = withAuth(async (req, session) => {
       recipients: undefined, // handled above
       nextRunAt,
     },
-    include: { recipients: true },
+    include: {
+      recipients: true,
+      emailConnection: { select: { id: true, name: true } },
+    },
   });
 
   return NextResponse.json(updated);

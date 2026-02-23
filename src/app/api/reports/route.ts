@@ -63,6 +63,7 @@ export const POST = withAuth(async (req, session) => {
       sqlQuery: parsed.data.sqlQuery,
       dataSourceId: parsed.data.dataSourceId,
       formatting: parsed.data.formatting as any ?? undefined,
+      columnConfig: parsed.data.columnConfig as any ?? undefined,
       userId: session.user.id,
     },
   });

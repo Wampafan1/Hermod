@@ -36,15 +36,17 @@ model Session {
 }
 
 model User {
-  id            String       @id @default(cuid())
-  name          String?
-  email         String?      @unique
-  emailVerified DateTime?
-  image         String?
-  accounts      Account[]
-  sessions      Session[]
-  reports       Report[]
-  connections   DataSource[]
+  id              String           @id @default(cuid())
+  name            String?
+  email           String?          @unique
+  emailVerified   DateTime?
+  image           String?
+  accounts        Account[]
+  sessions        Session[]
+  reports         Report[]
+  connections     DataSource[]
+  sftpConnections  SftpConnection[]
+  emailConnections EmailConnection[]
 }
 
 model VerificationToken {
@@ -81,6 +83,82 @@ enum DataSourceType {
   BIGQUERY
 }
 
+// ─── SFTP Connections ────────────────────────────────
+
+model SftpConnection {
+  id                 String            @id @default(cuid())
+  name               String
+  description        String?
+  sourceType         SftpSourceType
+  sftpHost           String            @default("localhost")
+  sftpPort           Int               @default(2222)
+  sftpUsername        String            @unique
+  sftpPassword        String            // Encrypted at rest with AES-256-GCM
+  fileFormat         FileFormat        @default(CSV)
+  bqDataset          String
+  bqTable            String
+  loadMode           LoadMode          @default(REPLACE)
+  notificationEmails String[]
+  status             SftpStatus        @default(ACTIVE)
+  lastFileAt         DateTime?
+  lastFileName       String?
+  filesProcessed     Int               @default(0)
+  userId             String
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+}
+
+enum SftpSourceType {
+  ADP
+  QUICKBOOKS
+  SAP
+  GENERIC_FILE
+  CUSTOM_SFTP
+}
+
+enum FileFormat {
+  CSV
+  TSV
+  XLSX
+}
+
+enum LoadMode {
+  APPEND
+  REPLACE
+}
+
+enum SftpStatus {
+  ACTIVE
+  ERROR
+  DISABLED
+}
+
+// ─── Email Connections ─────────────────────────────────
+
+enum EmailAuthType {
+  NONE      // IP-whitelisted relay, no credentials
+  PLAIN     // Username + password (app passwords, basic SMTP)
+  OAUTH2    // Client ID + secret + refresh token
+}
+
+model EmailConnection {
+  id          String        @id @default(cuid())
+  name        String
+  host        String
+  port        Int           @default(587)
+  secure      Boolean       @default(false)
+  authType    EmailAuthType @default(PLAIN)
+  username    String?
+  password    String?       // Encrypted at rest (AES-256-GCM)
+  fromAddress String
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schedules   Schedule[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
 // ─── Reports ─────────────────────────────────────────
 
 model Report {
@@ -88,7 +166,8 @@ model Report {
   name         String
   description  String?
   sqlQuery     String     @db.Text
-  formatting   Json?      // Column widths, colors, number formats, etc.
+  formatting   Json?      // SheetTemplate: Univer cosmetics (styles, merges, freeze)
+  columnConfig Json?      // ColumnConfig[]: column mapping, order, display names, formulas
   dataSourceId String
   dataSource   DataSource @relation(fields: [dataSourceId], references: [id])
   userId       String
@@ -102,24 +181,26 @@ model Report {
 // ─── Schedules ───────────────────────────────────────
 
 model Schedule {
-  id         String          @id @default(cuid())
-  reportId   String          @unique
-  report     Report          @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  enabled    Boolean         @default(true)
-  frequency  ScheduleFrequency
-  daysOfWeek Int[]           // 0=Sun, 1=Mon, ... 6=Sat
-  dayOfMonth Int?            // 1-31 for monthly
-  timeHour   Int             // 0-23
-  timeMinute Int             // 0-59
-  timezone     String          @default("America/Chicago")
-  emailSubject String          @default("{report_name} — {date}")
-  emailBody    String          @db.Text @default("")
-  monthsOfYear Int[]           // For quarterly: which months (1-12)
-  recipients   Recipient[]
-  nextRunAt    DateTime?
-  pgBossJobId String?        // pg-boss job reference
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
+  id                String           @id @default(cuid())
+  reportId          String           @unique
+  report            Report           @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  enabled           Boolean          @default(true)
+  frequency         ScheduleFrequency
+  daysOfWeek        Int[]            // 0=Sun, 1=Mon, ... 6=Sat
+  dayOfMonth        Int?             // 1-31 for monthly
+  timeHour          Int              // 0-23
+  timeMinute        Int              // 0-59
+  timezone          String           @default("America/Chicago")
+  emailSubject      String           @default("{report_name} — {date}")
+  emailBody         String           @db.Text @default("")
+  monthsOfYear      Int[]            // For quarterly: which months (1-12)
+  emailConnectionId String?
+  emailConnection   EmailConnection? @relation(fields: [emailConnectionId], references: [id], onDelete: SetNull)
+  recipients        Recipient[]
+  nextRunAt         DateTime?
+  pgBossJobId       String?          // pg-boss job reference
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 }
 
 enum ScheduleFrequency {

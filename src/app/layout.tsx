@@ -1,9 +1,19 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Cinzel, Inconsolata } from "next/font/google";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+const cinzel = Cinzel({
+  subsets: ["latin"],
+  weight: ["400", "700", "900"],
+  variable: "--font-cinzel",
+});
+
+const inconsolata = Inconsolata({
+  subsets: ["latin"],
+  weight: ["300", "400", "600"],
+  variable: "--font-inconsolata",
+});
 
 export const metadata: Metadata = {
   title: "Hermod",
@@ -18,7 +28,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.className} bg-gray-950 text-gray-100`}>
+      <body
+        className={`${cinzel.variable} ${inconsolata.variable} font-inconsolata bg-void text-text`}
+      >
         <Providers>{children}</Providers>
       </body>
     </html>

@@ -6,6 +6,7 @@ export const createReportSchema = z.object({
   sqlQuery: z.string().min(1, "SQL query is required"),
   dataSourceId: z.string().min(1, "Connection is required"),
   formatting: z.record(z.unknown()).optional(),
+  columnConfig: z.array(z.record(z.unknown())).optional(),
 });
 
 export const updateReportSchema = z.object({
@@ -14,6 +15,7 @@ export const updateReportSchema = z.object({
   sqlQuery: z.string().min(1).optional(),
   dataSourceId: z.string().min(1).optional(),
   formatting: z.record(z.unknown()).optional().nullable(),
+  columnConfig: z.array(z.record(z.unknown())).optional().nullable(),
 });
 
 export const executeQuerySchema = z.object({
@@ -21,6 +23,15 @@ export const executeQuerySchema = z.object({
   sql: z.string().min(1, "SQL query is required").max(100000),
 });
 
+export const testSendSchema = z.object({
+  recipients: z
+    .array(z.string().email("Invalid email address"))
+    .min(1, "At least one recipient is required")
+    .max(20, "Maximum 20 recipients"),
+  emailConnectionId: z.string().min(1, "Email connection is required"),
+});
+
 export type CreateReportInput = z.infer<typeof createReportSchema>;
 export type UpdateReportInput = z.infer<typeof updateReportSchema>;
 export type ExecuteQueryInput = z.infer<typeof executeQuerySchema>;
+export type TestSendInput = z.infer<typeof testSendSchema>;

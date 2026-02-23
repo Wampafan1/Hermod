@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useCallback,
+  useMemo,
   ReactNode,
 } from "react";
 
@@ -24,6 +25,24 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+const RUNE_ICONS: Record<ToastType, string> = {
+  success: "ᚱ",
+  error: "ᛉ",
+  info: "ᛁ",
+};
+
+const TOAST_STYLES: Record<ToastType, string> = {
+  success: "border-l-2 border-l-success",
+  error: "border-l-2 border-l-error",
+  info: "border-l-2 border-l-frost",
+};
+
+const RUNE_COLORS: Record<ToastType, string> = {
+  success: "text-success",
+  error: "text-error",
+  info: "text-frost",
+};
+
 let nextId = 0;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -37,11 +56,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }, 4000);
   }, []);
 
-  const value: ToastContextValue = {
-    success: useCallback((msg: string) => addToast(msg, "success"), [addToast]),
-    error: useCallback((msg: string) => addToast(msg, "error"), [addToast]),
-    info: useCallback((msg: string) => addToast(msg, "info"), [addToast]),
-  };
+  const removeToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const success = useCallback((msg: string) => addToast(msg, "success"), [addToast]);
+  const error = useCallback((msg: string) => addToast(msg, "error"), [addToast]);
+  const info = useCallback((msg: string) => addToast(msg, "info"), [addToast]);
+
+  const value = useMemo<ToastContextValue>(
+    () => ({ success, error, info }),
+    [success, error, info]
+  );
 
   return (
     <ToastContext.Provider value={value}>
@@ -50,15 +76,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`px-4 py-3 rounded-lg text-sm font-medium shadow-lg animate-slide-in ${
-              toast.type === "success"
-                ? "bg-green-600 text-white"
-                : toast.type === "error"
-                  ? "bg-red-600 text-white"
-                  : "bg-blue-600 text-white"
-            }`}
+            className={`flex items-center gap-3 px-4 py-3 bg-surface-raised border border-border-mid text-sm animate-toast-in ${TOAST_STYLES[toast.type]}`}
           >
-            {toast.message}
+            <span className={`text-base ${RUNE_COLORS[toast.type]}`}>
+              {RUNE_ICONS[toast.type]}
+            </span>
+            <span className="text-text flex-1">{toast.message}</span>
+            <button
+              onClick={() => removeToast(toast.id)}
+              className="text-text-dim hover:text-text ml-2 text-xs"
+            >
+              &times;
+            </button>
           </div>
         ))}
       </div>
