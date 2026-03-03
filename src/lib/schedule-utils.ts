@@ -132,6 +132,12 @@ function nextBiweekly(
   return nextWeeklyRun;
 }
 
+/** Resolve dayOfMonth: 0 means "last day of month", otherwise clamp to month's max. */
+function resolveDay(dayOfMonth: number, refDate: Date): number {
+  const daysInMonth = getDaysInMonth(refDate);
+  return dayOfMonth === 0 ? daysInMonth : Math.min(dayOfMonth, daysInMonth);
+}
+
 function nextMonthly(
   now: Date,
   dayOfMonth: number,
@@ -140,15 +146,13 @@ function nextMonthly(
   tz: string
 ): Date {
   let candidate = startOfDay(now);
-  const maxDay = Math.min(dayOfMonth, getDaysInMonth(candidate));
-  candidate = setDate(candidate, maxDay);
+  candidate = setDate(candidate, resolveDay(dayOfMonth, candidate));
   candidate = setTime(candidate, hour, minute);
 
   if (!isAfter(candidate, now)) {
     // Move to next month
     candidate = addMonths(startOfDay(now), 1);
-    const nextMaxDay = Math.min(dayOfMonth, getDaysInMonth(candidate));
-    candidate = setDate(candidate, nextMaxDay);
+    candidate = setDate(candidate, resolveDay(dayOfMonth, candidate));
     candidate = setTime(candidate, hour, minute);
   }
 
@@ -170,8 +174,7 @@ function nextQuarterly(
   for (const month of sortedMonths) {
     if (month >= currentMonth) {
       let candidate = new Date(now.getFullYear(), month - 1, 1);
-      const maxDay = Math.min(dayOfMonth, getDaysInMonth(candidate));
-      candidate = setDate(candidate, maxDay);
+      candidate = setDate(candidate, resolveDay(dayOfMonth, candidate));
       candidate = setTime(candidate, hour, minute);
       if (isAfter(candidate, now)) {
         return toUtc(candidate, tz);
@@ -182,8 +185,7 @@ function nextQuarterly(
   // Next year
   const firstMonth = sortedMonths[0];
   let candidate = new Date(now.getFullYear() + 1, firstMonth - 1, 1);
-  const maxDay = Math.min(dayOfMonth, getDaysInMonth(candidate));
-  candidate = setDate(candidate, maxDay);
+  candidate = setDate(candidate, resolveDay(dayOfMonth, candidate));
   candidate = setTime(candidate, hour, minute);
   return toUtc(candidate, tz);
 }

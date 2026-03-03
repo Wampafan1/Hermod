@@ -2,13 +2,17 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { testSendSchema } from "@/lib/validations/reports";
-import { getConnector } from "@/lib/connectors";
+import type { getConnector } from "@/lib/connectors";
 import { sendReportEmail, toEmailConfig } from "@/lib/email";
-import { generateExcel } from "@/lib/report-runner";
-import { applyColumnConfig, generateColumnConfig, migrateConfigWidths } from "@/lib/column-config";
-import type { ColumnConfig } from "@/lib/column-config";
-import type { SheetTemplate } from "@/components/reports/univer-sheet";
+import { executeReportPipeline } from "@/lib/report-runner";
 import { format } from "date-fns";
+import {
+  renderEmailTemplate,
+  renderPlainText,
+  buildSubject,
+  formatFileSize,
+  type HermodEmailModel,
+} from "@/lib/email-templates";
 
 // POST /api/reports/[id]/test-send — send report to arbitrary recipients
 export const POST = withAuth(async (req, session) => {
@@ -45,57 +49,57 @@ export const POST = withAuth(async (req, session) => {
     return NextResponse.json({ error: "Report not found" }, { status: 404 });
   }
 
-  // Execute query
-  const connector = getConnector(
-    report.dataSource as Parameters<typeof getConnector>[0]
-  );
-  let result;
-  try {
-    result = await connector.query(report.sqlQuery);
-  } finally {
-    await connector.disconnect();
-  }
+  // Execute shared pipeline (query → column config → blueprint → Excel)
+  const pipeline = await executeReportPipeline({
+    name: report.name,
+    sqlQuery: report.sqlQuery,
+    dataSource: report.dataSource as Parameters<typeof getConnector>[0],
+    columnConfig: report.columnConfig,
+    formatting: report.formatting,
+    blueprintId: report.blueprintId,
+  });
 
-  // Load column config (or generate default from query), migrate old pixel widths
-  const rawConfig =
-    (report.columnConfig as ColumnConfig[] | null) ??
-    generateColumnConfig(result.columns);
-  const colConfig = migrateConfigWidths(rawConfig);
-
-  // Apply column config mapping
-  const {
-    columns: mappedCols,
-    rows: mappedRows,
-    configIds,
-  } = applyColumnConfig(colConfig, result.columns, result.rows);
-
-  // Generate Excel
-  const template = (report.formatting as SheetTemplate | null) ?? null;
-  const excelBuffer = await generateExcel(
-    report.name,
-    mappedCols,
-    mappedRows,
-    configIds,
-    colConfig,
-    template
-  );
-
-  // Build email
+  // Build email with template
   const now = new Date();
+  const reportDate = format(now, "MMMM d, yyyy");
   const filename = `${report.name.replace(/[^a-zA-Z0-9-_ ]/g, "")}_${format(now, "yyyy-MM-dd")}.xlsx`;
+
+  const emailModel: HermodEmailModel = {
+    reportName: report.name,
+    reportDate,
+    filename,
+    fileSize: formatFileSize(pipeline.excelBuffer.length),
+    nextSchedule: "N/A",
+    recipientName: "Team",
+    // Admin fields
+    clientName: "Team",
+    datasource: report.dataSource.name,
+    executionDate: format(now, "yyyy-MM-dd HH:mm:ss"),
+    duration: `${(pipeline.runTimeMs / 1000).toFixed(1)}s`,
+    rowCount: pipeline.rowCount,
+    sheetCount: 1,
+    sqlPreview: report.sqlQuery,
+    version: process.env.npm_package_version || "0.1.0",
+    managedBy: session.user.name || session.user.email || "Hermod",
+  };
+
+  const subject = buildSubject(report.name, reportDate, true);
+  const html = renderEmailTemplate("enduser", emailModel);
+  const text = renderPlainText(emailModel);
 
   await sendReportEmail({
     connection: emailConfig,
     to: recipients,
-    subject: `[Test] ${report.name} - ${format(now, "yyyy-MM-dd")}`,
-    body: `Test send of "${report.name}"\n\n${result.rows.length} rows, generated ${format(now, "yyyy-MM-dd HH:mm")}`,
-    attachment: excelBuffer,
+    subject,
+    text,
+    html,
+    attachment: pipeline.excelBuffer,
     filename,
   });
 
   return NextResponse.json({
     success: true,
-    rowCount: result.rows.length,
+    rowCount: pipeline.rowCount,
     recipients,
   });
 });

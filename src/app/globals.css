@@ -226,6 +226,10 @@
     color: var(--text-dim);
     margin-bottom: 0.375rem;
   }
+  th.label-norse {
+    display: table-cell;
+    margin-bottom: 0;
+  }
 
   /* ── Headings ── */
   .heading-norse {

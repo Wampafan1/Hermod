@@ -10,6 +10,7 @@ import { ReportConfig } from "./report-config";
 import { useToast } from "@/components/toast";
 import { useHermodLoading } from "@/components/hermod-loading-context";
 import type { ColumnConfig } from "@/lib/column-config";
+import { syncWidthsFromTemplate } from "@/lib/column-config";
 
 const SqlEditor = dynamic(
   () => import("./sql-editor").then((m) => m.SqlEditor),
@@ -51,6 +52,8 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
   const [sql, setSql] = useState("SELECT 1;");
   const [connectionId, setConnectionId] = useState("");
   const [template, setTemplate] = useState<SheetTemplate | null>(null);
+
+  const [blueprintId, setBlueprintId] = useState<string | null>(null);
 
   // Raw query results (before column config mapping)
   const [rawColumns, setRawColumns] = useState<string[]>([]);
@@ -119,6 +122,9 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
           setColumnConfig(migrated);
           columnConfigRef.current = migrated;
         }
+        if (report.blueprintId) {
+          setBlueprintId(report.blueprintId);
+        }
         setLoaded(true);
       })
       .catch(() => {
@@ -130,7 +136,7 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
 
   useEffect(() => {
     if (loaded && !isNew) setHasChanges(true);
-  }, [name, description, sql, connectionId]);
+  }, [name, description, sql, connectionId, blueprintId]);
 
   // Helper: compute and set mapped data from column config + raw data
   function updateMappedData(config: ColumnConfig[], cols: string[], rws: Record<string, unknown>[]) {
@@ -236,6 +242,12 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
       const tmpl = sheetExtractRef.current();
       if (tmpl) templateRef.current = tmpl;
     }
+    // Sync Univer column widths → column config so export uses the latest widths
+    if (templateRef.current && columnConfigRef.current.length > 0) {
+      const synced = syncWidthsFromTemplate(columnConfigRef.current, templateRef.current);
+      setColumnConfig(synced);
+      columnConfigRef.current = synced;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -245,6 +257,7 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
         dataSourceId: connectionId,
         formatting: templateRef.current,
         columnConfig: columnConfigRef.current.length > 0 ? columnConfigRef.current : undefined,
+        blueprintId,
       };
       const url = isNew ? "/api/reports" : `/api/reports/${reportId}`;
       const method = isNew ? "POST" : "PUT";
@@ -433,9 +446,11 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
           description={description}
           connectionId={connectionId}
           connections={connections}
+          blueprintId={blueprintId}
           onNameChange={(v) => { setName(v); setHasChanges(true); }}
           onDescriptionChange={(v) => { setDescription(v); setHasChanges(true); }}
           onConnectionChange={(v) => { setConnectionId(v); setHasChanges(true); }}
+          onBlueprintChange={(v) => { setBlueprintId(v); setHasChanges(true); }}
           onSave={handleSave}
           onSaveAndSchedule={handleSaveAndSchedule}
           onTestSend={handleTestSend}

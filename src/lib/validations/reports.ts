@@ -16,6 +16,7 @@ export const updateReportSchema = z.object({
   dataSourceId: z.string().min(1).optional(),
   formatting: z.record(z.unknown()).optional().nullable(),
   columnConfig: z.array(z.record(z.unknown())).optional().nullable(),
+  blueprintId: z.string().nullable().optional(),
 });
 
 export const executeQuerySchema = z.object({

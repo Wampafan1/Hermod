@@ -57,7 +57,7 @@ describe("sendReportEmail", () => {
       connection: plainConnection,
       to: ["alice@example.com"],
       subject: "Daily Report",
-      body: "Report attached.",
+      text: "Report attached.",
       attachment: Buffer.from("xlsx-bytes"),
       filename: "report.xlsx",
     });
@@ -72,12 +72,28 @@ describe("sendReportEmail", () => {
     expect(call.attachments[0].filename).toBe("report.xlsx");
   });
 
+  it("sends HTML body when provided", async () => {
+    await sendReportEmail({
+      connection: plainConnection,
+      to: ["alice@example.com"],
+      subject: "Report",
+      text: "Plain text fallback",
+      html: "<h1>Report</h1>",
+      attachment: Buffer.from("data"),
+      filename: "file.xlsx",
+    });
+
+    const call = mockSendMail.mock.calls[0][0];
+    expect(call.text).toBe("Plain text fallback");
+    expect(call.html).toBe("<h1>Report</h1>");
+  });
+
   it("joins multiple recipients", async () => {
     await sendReportEmail({
       connection: plainConnection,
       to: ["alice@example.com", "bob@example.com"],
       subject: "Report",
-      body: "Body",
+      text: "Body",
       attachment: Buffer.from("data"),
       filename: "file.xlsx",
     });
@@ -91,7 +107,7 @@ describe("sendReportEmail", () => {
       connection: noAuthConnection,
       to: ["test@example.com"],
       subject: "Test",
-      body: "Body",
+      text: "Body",
       attachment: Buffer.from("data"),
       filename: "file.xlsx",
     });

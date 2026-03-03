@@ -47,6 +47,8 @@ model User {
   connections     DataSource[]
   sftpConnections  SftpConnection[]
   emailConnections EmailConnection[]
+  blueprints       Blueprint[]
+  bifrostRoutes    BifrostRoute[]
 }
 
 model VerificationToken {
@@ -71,9 +73,11 @@ model DataSource {
   extras   Json?          // BigQuery credentials JSON, SSL certs, etc.
   userId   String
   user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reports  Report[]
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  reports        Report[]
+  routesAsSource BifrostRoute[] @relation("routeSource")
+  routesAsDest   BifrostRoute[] @relation("routeDest")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 }
 
 enum DataSourceType {
@@ -170,6 +174,8 @@ model Report {
   columnConfig Json?      // ColumnConfig[]: column mapping, order, display names, formulas
   dataSourceId String
   dataSource   DataSource @relation(fields: [dataSourceId], references: [id])
+  blueprintId  String?
+  blueprint    Blueprint? @relation(fields: [blueprintId], references: [id], onDelete: SetNull)
   userId       String
   user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   schedule     Schedule?
@@ -238,4 +244,112 @@ enum RunStatus {
   RUNNING
   SUCCESS
   FAILED
+}
+
+// ─── Blueprints (Mjolnir) ────────────────────────────
+
+model Blueprint {
+  id              String          @id @default(cuid())
+  name            String
+  description     String?
+  version         Int             @default(1)
+  steps           Json            // ForgeStep[] — the transformation pipeline
+  sourceSchema    Json?           // Expected input columns + types (for validation)
+  analysisLog     Json?           // Full Mjolnir analysis results (audit trail)
+  afterFormatting Json?           // BlueprintFormatting — captured AFTER workbook styles for pixel-perfect mirror
+  beforeSample    String?         // Original BEFORE filename
+  afterSample     String?         // Original AFTER filename
+  status          BlueprintStatus @default(DRAFT)
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reports         Report[]
+  bifrostRoutes   BifrostRoute[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+enum BlueprintStatus {
+  DRAFT
+  VALIDATED
+  ACTIVE
+  ARCHIVED
+}
+
+// ─── Bifrost Routes ─────────────────────────────────
+
+model BifrostRoute {
+  id               String         @id @default(cuid())
+  name             String
+  type             String         // "cloud-to-cloud", "ftp-ingest", etc.
+  enabled          Boolean        @default(true)
+
+  // Source
+  sourceId         String
+  source           DataSource     @relation("routeSource", fields: [sourceId], references: [id])
+  sourceConfig     Json           // { query, dataset, incrementalKey, chunkSize? }
+
+  // Destination
+  destConnectionId String
+  destConnection   DataSource     @relation("routeDest", fields: [destConnectionId], references: [id])
+  destConfig       Json           // { dataset, table, writeDisposition, autoCreateTable, schema? }
+
+  // Optional forge transform
+  transformEnabled Boolean        @default(false)
+  blueprintId      String?
+  blueprint        Blueprint?     @relation(fields: [blueprintId], references: [id], onDelete: SetNull)
+
+  // Embedded schedule
+  frequency        String?        // "DAILY", "WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY"
+  daysOfWeek       Int[]          @default([])
+  dayOfMonth       Int?
+  timeHour         Int            @default(7)
+  timeMinute       Int            @default(0)
+  timezone         String         @default("America/Chicago")
+  nextRunAt        DateTime?
+  lastCheckpoint   DateTime?      // Incremental: last successful run timestamp
+
+  // Ownership
+  userId           String
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Relations
+  routeLogs        RouteLog[]
+  helheimEntries   HelheimEntry[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+model RouteLog {
+  id               String       @id @default(cuid())
+  routeId          String
+  route            BifrostRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  status           String       // "running", "completed", "partial", "failed"
+  rowsExtracted    Int?
+  rowsLoaded       Int?
+  errorCount       Int          @default(0)
+  bytesTransferred BigInt?
+  duration         Int?         // milliseconds
+  error            String?      @db.Text
+  triggeredBy      String       // "schedule", "manual", "webhook"
+  startedAt        DateTime     @default(now())
+  completedAt      DateTime?
+}
+
+model HelheimEntry {
+  id            String       @id @default(cuid())
+  routeId       String
+  route         BifrostRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  jobId         String       // RouteLog.id that produced this failure
+  chunkIndex    Int
+  rowCount      Int
+  errorType     String       // "load_failure", "transform_failure", "auth_failure", "timeout"
+  errorMessage  String       @db.Text
+  errorDetails  Json?        // BQ error response details
+  payload       String       @db.Text // base64-encoded gzipped NDJSON
+  retryCount    Int          @default(0)
+  maxRetries    Int          @default(3)
+  nextRetryAt   DateTime?
+  status        String       @default("pending") // "pending", "retrying", "recovered", "dead"
+  createdAt     DateTime     @default(now())
+  lastRetriedAt DateTime?
 }

@@ -358,6 +358,21 @@ nav {
   background: rgba(201,147,58,0.06);
   box-shadow: 0 0 30px rgba(201,147,58,0.15);
 }
+.btn:disabled {
+  opacity: 0.7;
+  pointer-events: none;
+}
+.ride-spinner {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 2px solid rgba(4,6,15,0.3);
+  border-top-color: var(--void);
+  border-radius: 9999px;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 0.3em;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── Section reveal (scroll-triggered) ── */
 .reveal {
@@ -689,7 +704,7 @@ nav {
     <div class="hero-line"></div>
 
     <div class="cta-group">
-      <button class="btn btn-primary" onclick="window.location.href='/login'"><span>Begin the Ride</span></button>
+      <button class="btn btn-primary" id="cta-ride" onclick="(function(btn){btn.disabled=true;btn.querySelector('span').innerHTML='<span class=\'ride-spinner\'></span> Summoning…';window.location.href='/login';})(this)"><span>Begin the Ride</span></button>
       <button class="btn btn-ghost">Read the Scrolls</button>
     </div>
   </section>

@@ -25,13 +25,14 @@ export function describeSchedule(schedule: ScheduleDescribeInput): string {
   const minute = String(schedule.timeMinute).padStart(2, "0");
   const timeStr = `${hour12}:${minute} ${ampm}`;
 
-  // Short timezone
+  // Short timezone — fall back to local timezone if empty/invalid
+  const tz = schedule.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const tzShort = new Intl.DateTimeFormat("en-US", {
-    timeZone: schedule.timezone,
+    timeZone: tz,
     timeZoneName: "short",
   })
     .formatToParts(new Date())
-    .find((p) => p.type === "timeZoneName")?.value ?? schedule.timezone;
+    .find((p) => p.type === "timeZoneName")?.value ?? tz;
 
   switch (schedule.frequency) {
     case "DAILY":

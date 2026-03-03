@@ -49,7 +49,7 @@ export function generateColumnConfig(columns: string[]): ColumnConfig[] {
     sourceColumn: col,
     displayName: prettifyColumnName(col),
     visible: true,
-    width: 8.43,
+    width: DEFAULT_EXCEL_WIDTH,
   }));
 }
 
@@ -94,7 +94,7 @@ export function reconcileColumnConfig(
         sourceColumn: col,
         displayName: prettifyColumnName(col),
         visible: true,
-        width: 8.43,
+        width: DEFAULT_EXCEL_WIDTH,
       });
       warnings.push(`New column "${col}" added to config`);
     }
@@ -155,12 +155,18 @@ export function createFormulaColumn(
     displayName,
     visible: true,
     formula,
-    width: 8.43,
+    width: DEFAULT_EXCEL_WIDTH,
   };
 }
 
-/** Approximate pixels per Excel character-width unit */
+/** Default Excel column width in character-width units */
+export const DEFAULT_EXCEL_WIDTH = 8.43;
+
+/** Approximate pixels per Excel character-width unit (legacy migration) */
 export const PX_PER_EXCEL_WIDTH = 7;
+
+/** More accurate conversion factor: Univer uses 64px ≈ 8.43 Excel chars → 64/8.43 ≈ 7.59 */
+export const UNIVER_PX_PER_EXCEL_WIDTH = 7.5;
 
 /**
  * Migrate old pixel-based widths (120+) to Excel character-width units.
@@ -171,4 +177,33 @@ export function migrateConfigWidths(config: ColumnConfig[]): ColumnConfig[] {
     ...c,
     width: c.width > 50 ? Math.round((c.width / PX_PER_EXCEL_WIDTH) * 100) / 100 : c.width,
   }));
+}
+
+/**
+ * Sync column widths from a Univer template snapshot back into the column config.
+ * Called before saving so the config (single source of truth for export) always
+ * reflects the latest Univer drag-resize widths.
+ */
+export function syncWidthsFromTemplate(
+  config: ColumnConfig[],
+  template: { snapshot?: { sheets?: Record<string, { columnData?: Record<number, { w?: number }> }> }; columnMap?: Record<string, number> } | null
+): ColumnConfig[] {
+  if (!template?.snapshot?.sheets || !template?.columnMap) return config;
+
+  const firstSheet = Object.values(template.snapshot.sheets)[0];
+  if (!firstSheet?.columnData) return config;
+
+  const columnData = firstSheet.columnData;
+
+  return config.map((entry) => {
+    const tmplPos = template.columnMap![entry.id];
+    if (tmplPos === undefined) return entry;
+
+    const tmplCol = columnData[tmplPos];
+    if (!tmplCol?.w) return entry;
+
+    // Convert Univer pixel width to Excel character-width units
+    const excelWidth = Math.round((tmplCol.w / UNIVER_PX_PER_EXCEL_WIDTH) * 100) / 100;
+    return { ...entry, width: excelWidth };
+  });
 }

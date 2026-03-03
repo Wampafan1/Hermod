@@ -39,15 +39,23 @@ export function toEmailConfig(dbRow: {
 }
 
 function createTransport(connection: EmailConnectionConfig): Transporter {
-  const options: nodemailer.TransportOptions & {
-    host: string;
-    port: number;
-    secure: boolean;
-    auth?: { user: string; pass: string };
-  } = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const options: Record<string, any> = {
     host: connection.host,
     port: connection.port,
     secure: connection.secure,
+    // On non-SSL ports (587), require STARTTLS upgrade
+    requireTLS: !connection.secure && connection.port !== 25,
+    connectionTimeout: 30_000,
+    greetingTimeout: 30_000,
+    socketTimeout: 60_000,
+    tls: {
+      // Allow self-signed certs in dev; Gmail/Outlook have valid certs anyway
+      rejectUnauthorized: process.env.NODE_ENV === "production",
+    },
+    // Use from-address domain as EHLO hostname (Windows os.hostname() returns
+    // a bare machine name like "DESKTOP-XXX" which some SMTP servers reject)
+    name: extractDomain(connection.fromAddress) || connection.host,
   };
 
   if (connection.authType !== "NONE" && connection.username && connection.password) {
@@ -60,11 +68,20 @@ function createTransport(connection: EmailConnectionConfig): Transporter {
   return nodemailer.createTransport(options);
 }
 
+/** Extract domain from email/display-name string, e.g. "Hermod <a@b.com>" → "b.com" */
+function extractDomain(from: string): string | null {
+  const match = from.match(/@([^>\s]+)/);
+  return match ? match[1] : null;
+}
+
 interface SendReportEmailOptions {
   connection: EmailConnectionConfig;
   to: string[];
   subject: string;
-  body: string;
+  /** Plain-text fallback body */
+  text: string;
+  /** HTML body (optional — if provided, sent as the primary content) */
+  html?: string;
   attachment: Buffer;
   filename: string;
 }
@@ -73,7 +90,8 @@ export async function sendReportEmail({
   connection,
   to,
   subject,
-  body,
+  text,
+  html,
   attachment,
   filename,
 }: SendReportEmailOptions): Promise<void> {
@@ -83,7 +101,8 @@ export async function sendReportEmail({
     from: connection.fromAddress,
     to: to.join(", "),
     subject,
-    text: body,
+    text,
+    html,
     attachments: [
       {
         filename,

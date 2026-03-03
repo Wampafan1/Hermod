@@ -8,6 +8,8 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", rune: "ᛟ" },
   { href: "/reports", label: "Reports", rune: "ᚱ" },
   { href: "/connections", label: "Connections", rune: "ᚷ" },
+  { href: "/bifrost", label: "Bifrost", rune: "ᛒ" },
+  { href: "/mjolnir", label: "Mjolnir", rune: "ᛗ" },
   { href: "/schedules", label: "Schedules", rune: "ᛏ" },
   { href: "/history", label: "History", rune: "ᚺ" },
 ];

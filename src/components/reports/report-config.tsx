@@ -13,14 +13,22 @@ interface EmailConnection {
   name: string;
 }
 
+interface BlueprintOption {
+  id: string;
+  name: string;
+  status: string;
+}
+
 interface ReportConfigProps {
   name: string;
   description: string;
   connectionId: string;
   connections: Connection[];
+  blueprintId: string | null;
   onNameChange: (name: string) => void;
   onDescriptionChange: (desc: string) => void;
   onConnectionChange: (id: string) => void;
+  onBlueprintChange: (id: string | null) => void;
   onSave: () => void;
   onSaveAndSchedule: () => void;
   onTestSend: (recipients: string[], emailConnectionId: string) => Promise<void>;
@@ -34,9 +42,11 @@ export function ReportConfig({
   description,
   connectionId,
   connections,
+  blueprintId,
   onNameChange,
   onDescriptionChange,
   onConnectionChange,
+  onBlueprintChange,
   onSave,
   onSaveAndSchedule,
   onTestSend,
@@ -48,6 +58,7 @@ export function ReportConfig({
   const [sending, setSending] = useState(false);
   const [emailConnections, setEmailConnections] = useState<EmailConnection[]>([]);
   const [testEmailConnectionId, setTestEmailConnectionId] = useState("");
+  const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
 
   useEffect(() => {
     fetch("/api/email-connections")
@@ -58,6 +69,10 @@ export function ReportConfig({
           setTestEmailConnectionId(conns[0].id);
         }
       })
+      .catch(() => {});
+    fetch("/api/mjolnir/blueprints?status=DRAFT,VALIDATED,ACTIVE")
+      .then((r) => r.json())
+      .then((bps: BlueprintOption[]) => setBlueprints(bps))
       .catch(() => {});
   }, []);
 
@@ -116,6 +131,35 @@ export function ReportConfig({
             </option>
           ))}
         </select>
+      </div>
+
+      {/* Blueprint (Mjolnir Forge) */}
+      <div>
+        <label className="label-norse">Forge Blueprint</label>
+        {blueprints.length > 0 ? (
+          <select
+            value={blueprintId ?? ""}
+            onChange={(e) => onBlueprintChange(e.target.value || null)}
+            className="select-norse"
+          >
+            <option value="">None (raw query output)</option>
+            {blueprints.map((bp) => (
+              <option key={bp.id} value={bp.id}>
+                {bp.name} ({bp.status.toLowerCase()})
+              </option>
+            ))}
+          </select>
+        ) : (
+          <p className="text-[0.5625rem] text-text-dim tracking-wide">
+            No blueprints.{" "}
+            <a href="/mjolnir" className="text-gold hover:text-gold-bright underline">
+              Forge one
+            </a>
+          </p>
+        )}
+        <p className="text-[0.5rem] text-text-dim tracking-wide mt-1">
+          Applies transformation steps to query results before export
+        </p>
       </div>
 
       <div className="flex flex-col gap-2 pt-2">

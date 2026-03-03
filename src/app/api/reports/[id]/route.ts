@@ -61,6 +61,19 @@ export const PUT = withAuth(async (req, session) => {
     }
   }
 
+  // If setting a blueprint, verify ownership (null = detach)
+  if (parsed.data.blueprintId !== undefined && parsed.data.blueprintId !== null) {
+    const bp = await prisma.blueprint.findFirst({
+      where: { id: parsed.data.blueprintId, userId: session.user.id },
+    });
+    if (!bp) {
+      return NextResponse.json(
+        { error: "Blueprint not found" },
+        { status: 404 }
+      );
+    }
+  }
+
   const updated = await prisma.report.update({
     where: { id },
     data: {
@@ -70,6 +83,7 @@ export const PUT = withAuth(async (req, session) => {
       dataSourceId: parsed.data.dataSourceId,
       formatting: parsed.data.formatting as any ?? undefined,
       columnConfig: parsed.data.columnConfig as any ?? undefined,
+      blueprintId: parsed.data.blueprintId !== undefined ? parsed.data.blueprintId : undefined,
     },
   });
 

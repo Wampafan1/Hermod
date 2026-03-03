@@ -10,7 +10,7 @@ export const scheduleFrequencySchema = z.enum([
 
 const recipientSchema = z.object({
   email: z.string().email("Invalid email address"),
-  name: z.string().max(100).optional(),
+  name: z.string().max(100).optional().nullable(),
 });
 
 export const createScheduleSchema = z
@@ -19,7 +19,7 @@ export const createScheduleSchema = z
     enabled: z.boolean().default(true),
     frequency: scheduleFrequencySchema,
     daysOfWeek: z.array(z.number().int().min(0).max(6)).default([]),
-    dayOfMonth: z.number().int().min(1).max(31).optional().nullable(),
+    dayOfMonth: z.number().int().min(0).max(31).optional().nullable(), // 0 = last day of month
     monthsOfYear: z.array(z.number().int().min(1).max(12)).optional().default([]),
     timeHour: z.number().int().min(0).max(23),
     timeMinute: z.number().int().min(0).max(59),
@@ -60,7 +60,7 @@ export const updateScheduleSchema = z.object({
   enabled: z.boolean().optional(),
   frequency: scheduleFrequencySchema.optional(),
   daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
-  dayOfMonth: z.number().int().min(1).max(31).optional().nullable(),
+  dayOfMonth: z.number().int().min(0).max(31).optional().nullable(), // 0 = last day of month
   monthsOfYear: z.array(z.number().int().min(1).max(12)).optional(),
   timeHour: z.number().int().min(0).max(23).optional(),
   timeMinute: z.number().int().min(0).max(59).optional(),
