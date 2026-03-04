@@ -12,7 +12,7 @@ import {
   markRecovered,
   markRetryFailed,
 } from "./bifrost/helheim/dead-letter";
-import { getCloudProvider } from "./bifrost/providers";
+import { getProvider, toConnectionLike } from "./providers";
 
 const prisma = new PrismaClient();
 const POLL_INTERVAL = 60_000; // 60 seconds
@@ -140,17 +140,18 @@ async function main() {
           const route = await prisma.bifrostRoute.findUniqueOrThrow({
             where: { id: entry.routeId },
             include: {
-              destConnection: { select: { id: true, type: true, extras: true, password: true } },
+              dest: { select: { id: true, type: true, config: true, credentials: true } },
             },
           });
 
-          const destProvider = getCloudProvider(route.destConnection.type);
-          const destConn = await destProvider.connect(route.destConnection);
+          const destProvider = getProvider(route.dest.type);
+          const destConnLike = toConnectionLike(route.dest);
+          const destConn = await destProvider.connect(destConnLike);
           const rows = decompressPayload(entry.payload);
           const destConfig = route.destConfig as any;
 
           try {
-            await destProvider.load(destConn, rows, destConfig);
+            await destProvider.load!(destConn, rows, destConfig);
             await markRecovered(entry.id);
             console.log(`[Worker] Helheim entry ${entry.id} recovered`);
           } catch (retryErr) {

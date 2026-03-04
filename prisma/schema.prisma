@@ -74,8 +74,6 @@ model DataSource {
   extras   Json?          // BigQuery credentials JSON, SSL certs, etc.
   userId   String
   user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  routesAsSource BifrostRoute[] @relation("routeSource")
-  routesAsDest   BifrostRoute[] @relation("routeDest")
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 }
@@ -303,9 +301,11 @@ model Connection {
   lastTestedAt  DateTime?
   userId        String
   user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reports       Report[]
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  reports        Report[]
+  routesAsSource BifrostRoute[] @relation("routeSource")
+  routesAsDest   BifrostRoute[] @relation("routeDest")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 }
 
 // ─── Bifrost Routes ─────────────────────────────────
@@ -313,17 +313,16 @@ model Connection {
 model BifrostRoute {
   id               String         @id @default(cuid())
   name             String
-  type             String         // "cloud-to-cloud", "ftp-ingest", etc.
   enabled          Boolean        @default(true)
 
   // Source
   sourceId         String
-  source           DataSource     @relation("routeSource", fields: [sourceId], references: [id])
+  source           Connection     @relation("routeSource", fields: [sourceId], references: [id])
   sourceConfig     Json           // { query, dataset, incrementalKey, chunkSize? }
 
   // Destination
-  destConnectionId String
-  destConnection   DataSource     @relation("routeDest", fields: [destConnectionId], references: [id])
+  destId           String
+  dest             Connection     @relation("routeDest", fields: [destId], references: [id])
   destConfig       Json           // { dataset, table, writeDisposition, autoCreateTable, schema? }
 
   // Optional forge transform
