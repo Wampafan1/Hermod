@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ConnectionType } from "@/lib/providers/types";
 
 // ─── Config schemas (non-sensitive, stored in config JSON) ───────
 
@@ -49,7 +50,7 @@ const netsuiteCredentials = z.object({
 
 // ─── Schema maps (for programmatic access per type) ─────────────
 
-export const connectionConfigSchemas: Record<string, z.ZodTypeAny> = {
+export const connectionConfigSchemas: Record<ConnectionType, z.ZodTypeAny> = {
   POSTGRES: postgresConfig,
   MSSQL: mssqlConfig,
   MYSQL: mysqlConfig,
@@ -58,7 +59,7 @@ export const connectionConfigSchemas: Record<string, z.ZodTypeAny> = {
   SFTP: sftpConfig,
 };
 
-export const connectionCredentialsSchemas: Record<string, z.ZodTypeAny> = {
+export const connectionCredentialsSchemas: Record<ConnectionType, z.ZodTypeAny> = {
   POSTGRES: passwordCredentials,
   MSSQL: passwordCredentials,
   MYSQL: passwordCredentials,
@@ -82,11 +83,16 @@ export const createConnectionSchema = z.discriminatedUnion("type", [
   z.object({ ...baseFields, type: z.literal("SFTP"),      config: sftpConfig,      credentials: passwordCredentials }),
 ]);
 
+// TODO: updateConnectionSchema uses loose validation — type-aware config/credentials
+// validation should happen in the API route by looking up the connection's type
+// from the DB and validating against connectionConfigSchemas[type].
 export const updateConnectionSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   config: z.record(z.unknown()).optional(),
   credentials: z.record(z.unknown()).optional(),
 });
+
+export const testConnectionSchema = createConnectionSchema;
 
 export type CreateConnectionInput = z.infer<typeof createConnectionSchema>;
 export type UpdateConnectionInput = z.infer<typeof updateConnectionSchema>;
