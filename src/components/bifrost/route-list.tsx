@@ -111,7 +111,7 @@ export function RouteList() {
             ᛒ Bifrost Routes
           </h1>
           <p className="text-text-dim text-xs tracking-wider mt-1">
-            Cloud-to-cloud data pathways
+            Data pathways through the realms
           </p>
         </div>
         <Link

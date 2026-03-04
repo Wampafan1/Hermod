@@ -17,7 +17,7 @@ interface ConnectionCardProps {
   onDelete: () => void;
 }
 
-const TYPE_LABELS: Record<string, string> = {
+export const TYPE_LABELS: Record<string, string> = {
   POSTGRES: "PostgreSQL",
   MSSQL: "SQL Server",
   MYSQL: "MySQL",

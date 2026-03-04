@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useToast } from "@/components/toast";
-import type { UnifiedConnection } from "@/components/connections/connection-card";
+import { TYPE_LABELS, type UnifiedConnection } from "@/components/connections/connection-card";
 
 type ConnectionType = "POSTGRES" | "MSSQL" | "MYSQL" | "BIGQUERY" | "NETSUITE" | "SFTP";
 
@@ -17,15 +17,6 @@ const DEFAULT_PORTS: Record<string, number> = {
   MSSQL: 1433,
   MYSQL: 3306,
   SFTP: 22,
-};
-
-const TYPE_LABELS: Record<ConnectionType, string> = {
-  POSTGRES: "PostgreSQL",
-  MSSQL: "SQL Server",
-  MYSQL: "MySQL",
-  BIGQUERY: "BigQuery",
-  NETSUITE: "NetSuite",
-  SFTP: "SFTP",
 };
 
 const SFTP_FILE_FORMATS = ["CSV", "TSV", "XLSX"] as const;
@@ -177,7 +168,11 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
       });
       const data = await res.json();
 
-      if (data.success) {
+      if (!res.ok) {
+        const msg = data.error || "Validation failed";
+        setTestResult({ success: false, error: msg });
+        toast.error(msg);
+      } else if (data.success) {
         setTestResult({ success: true });
         toast.success(data.message || "Connection successful!");
       } else {
