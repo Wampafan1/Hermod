@@ -9,7 +9,7 @@ export const GET = withAuth(async (_req, session) => {
     where: { userId: session.user.id },
     orderBy: { updatedAt: "desc" },
     include: {
-      dataSource: { select: { name: true, type: true } },
+      connection: { select: { name: true, type: true } },
       schedule: { select: { enabled: true } },
       runHistory: {
         orderBy: { startedAt: "desc" },
@@ -23,8 +23,8 @@ export const GET = withAuth(async (_req, session) => {
     id: r.id,
     name: r.name,
     description: r.description,
-    connectionName: r.dataSource.name,
-    connectionType: r.dataSource.type,
+    connectionName: r.connection.name,
+    connectionType: r.connection.type,
     lastRunStatus: r.runHistory[0]?.status ?? null,
     scheduled: !!r.schedule,
     scheduleEnabled: r.schedule?.enabled ?? false,
@@ -45,11 +45,11 @@ export const POST = withAuth(async (req, session) => {
     );
   }
 
-  // Verify user owns the data source
-  const dataSource = await prisma.dataSource.findFirst({
-    where: { id: parsed.data.dataSourceId, userId: session.user.id },
+  // Verify user owns the connection
+  const connection = await prisma.connection.findFirst({
+    where: { id: parsed.data.connectionId, userId: session.user.id },
   });
-  if (!dataSource) {
+  if (!connection) {
     return NextResponse.json(
       { error: "Connection not found" },
       { status: 404 }
@@ -61,7 +61,7 @@ export const POST = withAuth(async (req, session) => {
       name: parsed.data.name,
       description: parsed.data.description,
       sqlQuery: parsed.data.sqlQuery,
-      dataSourceId: parsed.data.dataSourceId,
+      connectionId: parsed.data.connectionId,
       formatting: parsed.data.formatting as any ?? undefined,
       columnConfig: parsed.data.columnConfig as any ?? undefined,
       userId: session.user.id,

@@ -10,7 +10,7 @@ export default async function ReportsPage() {
     where: { userId: session.user.id },
     orderBy: { updatedAt: "desc" },
     include: {
-      dataSource: { select: { name: true, type: true } },
+      connection: { select: { name: true, type: true } },
       schedule: { select: { enabled: true } },
       runHistory: {
         orderBy: { startedAt: "desc" },
@@ -24,8 +24,8 @@ export default async function ReportsPage() {
     id: r.id,
     name: r.name,
     description: r.description,
-    connectionName: r.dataSource.name,
-    connectionType: r.dataSource.type,
+    connectionName: r.connection.name,
+    connectionType: r.connection.type,
     lastRunStatus: r.runHistory[0]?.status ?? null,
     scheduled: !!r.schedule,
     scheduleEnabled: r.schedule?.enabled ?? false,

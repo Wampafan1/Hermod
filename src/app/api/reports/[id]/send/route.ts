@@ -13,7 +13,7 @@ export const POST = withAuth(async (req, session) => {
   const report = await prisma.report.findFirst({
     where: { id, userId: session.user.id },
     include: {
-      dataSource: true,
+      connection: true,
       schedule: { include: { recipients: true } },
     },
   });

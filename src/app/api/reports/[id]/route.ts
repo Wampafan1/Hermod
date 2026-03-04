@@ -13,7 +13,7 @@ export const GET = withAuth(async (req, session) => {
   const report = await prisma.report.findFirst({
     where: { id, userId: session.user.id },
     include: {
-      dataSource: { select: { id: true, name: true, type: true } },
+      connection: { select: { id: true, name: true, type: true } },
       schedule: { select: { id: true, enabled: true } },
     },
   });
@@ -48,12 +48,12 @@ export const PUT = withAuth(async (req, session) => {
     );
   }
 
-  // If changing data source, verify ownership
-  if (parsed.data.dataSourceId) {
-    const ds = await prisma.dataSource.findFirst({
-      where: { id: parsed.data.dataSourceId, userId: session.user.id },
+  // If changing connection, verify ownership
+  if (parsed.data.connectionId) {
+    const conn = await prisma.connection.findFirst({
+      where: { id: parsed.data.connectionId, userId: session.user.id },
     });
-    if (!ds) {
+    if (!conn) {
       return NextResponse.json(
         { error: "Connection not found" },
         { status: 404 }
@@ -80,7 +80,7 @@ export const PUT = withAuth(async (req, session) => {
       name: parsed.data.name,
       description: parsed.data.description,
       sqlQuery: parsed.data.sqlQuery,
-      dataSourceId: parsed.data.dataSourceId,
+      connectionId: parsed.data.connectionId,
       formatting: parsed.data.formatting as any ?? undefined,
       columnConfig: parsed.data.columnConfig as any ?? undefined,
       blueprintId: parsed.data.blueprintId !== undefined ? parsed.data.blueprintId : undefined,

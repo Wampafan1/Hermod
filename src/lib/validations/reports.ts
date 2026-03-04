@@ -4,7 +4,7 @@ export const createReportSchema = z.object({
   name: z.string().min(1, "Report name is required").max(200),
   description: z.string().max(2000).optional(),
   sqlQuery: z.string().min(1, "SQL query is required"),
-  dataSourceId: z.string().min(1, "Connection is required"),
+  connectionId: z.string().min(1, "Connection is required"),
   formatting: z.record(z.unknown()).optional(),
   columnConfig: z.array(z.record(z.unknown())).optional(),
 });
@@ -13,7 +13,7 @@ export const updateReportSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).optional().nullable(),
   sqlQuery: z.string().min(1).optional(),
-  dataSourceId: z.string().min(1).optional(),
+  connectionId: z.string().min(1).optional(),
   formatting: z.record(z.unknown()).optional().nullable(),
   columnConfig: z.array(z.record(z.unknown())).optional().nullable(),
   blueprintId: z.string().nullable().optional(),

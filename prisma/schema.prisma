@@ -74,7 +74,6 @@ model DataSource {
   extras   Json?          // BigQuery credentials JSON, SSL certs, etc.
   userId   String
   user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reports        Report[]
   routesAsSource BifrostRoute[] @relation("routeSource")
   routesAsDest   BifrostRoute[] @relation("routeDest")
   createdAt      DateTime       @default(now())
@@ -174,8 +173,8 @@ model Report {
   sqlQuery     String     @db.Text
   formatting   Json?      // SheetTemplate: Univer cosmetics (styles, merges, freeze)
   columnConfig Json?      // ColumnConfig[]: column mapping, order, display names, formulas
-  dataSourceId String
-  dataSource   DataSource @relation(fields: [dataSourceId], references: [id])
+  connectionId String
+  connection   Connection @relation(fields: [connectionId], references: [id])
   blueprintId  String?
   blueprint    Blueprint? @relation(fields: [blueprintId], references: [id], onDelete: SetNull)
   userId       String
@@ -304,6 +303,7 @@ model Connection {
   lastTestedAt  DateTime?
   userId        String
   user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reports       Report[]
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 }

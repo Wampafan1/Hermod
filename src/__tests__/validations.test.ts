@@ -100,7 +100,7 @@ describe("report validation", () => {
     const result = createReportSchema.safeParse({
       name: "Sales Report",
       sqlQuery: "SELECT * FROM sales",
-      dataSourceId: "cuid123",
+      connectionId: "cuid123",
     });
     expect(result.success).toBe(true);
   });
@@ -109,7 +109,7 @@ describe("report validation", () => {
     const result = createReportSchema.safeParse({
       name: "Empty Query",
       sqlQuery: "",
-      dataSourceId: "cuid123",
+      connectionId: "cuid123",
     });
     expect(result.success).toBe(false);
   });

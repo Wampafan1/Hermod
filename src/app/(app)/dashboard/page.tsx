@@ -8,7 +8,7 @@ export default async function DashboardPage() {
   const [reportCount, connectionCount, recentRuns, upcomingSchedules] =
     await Promise.all([
       prisma.report.count({ where: { userId: session.user.id } }),
-      prisma.dataSource.count({ where: { userId: session.user.id } }),
+      prisma.connection.count({ where: { userId: session.user.id } }),
       prisma.runLog.findMany({
         where: { report: { userId: session.user.id } },
         orderBy: { startedAt: "desc" },

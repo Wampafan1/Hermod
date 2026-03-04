@@ -1,6 +1,6 @@
 import { BlueprintStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { getConnector } from "@/lib/connectors";
+import { getProvider, toConnectionLike } from "@/lib/providers";
 import { sendReportEmail, toEmailConfig } from "@/lib/email";
 import ExcelJS from "exceljs";
 import { format } from "date-fns";
@@ -68,8 +68,8 @@ export interface PipelineInput {
   name: string;
   /** Raw SQL to execute */
   sqlQuery: string;
-  /** DataSource record (for connector factory) */
-  dataSource: Parameters<typeof getConnector>[0];
+  /** Connection ID (resolved to Connection row internally) */
+  connectionId: string;
   /** Saved column config JSON (or null for auto-generate) */
   columnConfig: unknown;
   /** Saved template JSON (Univer cosmetics) */
@@ -98,13 +98,21 @@ export interface PipelineResult {
 export async function executeReportPipeline(input: PipelineInput): Promise<PipelineResult> {
   const startTime = Date.now();
 
-  // 1. Execute query
-  const connector = getConnector(input.dataSource);
+  // 1. Resolve connection and execute query
+  const connection = await prisma.connection.findUniqueOrThrow({
+    where: { id: input.connectionId },
+  });
+  const provider = getProvider(connection.type);
+  if (!provider.query) {
+    throw new Error(`Connection type "${connection.type}" does not support SQL queries`);
+  }
+  const connLike = toConnectionLike(connection);
+  const conn = await provider.connect(connLike);
   let result;
   try {
-    result = await connector.query(input.sqlQuery);
+    result = await provider.query(conn, input.sqlQuery);
   } finally {
-    await connector.disconnect();
+    await conn.close();
   }
 
   let finalCols: string[];
@@ -205,7 +213,7 @@ export async function runReport(
     const report = await prisma.report.findUniqueOrThrow({
       where: { id: reportId },
       include: {
-        dataSource: true,
+        connection: true,
         user: { select: { name: true, email: true } },
         schedule: { include: { recipients: true, emailConnection: true } },
       },
@@ -226,7 +234,7 @@ export async function runReport(
     const pipeline = await executeReportPipeline({
       name: report.name,
       sqlQuery: report.sqlQuery,
-      dataSource: report.dataSource as Parameters<typeof getConnector>[0],
+      connectionId: report.connectionId,
       columnConfig: report.columnConfig,
       formatting: report.formatting,
       blueprintId: report.blueprintId,
@@ -258,7 +266,7 @@ export async function runReport(
       recipientName: "Team",
       // Admin fields
       clientName: "Team",
-      datasource: report.dataSource.name,
+      datasource: report.connection.name,
       executionDate: format(now, "yyyy-MM-dd HH:mm:ss"),
       duration: runTime,
       rowCount: pipeline.rowCount,

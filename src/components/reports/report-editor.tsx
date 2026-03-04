@@ -110,7 +110,7 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
         setName(report.name);
         setDescription(report.description ?? "");
         setSql(report.sqlQuery);
-        setConnectionId(report.dataSourceId);
+        setConnectionId(report.connectionId);
         if (report.formatting?.snapshot) {
           const tmpl = report.formatting as SheetTemplate;
           setTemplate(tmpl);
@@ -254,7 +254,7 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
         name,
         description: description || undefined,
         sqlQuery: sql,
-        dataSourceId: connectionId,
+        connectionId,
         formatting: templateRef.current,
         columnConfig: columnConfigRef.current.length > 0 ? columnConfigRef.current : undefined,
         blueprintId,

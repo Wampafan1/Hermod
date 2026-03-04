@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { testSendSchema } from "@/lib/validations/reports";
-import type { getConnector } from "@/lib/connectors";
 import { sendReportEmail, toEmailConfig } from "@/lib/email";
 import { executeReportPipeline } from "@/lib/report-runner";
 import { format } from "date-fns";
@@ -43,7 +42,7 @@ export const POST = withAuth(async (req, session) => {
 
   const report = await prisma.report.findFirst({
     where: { id, userId: session.user.id },
-    include: { dataSource: true },
+    include: { connection: true },
   });
   if (!report) {
     return NextResponse.json({ error: "Report not found" }, { status: 404 });
@@ -53,7 +52,7 @@ export const POST = withAuth(async (req, session) => {
   const pipeline = await executeReportPipeline({
     name: report.name,
     sqlQuery: report.sqlQuery,
-    dataSource: report.dataSource as Parameters<typeof getConnector>[0],
+    connectionId: report.connectionId,
     columnConfig: report.columnConfig,
     formatting: report.formatting,
     blueprintId: report.blueprintId,
@@ -73,7 +72,7 @@ export const POST = withAuth(async (req, session) => {
     recipientName: "Team",
     // Admin fields
     clientName: "Team",
-    datasource: report.dataSource.name,
+    datasource: report.connection.name,
     executionDate: format(now, "yyyy-MM-dd HH:mm:ss"),
     duration: `${(pipeline.runTimeMs / 1000).toFixed(1)}s`,
     rowCount: pipeline.rowCount,
