@@ -44,12 +44,11 @@ model User {
   accounts        Account[]
   sessions        Session[]
   reports         Report[]
-  connections     DataSource[]
   sftpConnections  SftpConnection[]
   emailConnections EmailConnection[]
   blueprints       Blueprint[]
   bifrostRoutes    BifrostRoute[]
-  unifiedConns     Connection[]
+  connections      Connection[]
 }
 
 model VerificationToken {
@@ -58,32 +57,6 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
-}
-
-// ─── Data Sources ────────────────────────────────────
-
-model DataSource {
-  id       String         @id @default(cuid())
-  name     String
-  type     DataSourceType
-  host     String?
-  port     Int?
-  database String?
-  username String?
-  password String?        // Encrypted at rest with AES-256-GCM
-  extras   Json?          // BigQuery credentials JSON, SSL certs, etc.
-  userId   String
-  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-}
-
-enum DataSourceType {
-  POSTGRES
-  MSSQL
-  MYSQL
-  BIGQUERY
-  NETSUITE
 }
 
 // ─── SFTP Connections ────────────────────────────────

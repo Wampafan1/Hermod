@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
-import { testConnectionSchema } from "@/lib/validations/connections";
-import { getConnectorRaw } from "@/lib/connectors";
+import { getProvider } from "@/lib/providers";
+import { createConnectionSchema } from "@/lib/validations/unified-connections";
+import type { ConnectionLike } from "@/lib/providers/types";
 
-// POST /api/connections/test — test a connection without saving
+// ─── POST /api/connections/test — test before saving ─────────
 export const POST = withAuth(async (req, _session) => {
   const body = await req.json();
-  const parsed = testConnectionSchema.safeParse(body);
+  const parsed = createConnectionSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Validation failed", details: parsed.error.flatten() },
@@ -14,25 +15,37 @@ export const POST = withAuth(async (req, _session) => {
     );
   }
 
-  const data = parsed.data;
-  const isBigQuery = data.type === "BIGQUERY";
+  const { type, config, credentials } = parsed.data;
+
+  const provider = getProvider(type);
+
+  // For test: credentials are plaintext (not yet encrypted).
+  // Construct a ConnectionLike directly from the validated input.
+  const connectionLike: ConnectionLike = {
+    type,
+    config: config as Record<string, unknown>,
+    credentials: credentials as Record<string, unknown>,
+  };
 
   try {
-    const connector = getConnectorRaw({
-      type: data.type,
-      host: isBigQuery ? null : (data as any).host,
-      port: isBigQuery ? null : (data as any).port,
-      database: isBigQuery ? null : (data as any).database,
-      username: isBigQuery ? null : (data as any).username,
-      password: isBigQuery ? null : (data as any).password,
-      extras: isBigQuery ? (data as any).extras : null,
-    });
+    // Use extended test for NetSuite (richer response with account details)
+    if (
+      type === "NETSUITE" &&
+      "testConnectionExtended" in provider
+    ) {
+      const result = await (
+        provider as typeof provider & {
+          testConnectionExtended(c: ConnectionLike): Promise<unknown>;
+        }
+      ).testConnectionExtended(connectionLike);
+      return NextResponse.json(result);
+    }
 
-    const success = await connector.testConnection();
+    const success = await provider.testConnection(connectionLike);
     return NextResponse.json({ success });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Connection failed";
+      error instanceof Error ? error.message : "Connection test failed";
     return NextResponse.json({ success: false, error: message });
   }
 });

@@ -179,7 +179,7 @@ export function SyncBuilder() {
   // ── Fetch reference data ──
   useEffect(() => {
     Promise.all([
-      fetch("/api/v2/connections").then((r) => r.json()),
+      fetch("/api/connections").then((r) => r.json()),
       fetch("/api/mjolnir/blueprints")
         .then((r) => r.json())
         .catch(() => []),

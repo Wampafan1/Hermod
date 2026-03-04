@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createConnectionSchema } from "@/lib/validations/connections";
+import { createConnectionSchema } from "@/lib/validations/unified-connections";
 import { createReportSchema, executeQuerySchema } from "@/lib/validations/reports";
 import { createScheduleSchema } from "@/lib/validations/schedules";
 import { createEmailConnectionSchema } from "@/lib/validations/email-connections";
@@ -9,11 +9,8 @@ describe("connection validation", () => {
     const result = createConnectionSchema.safeParse({
       name: "Test DB",
       type: "POSTGRES",
-      host: "localhost",
-      port: 5432,
-      database: "mydb",
-      username: "user",
-      password: "pass",
+      config: { host: "localhost", port: 5432, database: "mydb", username: "user" },
+      credentials: { password: "pass" },
     });
     expect(result.success).toBe(true);
   });
@@ -22,25 +19,19 @@ describe("connection validation", () => {
     const result = createConnectionSchema.safeParse({
       name: "Test",
       type: "MSSQL",
-      host: "db.example.com",
-      port: "1433",
-      database: "master",
-      username: "sa",
-      password: "pass",
+      config: { host: "db.example.com", port: "1433", database: "master", username: "sa" },
+      credentials: { password: "pass" },
     });
     expect(result.success).toBe(true);
-    if (result.success) expect((result.data as any).port).toBe(1433);
+    if (result.success) expect((result.data as any).config.port).toBe(1433);
   });
 
   it("rejects connection without name", () => {
     const result = createConnectionSchema.safeParse({
       name: "",
       type: "POSTGRES",
-      host: "localhost",
-      port: 5432,
-      database: "db",
-      username: "user",
-      password: "pass",
+      config: { host: "localhost", port: 5432, database: "db", username: "user" },
+      credentials: { password: "pass" },
     });
     expect(result.success).toBe(false);
   });
@@ -49,34 +40,29 @@ describe("connection validation", () => {
     const result = createConnectionSchema.safeParse({
       name: "BQ Prod",
       type: "BIGQUERY",
-      extras: {
-        type: "service_account",
-        project_id: "my-project",
-        private_key_id: "key-id",
-        private_key: "-----BEGIN RSA PRIVATE KEY-----\n...",
-        client_email: "sa@my-project.iam.gserviceaccount.com",
-        client_id: "123456",
-        auth_uri: "https://accounts.google.com/o/oauth2/auth",
-        token_uri: "https://oauth2.googleapis.com/token",
+      config: { projectId: "my-project", location: "US" },
+      credentials: {
+        serviceAccountKey: {
+          type: "service_account",
+          project_id: "my-project",
+          private_key_id: "key-id",
+          private_key: "-----BEGIN RSA PRIVATE KEY-----\n...",
+          client_email: "sa@my-project.iam.gserviceaccount.com",
+          client_id: "123456",
+          auth_uri: "https://accounts.google.com/o/oauth2/auth",
+          token_uri: "https://oauth2.googleapis.com/token",
+        },
       },
     });
     expect(result.success).toBe(true);
   });
 
-  it("rejects bigquery with invalid service account type", () => {
+  it("rejects bigquery without projectId", () => {
     const result = createConnectionSchema.safeParse({
       name: "BQ Bad",
       type: "BIGQUERY",
-      extras: {
-        type: "authorized_user",
-        project_id: "my-project",
-        private_key_id: "key-id",
-        private_key: "key",
-        client_email: "sa@gsa.com",
-        client_id: "123",
-        auth_uri: "https://accounts.google.com/o/oauth2/auth",
-        token_uri: "https://oauth2.googleapis.com/token",
-      },
+      config: { projectId: "", location: "US" },
+      credentials: { serviceAccountKey: { type: "service_account" } },
     });
     expect(result.success).toBe(false);
   });
@@ -85,11 +71,8 @@ describe("connection validation", () => {
     const result = createConnectionSchema.safeParse({
       name: "Test",
       type: "MYSQL",
-      host: "localhost",
-      port: 99999,
-      database: "db",
-      username: "root",
-      password: "pass",
+      config: { host: "localhost", port: 99999, database: "db", username: "root" },
+      credentials: { password: "pass" },
     });
     expect(result.success).toBe(false);
   });

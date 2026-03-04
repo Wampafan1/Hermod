@@ -75,7 +75,7 @@ export function ConnectionList({
   async function handleDelete(id: string) {
     if (!confirm("Delete this connection?")) return;
     try {
-      const res = await fetch(`/api/v2/connections/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/connections/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error || "Delete failed");

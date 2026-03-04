@@ -2,31 +2,30 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { encrypt } from "@/lib/crypto";
-import { createConnectionSchema } from "@/lib/validations/connections";
+import { createConnectionSchema } from "@/lib/validations/unified-connections";
 
-// GET /api/connections — list user's connections
+// ─── GET /api/connections — list user's connections ──────────
 export const GET = withAuth(async (_req, session) => {
-  const connections = await prisma.dataSource.findMany({
+  const connections = await prisma.connection.findMany({
     where: { userId: session.user.id },
-    orderBy: { createdAt: "desc" },
     select: {
       id: true,
       name: true,
       type: true,
-      host: true,
-      port: true,
-      database: true,
-      username: true,
-      extras: true,
+      config: true,
+      status: true,
+      lastTestedAt: true,
       createdAt: true,
       updatedAt: true,
-      // Never return password
+      // NEVER return credentials
     },
+    orderBy: { createdAt: "desc" },
   });
+
   return NextResponse.json(connections);
 });
 
-// POST /api/connections — create connection
+// ─── POST /api/connections — create connection ───────────────
 export const POST = withAuth(async (req, session) => {
   const body = await req.json();
   const parsed = createConnectionSchema.safeParse(body);
@@ -37,30 +36,25 @@ export const POST = withAuth(async (req, session) => {
     );
   }
 
-  const data = parsed.data;
-  const isBigQuery = data.type === "BIGQUERY";
+  const { name, type, config, credentials } = parsed.data;
 
-  const connection = await prisma.dataSource.create({
+  const connection = await prisma.connection.create({
     data: {
-      name: data.name,
-      type: data.type,
-      host: isBigQuery ? null : (data as any).host,
-      port: isBigQuery ? null : (data as any).port,
-      database: isBigQuery ? null : (data as any).database,
-      username: isBigQuery ? null : (data as any).username,
-      password: isBigQuery ? null : encrypt((data as any).password),
-      extras: isBigQuery ? (data as any).extras : null,
+      name,
+      type,
+      config,
+      credentials: encrypt(JSON.stringify(credentials)),
       userId: session.user.id,
     },
     select: {
       id: true,
       name: true,
       type: true,
-      host: true,
-      port: true,
-      database: true,
-      username: true,
+      config: true,
+      status: true,
+      lastTestedAt: true,
       createdAt: true,
+      updatedAt: true,
     },
   });
 

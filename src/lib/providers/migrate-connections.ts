@@ -211,12 +211,19 @@ async function runMigration() {
   try {
     console.log("Starting connection migration...\n");
 
-    // 1. Read all DataSource records
-    const dataSources = await prisma.dataSource.findMany();
+    // 1. Read all DataSource records (raw SQL since model was removed from schema)
+    const dataSources = await prisma.$queryRaw<DataSourceRow[]>`
+      SELECT id, name, type, host, port, database, username, password, extras, "userId"
+      FROM "DataSource"
+    `;
     console.log(`Found ${dataSources.length} DataSource record(s)`);
 
     // 2. Read all SftpConnection records
-    const sftpConnections = await prisma.sftpConnection.findMany();
+    const sftpConnections = await prisma.$queryRaw<SftpConnectionRow[]>`
+      SELECT id, name, "sftpHost", "sftpPort", "sftpUsername", "sftpPassword",
+             "fileFormat"::text, "sourceType"::text, status::text, "userId"
+      FROM "SftpConnection"
+    `;
     console.log(`Found ${sftpConnections.length} SftpConnection record(s)\n`);
 
     const idMapping: Record<string, string> = {};

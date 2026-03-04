@@ -153,7 +153,7 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
 
   // Load reference data
   useEffect(() => {
-    fetch("/api/v2/connections")
+    fetch("/api/connections")
       .then((r) => r.json())
       .then((data) => setDataSources(data))
       .catch(() => toast.error("Failed to load connections"));

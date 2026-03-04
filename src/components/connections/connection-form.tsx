@@ -161,7 +161,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
         return;
       }
 
-      const res = await fetch("/api/v2/connections/test", {
+      const res = await fetch("/api/connections/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -190,8 +190,8 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
     setSaving(true);
     try {
       const url = isEditing
-        ? `/api/v2/connections/${initial!.id}`
-        : "/api/v2/connections";
+        ? `/api/connections/${initial!.id}`
+        : "/api/connections";
       const method = isEditing ? "PUT" : "POST";
       const payload = buildPayload();
 
