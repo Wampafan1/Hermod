@@ -49,6 +49,7 @@ model User {
   emailConnections EmailConnection[]
   blueprints       Blueprint[]
   bifrostRoutes    BifrostRoute[]
+  unifiedConns     Connection[]
 }
 
 model VerificationToken {
@@ -85,6 +86,7 @@ enum DataSourceType {
   MSSQL
   MYSQL
   BIGQUERY
+  NETSUITE
 }
 
 // ─── SFTP Connections ────────────────────────────────
@@ -273,6 +275,37 @@ enum BlueprintStatus {
   VALIDATED
   ACTIVE
   ARCHIVED
+}
+
+// ─── Unified Connections ──────────────────────────────
+
+enum ConnectionType {
+  POSTGRES
+  MSSQL
+  MYSQL
+  BIGQUERY
+  NETSUITE
+  SFTP
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  ERROR
+  DISABLED
+}
+
+model Connection {
+  id            String           @id @default(cuid())
+  name          String
+  type          ConnectionType
+  config        Json
+  credentials   String?          @db.Text  // Encrypted JSON: passwords, tokens, service account keys
+  status        ConnectionStatus @default(ACTIVE)
+  lastTestedAt  DateTime?
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 }
 
 // ─── Bifrost Routes ─────────────────────────────────
