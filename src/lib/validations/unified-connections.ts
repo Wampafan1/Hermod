@@ -1,0 +1,92 @@
+import { z } from "zod";
+
+// ─── Config schemas (non-sensitive, stored in config JSON) ───────
+
+const sqlConfigBase = {
+  host: z.string().min(1),
+  database: z.string().min(1),
+  username: z.string().min(1),
+  ssl: z.boolean().default(false),
+};
+
+const postgresConfig = z.object({ ...sqlConfigBase, port: z.coerce.number().int().min(1).max(65535).default(5432) });
+const mssqlConfig    = z.object({ ...sqlConfigBase, port: z.coerce.number().int().min(1).max(65535).default(1433) });
+const mysqlConfig    = z.object({ ...sqlConfigBase, port: z.coerce.number().int().min(1).max(65535).default(3306) });
+
+const bigqueryConfig = z.object({
+  projectId: z.string().min(1),
+  location: z.string().default("US"),
+});
+
+const netsuiteConfig = z.object({
+  accountId: z.string().min(1),
+});
+
+const sftpConfig = z.object({
+  host: z.string().min(1),
+  port: z.coerce.number().int().min(1).max(65535).default(2222),
+  username: z.string().min(1),
+  fileFormat: z.enum(["CSV", "TSV", "XLSX"]).default("CSV"),
+  sourceType: z.enum(["ADP", "QUICKBOOKS", "SAP", "GENERIC_FILE", "CUSTOM_SFTP"]),
+});
+
+// ─── Credentials schemas (sensitive, encrypted at rest) ─────────
+
+const passwordCredentials = z.object({
+  password: z.string().min(1),
+});
+
+const bigqueryCredentials = z.object({
+  serviceAccountKey: z.record(z.unknown()),
+});
+
+const netsuiteCredentials = z.object({
+  consumerKey: z.string().min(1),
+  consumerSecret: z.string().min(1),
+  tokenId: z.string().min(1),
+  tokenSecret: z.string().min(1),
+});
+
+// ─── Schema maps (for programmatic access per type) ─────────────
+
+export const connectionConfigSchemas: Record<string, z.ZodTypeAny> = {
+  POSTGRES: postgresConfig,
+  MSSQL: mssqlConfig,
+  MYSQL: mysqlConfig,
+  BIGQUERY: bigqueryConfig,
+  NETSUITE: netsuiteConfig,
+  SFTP: sftpConfig,
+};
+
+export const connectionCredentialsSchemas: Record<string, z.ZodTypeAny> = {
+  POSTGRES: passwordCredentials,
+  MSSQL: passwordCredentials,
+  MYSQL: passwordCredentials,
+  BIGQUERY: bigqueryCredentials,
+  NETSUITE: netsuiteCredentials,
+  SFTP: passwordCredentials,
+};
+
+// ─── Discriminated union for create ─────────────────────────────
+
+const baseFields = {
+  name: z.string().min(1).max(200),
+};
+
+export const createConnectionSchema = z.discriminatedUnion("type", [
+  z.object({ ...baseFields, type: z.literal("POSTGRES"),  config: postgresConfig,  credentials: passwordCredentials }),
+  z.object({ ...baseFields, type: z.literal("MSSQL"),     config: mssqlConfig,     credentials: passwordCredentials }),
+  z.object({ ...baseFields, type: z.literal("MYSQL"),     config: mysqlConfig,     credentials: passwordCredentials }),
+  z.object({ ...baseFields, type: z.literal("BIGQUERY"),  config: bigqueryConfig,  credentials: bigqueryCredentials }),
+  z.object({ ...baseFields, type: z.literal("NETSUITE"),  config: netsuiteConfig,  credentials: netsuiteCredentials }),
+  z.object({ ...baseFields, type: z.literal("SFTP"),      config: sftpConfig,      credentials: passwordCredentials }),
+]);
+
+export const updateConnectionSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  config: z.record(z.unknown()).optional(),
+  credentials: z.record(z.unknown()).optional(),
+});
+
+export type CreateConnectionInput = z.infer<typeof createConnectionSchema>;
+export type UpdateConnectionInput = z.infer<typeof updateConnectionSchema>;
