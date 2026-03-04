@@ -6,32 +6,17 @@ import { ConnectionList } from "@/components/connections/connection-list";
 export default async function ConnectionsPage() {
   const session = await requireAuth();
 
-  const [connections, sftpConnections, emailConnections] = await Promise.all([
-    prisma.dataSource.findMany({
+  const [connections, emailConnections] = await Promise.all([
+    prisma.connection.findMany({
       where: { userId: session.user.id },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
         name: true,
         type: true,
-        host: true,
-        port: true,
-        database: true,
-        username: true,
-      },
-    }),
-    prisma.sftpConnection.findMany({
-      where: { userId: session.user.id },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        name: true,
-        sourceType: true,
+        config: true,
         status: true,
-        lastFileAt: true,
-        lastFileName: true,
-        filesProcessed: true,
-        sftpUsername: true,
+        lastTestedAt: true,
       },
     }),
     prisma.emailConnection.findMany({
@@ -50,10 +35,12 @@ export default async function ConnectionsPage() {
     }),
   ]);
 
-  // Serialize dates for client component
-  const serializedSftp = sftpConnections.map((s) => ({
-    ...s,
-    lastFileAt: s.lastFileAt?.toISOString() ?? null,
+  // Serialize dates and cast config for client component
+  const serializedConnections = connections.map((c) => ({
+    ...c,
+    config: (c.config ?? {}) as Record<string, unknown>,
+    status: c.status as string,
+    lastTestedAt: c.lastTestedAt?.toISOString() ?? null,
   }));
 
   return (
@@ -71,8 +58,7 @@ export default async function ConnectionsPage() {
       </div>
 
       <ConnectionList
-        connections={connections}
-        sftpConnections={serializedSftp}
+        connections={serializedConnections}
         emailConnections={emailConnections}
       />
     </div>
