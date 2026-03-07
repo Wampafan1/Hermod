@@ -17,10 +17,11 @@ export function withAuth(handler: AuthHandler) {
     try {
       return await handler(req, session as Session & { user: { id: string } });
     } catch (error) {
-      console.error("API error:", error);
-      const message =
-        error instanceof Error ? error.message : "Internal server error";
-      return NextResponse.json({ error: message }, { status: 500 });
+      console.error("API error:", error instanceof Error ? error.message : error);
+      return NextResponse.json(
+        { error: "An internal error occurred. Please try again or contact support." },
+        { status: 500 }
+      );
     }
   };
 }
