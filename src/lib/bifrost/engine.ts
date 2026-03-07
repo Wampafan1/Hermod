@@ -87,20 +87,6 @@ export class BifrostEngine {
 
     let routeLog: { id: string } | null = null;
 
-    // 0. Clean up any stale "running" logs from previous crashed runs
-    await prisma.routeLog.updateMany({
-      where: {
-        routeId: route.id,
-        status: "running",
-        startedAt: { lt: new Date(Date.now() - 15 * 60_000) }, // >15 min old
-      },
-      data: {
-        status: "failed",
-        error: "Timed out — process crashed or hung before completion",
-        completedAt: new Date(),
-      },
-    });
-
     try {
       // 1. Schema validation
       await this.validateOrCreateDestTable(

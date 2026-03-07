@@ -397,24 +397,6 @@ describe("BifrostEngine", () => {
     expect(mockLoad).toHaveBeenCalledTimes(1); // 1 batched load, not 10
   });
 
-  it("cleans up stale 'running' logs from previous crashed runs", async () => {
-    mockExtractGen.mockImplementation(() => asyncGenFromChunks([[]]));
-
-    await engine.execute(makeRoute(), "manual");
-
-    // updateMany should be called to mark stale running logs as failed
-    expect(mockUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          routeId: "route_1",
-          status: "running",
-          startedAt: expect.objectContaining({ lt: expect.any(Date) }),
-        }),
-        data: expect.objectContaining({
-          status: "failed",
-          error: expect.stringContaining("Timed out"),
-        }),
-      })
-    );
-  });
+  // Stale "running" log cleanup is handled by worker.ts at startup,
+  // not by the engine on every execution — see worker.ts lines 39-52.
 });
