@@ -7,6 +7,10 @@ const sourceConfigSchema = z.object({
   dataset: z.string().optional(),
   incrementalKey: z.string().optional(),
   chunkSize: z.number().int().min(100).max(100_000).optional(),
+  // NetSuite structured config (stored alongside generated SuiteQL query)
+  recordType: z.string().optional(),
+  fields: z.array(z.string()).optional(),
+  filter: z.string().optional(),
 });
 
 // ─── Dest Config ─────────────────────────────────────
@@ -18,6 +22,26 @@ const destConfigSchema = z.object({
   autoCreateTable: z.boolean().default(false),
   schema: z.record(z.unknown()).nullable().optional(),
 });
+
+// ─── Cursor Config (Incremental Sync) ───────────────
+
+const cursorCandidateSchema = z.object({
+  column: z.string(),
+  strategy: z.enum(["timestamp_cursor", "integer_id_cursor", "rowversion_cursor", "full_refresh"]),
+  score: z.number(),
+  reason: z.string(),
+});
+
+const cursorConfigSchema = z.object({
+  strategy: z.enum(["timestamp_cursor", "integer_id_cursor", "rowversion_cursor", "full_refresh"]),
+  cursorColumn: z.string().nullable(),
+  cursorColumnType: z.string().nullable(),
+  primaryKey: z.string().nullable(),
+  confidence: z.enum(["high", "medium", "low"]),
+  reasoning: z.string(),
+  warnings: z.array(z.string()),
+  candidates: z.array(cursorCandidateSchema),
+}).nullable().optional();
 
 // ─── Create Route ────────────────────────────────────
 
@@ -35,6 +59,7 @@ export const createRouteSchema = z.object({
   timeHour: z.number().int().min(0).max(23).default(7),
   timeMinute: z.number().int().min(0).max(59).default(0),
   timezone: z.string().default("America/Chicago"),
+  cursorConfig: cursorConfigSchema,
 });
 
 // ─── Update Route ────────────────────────────────────
@@ -54,6 +79,7 @@ export const updateRouteSchema = z.object({
   timeHour: z.number().int().min(0).max(23).optional(),
   timeMinute: z.number().int().min(0).max(59).optional(),
   timezone: z.string().optional(),
+  cursorConfig: cursorConfigSchema,
 });
 
 // ─── Schema Fetch ────────────────────────────────────
