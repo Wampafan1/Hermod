@@ -120,16 +120,12 @@ function nextBiweekly(
   minute: number,
   tz: string
 ): Date {
-  // Find the next matching day, then skip a week
-  // Simple approach: find next weekly occurrence, then check if it's on an even/odd week
-  // For simplicity, we find the next occurrence and if it's this week, push to next-next week
+  // Find the next weekly occurrence, then add 1 week to ensure biweekly gap.
+  // After each run, advanceNextRun() adds 2 weeks for subsequent runs.
   const nextWeeklyRun = nextWeekly(now, daysOfWeek, hour, minute, tz);
-  const nowInTz = toZonedTime(now, tz);
   const runInTz = toZonedTime(nextWeeklyRun, tz);
-
-  // If the next run is within this week (next 7 days), it's fine for the first occurrence.
-  // For true biweekly, the worker will advance by 2 weeks after each run.
-  return nextWeeklyRun;
+  const biweeklyRun = addWeeks(runInTz, 1);
+  return toUtc(setTime(biweeklyRun, hour, minute), tz);
 }
 
 /** Resolve dayOfMonth: 0 means "last day of month", otherwise clamp to month's max. */
