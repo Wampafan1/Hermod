@@ -35,6 +35,7 @@ import { DEFAULT_CHUNK_SIZE } from "@/lib/bifrost/types";
 const DEFAULT_MAX_BYTES_BILLED = "50000000000"; // 50 GB
 const TEST_MAX_BYTES_BILLED = "1000000"; // 1 MB — just for SELECT 1
 const LOAD_JOB_TIMEOUT_MS = 5 * 60_000; // 5 minutes — safety net for load jobs
+const EXTRACT_JOB_TIMEOUT_MS = 10 * 60_000; // 10 minutes — safety net for extract queries
 
 // ─── Schema Cache ───────────────────────────────────────
 const SCHEMA_CACHE_TTL_MS = 60 * 60_000; // 1 hour
@@ -149,6 +150,7 @@ export class BigQueryProvider implements ConnectionProvider {
       query: config.query,
       useLegacySql: false,
       maximumBytesBilled: DEFAULT_MAX_BYTES_BILLED,
+      jobTimeoutMs: String(EXTRACT_JOB_TIMEOUT_MS),
     };
 
     // Use BigQuery's native parameterized query support for @param placeholders
