@@ -262,7 +262,7 @@ export async function runReport(
     const now = new Date();
     const tz = schedule.timezone || "America/Chicago";
     const reportDate = formatInTimeZone(now, tz, "MMMM d, yyyy");
-    const filename = `${report.name.replace(/[^a-zA-Z0-9-_ ]/g, "")}_${formatInTimeZone(now, tz, "yyyy-MM-dd")}.xlsx`;
+    const filename = `${report.name.replace(/[\/\\:*?"<>|]/g, "")}_${formatInTimeZone(now, tz, "yyyy-MM-dd")}.xlsx`;
 
     // Read nextRunAt (already advanced by worker scheduler before job runs)
     const updatedSchedule = await prisma.schedule.findUnique({
