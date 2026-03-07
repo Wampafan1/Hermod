@@ -312,6 +312,7 @@ model BifrostRoute {
   timezone         String         @default("America/Chicago")
   nextRunAt        DateTime?
   lastCheckpoint   DateTime?      // Incremental: last successful run timestamp
+  cursorConfig     Json?          // CursorConfig: AI-detected cursor strategy (setup-time only)
 
   // Ownership
   userId           String
@@ -320,6 +321,7 @@ model BifrostRoute {
   // Relations
   routeLogs        RouteLog[]
   helheimEntries   HelheimEntry[]
+  watermarks       PipelineWatermark[]
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 }
@@ -357,4 +359,20 @@ model HelheimEntry {
   status        String       @default("pending") // "pending", "retrying", "recovered", "dead"
   createdAt     DateTime     @default(now())
   lastRetriedAt DateTime?
+}
+
+// ─── Pipeline Watermarks (Incremental Sync) ─────────
+
+model PipelineWatermark {
+  id            String       @id @default(cuid())
+  routeId       String
+  route         BifrostRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  tableName     String
+  watermark     String       // serialized: ISO timestamp, integer ID, or hex hash
+  watermarkType String       // "timestamp_cursor", "integer_id_cursor", "rowversion_cursor", "full_refresh"
+  rowsSynced    Int?
+  runAt         DateTime     @default(now())
+
+  @@unique([routeId, tableName])
+  @@index([routeId])
 }
