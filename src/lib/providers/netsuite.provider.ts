@@ -225,8 +225,9 @@ export class NetSuiteProvider implements ConnectionProvider {
 
     // Substitute @last_run params if incremental
     if (config.incrementalKey) {
-      // The caller may pass last_run via SourceConfig extension — handle both Date and string
-      const lastRun = (config as unknown as Record<string, unknown>).last_run;
+      // Engine stores last_run in config.params; fallback to top-level for direct callers
+      const lastRun = config.params?.last_run
+        ?? (config as unknown as Record<string, unknown>).last_run;
       if (lastRun) {
         const lastRunStr =
           lastRun instanceof Date ? lastRun.toISOString() : String(lastRun);
