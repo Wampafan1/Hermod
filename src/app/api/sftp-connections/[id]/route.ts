@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
-import { decrypt } from "@/lib/crypto";
 import { updateSftpConnectionSchema } from "@/lib/validations/sftp-connections";
 import { removeSftpUser } from "@/lib/sftp-utils";
 
@@ -19,18 +18,9 @@ export const GET = withAuth(async (req, session) => {
     return NextResponse.json({ error: "Connection not found" }, { status: 404 });
   }
 
-  // Decrypt password for credential display
-  let rawPassword: string | null = null;
-  try {
-    rawPassword = decrypt(connection.sftpPassword);
-  } catch {
-    rawPassword = null;
-  }
-
-  return NextResponse.json({
-    ...connection,
-    sftpPassword: rawPassword,
-  });
+  // Never return the actual password — it's only shown once on creation
+  const { sftpPassword: _omit, ...safe } = connection;
+  return NextResponse.json(safe);
 });
 
 // PUT /api/sftp-connections/[id] — update SFTP connection
