@@ -4,6 +4,7 @@ import { getProvider, toConnectionLike } from "@/lib/providers";
 import { sendReportEmail, toEmailConfig } from "@/lib/email";
 import ExcelJS from "exceljs";
 import { format } from "date-fns";
+import { formatInTimeZone } from "date-fns-tz";
 import type { SheetTemplate } from "@/components/reports/univer-sheet";
 import type { ColumnConfig } from "@/lib/column-config";
 import { applyColumnConfig, generateColumnConfig, migrateConfigWidths, UNIVER_PX_PER_EXCEL_WIDTH, DEFAULT_EXCEL_WIDTH } from "@/lib/column-config";
@@ -259,8 +260,9 @@ export async function runReport(
 
     // Build email model and render template
     const now = new Date();
-    const reportDate = format(now, "MMMM d, yyyy");
-    const filename = `${report.name.replace(/[^a-zA-Z0-9-_ ]/g, "")}_${format(now, "yyyy-MM-dd")}.xlsx`;
+    const tz = schedule.timezone || "America/Chicago";
+    const reportDate = formatInTimeZone(now, tz, "MMMM d, yyyy");
+    const filename = `${report.name.replace(/[^a-zA-Z0-9-_ ]/g, "")}_${formatInTimeZone(now, tz, "yyyy-MM-dd")}.xlsx`;
 
     // Read nextRunAt (already advanced by worker scheduler before job runs)
     const updatedSchedule = await prisma.schedule.findUnique({
@@ -268,7 +270,7 @@ export async function runReport(
       select: { nextRunAt: true },
     });
     const nextScheduleStr = updatedSchedule?.nextRunAt
-      ? format(updatedSchedule.nextRunAt, "EEEE, MMMM d 'at' h:mm a")
+      ? formatInTimeZone(updatedSchedule.nextRunAt, tz, "EEEE, MMMM d 'at' h:mm a")
       : "N/A";
 
     const emailModel: HermodEmailModel = {
@@ -281,7 +283,7 @@ export async function runReport(
       // Admin fields
       clientName: "Team",
       datasource: report.connection.name,
-      executionDate: format(now, "yyyy-MM-dd HH:mm:ss"),
+      executionDate: formatInTimeZone(now, tz, "yyyy-MM-dd HH:mm:ss"),
       duration: runTime,
       rowCount: pipeline.rowCount,
       sheetCount: 1,
