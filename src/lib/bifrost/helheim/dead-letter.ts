@@ -91,14 +91,27 @@ export async function enqueueDeadLetter(
 
 // ─── Retry ───────────────────────────────────────────
 
-export async function markRetrying(entryId: string): Promise<void> {
-  await prisma.helheimEntry.update({
-    where: { id: entryId },
+/**
+ * Atomically claim a retry entry using optimistic locking.
+ * Returns true if this worker claimed it, false if another worker got it first.
+ */
+export async function claimRetry(entryId: string): Promise<boolean> {
+  const result = await prisma.helheimEntry.updateMany({
+    where: {
+      id: entryId,
+      status: { in: ["pending", "retrying"] },
+    },
     data: {
       status: "retrying",
       lastRetriedAt: new Date(),
     },
   });
+  return result.count > 0;
+}
+
+/** @deprecated Use claimRetry() for atomic claim. Kept for backwards compat. */
+export async function markRetrying(entryId: string): Promise<void> {
+  await claimRetry(entryId);
 }
 
 export async function markRecovered(entryId: string): Promise<void> {

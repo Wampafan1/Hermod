@@ -3,7 +3,7 @@ import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import {
   decompressPayload,
-  markRetrying,
+  claimRetry,
   markRecovered,
   markRetryFailed,
 } from "@/lib/bifrost/helheim/dead-letter";
@@ -36,7 +36,10 @@ export const POST = withAuth(async (req, session) => {
     return NextResponse.json({ error: "Entry already recovered" }, { status: 400 });
   }
 
-  await markRetrying(entry.id);
+  const claimed = await claimRetry(entry.id);
+  if (!claimed) {
+    return NextResponse.json({ error: "Entry is already being retried" }, { status: 409 });
+  }
 
   const destProvider = getProvider(entry.route.dest.type);
   const destConnLike = toConnectionLike(entry.route.dest);

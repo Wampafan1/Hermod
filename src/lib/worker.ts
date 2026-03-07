@@ -8,7 +8,7 @@ import { advanceRouteNextRun } from "./bifrost/engine";
 import {
   getDueRetries,
   decompressPayload,
-  markRetrying,
+  claimRetry,
   markRecovered,
   markRetryFailed,
 } from "./bifrost/helheim/dead-letter";
@@ -213,7 +213,11 @@ async function main() {
         for (const entry of entries) {
           try {
             console.log(`[Worker] Retrying Helheim entry ${entry.id}`);
-            await markRetrying(entry.id);
+            const claimed = await claimRetry(entry.id);
+            if (!claimed) {
+              console.log(`[Worker] Helheim entry ${entry.id} already claimed by another worker`);
+              continue;
+            }
 
             const rows = await decompressPayload(entry.payload);
             await destProvider.load!(conn, rows, destConfig);

@@ -572,54 +572,75 @@ describe("NetSuiteProvider", () => {
   // ═══════════════════════════════════════════════════
 
   describe("listRecordTypes", () => {
-    it("returns mapped record type list", async () => {
+    it("includes curated SuiteQL tables", async () => {
+      // Mock the custom record discovery SuiteQL call
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ items: [], hasMore: false })
+      );
+
+      const conn = (await provider.connect(makeConnection())) as any;
+      const types = await provider.listRecordTypes(conn);
+
+      // Should include known curated tables
+      const names = types.map((t) => t.name);
+      expect(names).toContain("transaction");
+      expect(names).toContain("customer");
+      expect(names).toContain("item");
+      expect(names).toContain("subsidiary");
+
+      // Each type should have label and category
+      const tx = types.find((t) => t.name === "transaction")!;
+      expect(tx.label).toBe("Transactions (all types)");
+      expect(tx.category).toBe("Transactions");
+    });
+
+    it("appends custom records discovered via SuiteQL", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({
           items: [
-            { name: "customer", href: "/record/v1/customer" },
-            { name: "salesOrder", href: "/record/v1/salesOrder" },
-            { name: "item", href: "/record/v1/item" },
+            { scriptid: "customrecord_my_data", name: "My Custom Data" },
+            { scriptid: "customrecord_inv_ext", name: "Inventory Extension" },
           ],
+          hasMore: false,
         })
       );
 
       const conn = (await provider.connect(makeConnection())) as any;
       const types = await provider.listRecordTypes(conn);
 
-      expect(types).toEqual([
-        { name: "customer", href: "/record/v1/customer" },
-        { name: "salesOrder", href: "/record/v1/salesOrder" },
-        { name: "item", href: "/record/v1/item" },
+      const customTypes = types.filter((t) => t.category === "Custom Records");
+      expect(customTypes).toEqual([
+        { name: "customrecord_my_data", label: "My Custom Data", category: "Custom Records" },
+        { name: "customrecord_inv_ext", label: "Inventory Extension", category: "Custom Records" },
       ]);
     });
 
-    it("returns empty array when items is missing", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({}));
+    it("returns curated list when custom record query fails", async () => {
+      mockFetch.mockRejectedValueOnce(new Error("SuiteQL failed"));
 
       const conn = (await provider.connect(makeConnection())) as any;
       const types = await provider.listRecordTypes(conn);
 
-      expect(types).toEqual([]);
+      // Should still have curated tables
+      expect(types.length).toBeGreaterThan(0);
+      expect(types.some((t) => t.name === "customer")).toBe(true);
+      // No custom records category
+      expect(types.every((t) => t.category !== "Custom Records")).toBe(true);
     });
 
-    it("requests the metadata catalog path", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ items: [] }));
+    it("uses SuiteQL POST to discover custom records", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ items: [], hasMore: false })
+      );
 
       const conn = (await provider.connect(makeConnection())) as any;
       await provider.listRecordTypes(conn);
 
-      const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain("/services/rest/record/v1/metadata-catalog/");
-    });
-
-    it("uses GET method", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ items: [] }));
-
-      const conn = (await provider.connect(makeConnection())) as any;
-      await provider.listRecordTypes(conn);
-
-      const [, opts] = mockFetch.mock.calls[0];
-      expect(opts.method).toBe("GET");
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toContain("/suiteql");
+      expect(opts.method).toBe("POST");
+      const body = JSON.parse(opts.body);
+      expect(body.q).toContain("customrecordtype");
     });
   });
 
@@ -628,19 +649,19 @@ describe("NetSuiteProvider", () => {
   // ═══════════════════════════════════════════════════
 
   describe("getRecordFields", () => {
-    it("maps NetSuite property types to standard types", async () => {
+    it("infers types from sample SuiteQL row values", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({
-          properties: {
-            id: { type: "integer", title: "Internal ID", nullable: false },
-            name: { type: "string", title: "Name", nullable: true },
-            amount: { type: "double", title: "Amount", nullable: true },
-            isActive: { type: "boolean", title: "Active", nullable: true },
-            created: { type: "datetime", title: "Created Date", nullable: true },
-            count: { type: "number", title: "Count", nullable: true },
-            rate: { type: "float", title: "Rate", nullable: true },
-            price: { type: "decimal", title: "Price", nullable: false },
-          },
+          items: [{
+            id: 42,
+            name: "Acme Widget",
+            amount: 19.99,
+            isactive: true,
+            datecreated: "2024-01-15 08:30:00",
+            count: 100,
+            memo: null,
+          }],
+          hasMore: false,
         })
       );
 
@@ -652,21 +673,17 @@ describe("NetSuiteProvider", () => {
       expect(fieldMap.id.type).toBe("INTEGER");
       expect(fieldMap.name.type).toBe("STRING");
       expect(fieldMap.amount.type).toBe("FLOAT");
-      expect(fieldMap.isActive.type).toBe("BOOLEAN");
-      expect(fieldMap.created.type).toBe("TIMESTAMP");
+      expect(fieldMap.isactive.type).toBe("BOOLEAN");
+      expect(fieldMap.datecreated.type).toBe("TIMESTAMP");
       expect(fieldMap.count.type).toBe("INTEGER");
-      expect(fieldMap.rate.type).toBe("FLOAT");
-      expect(fieldMap.price.type).toBe("FLOAT");
+      expect(fieldMap.memo.type).toBe("STRING"); // null defaults to STRING
     });
 
-    it("handles mandatory field detection", async () => {
+    it("uses field name as label", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({
-          properties: {
-            id: { type: "integer", title: "ID", nullable: false },
-            name: { type: "string", title: "Name", nullable: true },
-            desc: { type: "string", title: "Description" },
-          },
+          items: [{ entityid: "CUST001", companyname: "Acme" }],
+          hasMore: false,
         })
       );
 
@@ -675,32 +692,14 @@ describe("NetSuiteProvider", () => {
 
       const fieldMap = Object.fromEntries(fields.map((f) => [f.name, f]));
 
-      expect(fieldMap.id.mandatory).toBe(true);
-      expect(fieldMap.name.mandatory).toBe(false);
-      expect(fieldMap.desc.mandatory).toBe(false);
+      expect(fieldMap.entityid.label).toBe("entityid");
+      expect(fieldMap.companyname.label).toBe("companyname");
     });
 
-    it("uses title as label, falling back to name", async () => {
+    it("returns empty array when record type has no rows", async () => {
       mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          properties: {
-            entityid: { type: "string", title: "Entity ID" },
-            custfield: { type: "string" },
-          },
-        })
+        jsonResponse({ items: [], hasMore: false })
       );
-
-      const conn = (await provider.connect(makeConnection())) as any;
-      const fields = await provider.getRecordFields(conn, "customer");
-
-      const fieldMap = Object.fromEntries(fields.map((f) => [f.name, f]));
-
-      expect(fieldMap.entityid.label).toBe("Entity ID");
-      expect(fieldMap.custfield.label).toBe("custfield");
-    });
-
-    it("returns empty array when no properties", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({}));
 
       const conn = (await provider.connect(makeConnection())) as any;
       const fields = await provider.getRecordFields(conn, "nonexistent");
@@ -708,31 +707,46 @@ describe("NetSuiteProvider", () => {
       expect(fields).toEqual([]);
     });
 
-    it("defaults unknown type to STRING", async () => {
+    it("sends SELECT * FROM {recordType} with limit 1", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ items: [{ id: 1 }], hasMore: false })
+      );
+
+      const conn = (await provider.connect(makeConnection())) as any;
+      await provider.getRecordFields(conn, "customer");
+
+      const [, opts] = mockFetch.mock.calls[0];
+      const body = JSON.parse(opts.body);
+      expect(body.q).toBe("SELECT * FROM customer");
+      expect(opts.headers.Prefer).toContain("max-page-size=1");
+    });
+
+    it("detects date strings with slash format as TIMESTAMP", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({
-          properties: {
-            custom: { title: "Custom" },
-            exotic: { type: "customrecord", title: "Exotic" },
-          },
+          items: [{ lastmodified: "3/15/2024 12:00:00 AM" }],
+          hasMore: false,
+        })
+      );
+
+      const conn = (await provider.connect(makeConnection())) as any;
+      const fields = await provider.getRecordFields(conn, "transaction");
+
+      expect(fields[0].type).toBe("TIMESTAMP");
+    });
+
+    it("sets all fields as non-mandatory (SuiteQL cannot determine this)", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          items: [{ id: 1, name: "Test" }],
+          hasMore: false,
         })
       );
 
       const conn = (await provider.connect(makeConnection())) as any;
       const fields = await provider.getRecordFields(conn, "customer");
 
-      expect(fields[0].type).toBe("STRING");
-      expect(fields[1].type).toBe("STRING");
-    });
-
-    it("URL-encodes the record type in the request", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ properties: {} }));
-
-      const conn = (await provider.connect(makeConnection())) as any;
-      await provider.getRecordFields(conn, "custom record type");
-
-      const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain("/nsrecord/custom%20record%20type");
+      expect(fields.every((f) => f.mandatory === false)).toBe(true);
     });
   });
 
@@ -804,7 +818,7 @@ describe("NetSuiteProvider", () => {
     it("returns true when query succeeds", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({
-          items: [{ companyname: "Acme Corp" }],
+          items: [{ id: "1", name: "Parent Company" }],
           hasMore: false,
         })
       );
@@ -834,10 +848,10 @@ describe("NetSuiteProvider", () => {
   // ═══════════════════════════════════════════════════
 
   describe("testConnectionExtended", () => {
-    it("returns success with account name", async () => {
+    it("returns success with account ID in message", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({
-          items: [{ companyname: "Acme Corp" }],
+          items: [{ ts: "2026-03-06T12:00:00Z" }],
           hasMore: false,
         })
       );
@@ -845,11 +859,10 @@ describe("NetSuiteProvider", () => {
       const result = await provider.testConnectionExtended(makeConnection());
 
       expect(result.success).toBe(true);
-      expect(result.message).toBe("Connected to Acme Corp");
-      expect(result.accountName).toBe("Acme Corp");
+      expect(result.message).toContain("1234567_SB1");
     });
 
-    it("returns success without account name when no rows", async () => {
+    it("returns success even when query returns no rows", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({ items: [], hasMore: false })
       );
@@ -857,8 +870,7 @@ describe("NetSuiteProvider", () => {
       const result = await provider.testConnectionExtended(makeConnection());
 
       expect(result.success).toBe(true);
-      expect(result.message).toBe("Connection successful");
-      expect(result.accountName).toBeUndefined();
+      expect(result.message).toContain("1234567_SB1");
     });
 
     it("returns failure on error", async () => {
@@ -878,16 +890,16 @@ describe("NetSuiteProvider", () => {
       expect(result.message).toContain("INVALID_LOGIN");
     });
 
-    it("queries company table with limit 1", async () => {
+    it("queries CURRENT_TIMESTAMP with limit 1", async () => {
       mockFetch.mockResolvedValueOnce(
-        jsonResponse({ items: [{ companyname: "Test" }], hasMore: false })
+        jsonResponse({ items: [{ ts: "2026-03-06T12:00:00Z" }], hasMore: false })
       );
 
       await provider.testConnectionExtended(makeConnection());
 
       const [, opts] = mockFetch.mock.calls[0];
       const body = JSON.parse(opts.body);
-      expect(body.q).toBe("SELECT companyname FROM company WHERE id = 1");
+      expect(body.q).toBe("SELECT CURRENT_TIMESTAMP AS ts");
       expect(opts.headers.Prefer).toContain("max-page-size=1");
     });
   });
@@ -903,6 +915,7 @@ describe("NetSuiteProvider", () => {
 
     // Speed up retries for tests
     beforeEach(() => {
+      mockFetch.mockReset(); // Clear any leftover mocks from previous tests
       vi.spyOn(global, "setTimeout").mockImplementation((fn: any) => {
         if (typeof fn === "function") fn();
         return 0 as any;
@@ -991,16 +1004,13 @@ describe("NetSuiteProvider", () => {
     });
 
     it("parses SuiteQL title/detail error format", async () => {
-      // Provide error responses for all 3 retry attempts since this error
-      // is retryable (not INVALID_LOGIN/INVALID_QUERY/INSUFFICIENT_PERMISSION)
-      for (let i = 0; i < 3; i++) {
-        const errorResponse = jsonResponse(
-          { title: "Invalid Search", detail: "The search query is malformed" },
-          400
-        );
-        errorResponse.ok = false;
-        mockFetch.mockResolvedValueOnce(errorResponse);
-      }
+      // 400 errors are non-retryable (4xx tagged), so only 1 mock needed
+      const errorResponse = jsonResponse(
+        { title: "Invalid Search", detail: "The search query is malformed" },
+        400
+      );
+      errorResponse.ok = false;
+      mockFetch.mockResolvedValueOnce(errorResponse);
 
       const conn = await connectDefault();
       await expect(
@@ -1137,13 +1147,13 @@ describe("NetSuiteProvider", () => {
       );
     });
 
-    it("uses * when fields array is empty", () => {
+    it("uses * when fields array is empty (no ORDER BY without explicit id)", () => {
       const sql = buildSuiteQL({
         recordType: "customer",
         fields: [],
       });
 
-      expect(sql).toBe("SELECT * FROM customer ORDER BY id ASC");
+      expect(sql).toBe("SELECT * FROM customer");
     });
 
     it("includes WHERE clause from filter", () => {
@@ -1218,6 +1228,44 @@ describe("NetSuiteProvider", () => {
       });
 
       expect(sql).toBe("SELECT id FROM item ORDER BY id ASC");
+    });
+
+    it("allows dot-notation sublist fields", () => {
+      const sql = buildSuiteQL({
+        recordType: "transaction",
+        fields: ["id", "item.internalId", "item.quantity"],
+      });
+
+      expect(sql).toBe(
+        "SELECT id, item.internalId, item.quantity FROM transaction ORDER BY id ASC"
+      );
+    });
+
+    it("rejects field names with SQL injection", () => {
+      expect(() =>
+        buildSuiteQL({
+          recordType: "item",
+          fields: ["id; DROP TABLE item--"],
+        })
+      ).toThrow('Invalid field name');
+    });
+
+    it("rejects field names with quotes", () => {
+      expect(() =>
+        buildSuiteQL({
+          recordType: "item",
+          fields: ["id", "name' OR '1'='1"],
+        })
+      ).toThrow('Invalid field name');
+    });
+
+    it("rejects field names with spaces", () => {
+      expect(() =>
+        buildSuiteQL({
+          recordType: "item",
+          fields: ["id", "name FROM item; --"],
+        })
+      ).toThrow('Invalid field name');
     });
   });
 });

@@ -27,11 +27,20 @@ const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes
 const MAX_RETRIES = 3;
 const RETRY_BACKOFF_MS = [1000, 3000, 10000];
 
-/** Validates a SuiteQL identifier (record type or field name) against injection. */
+/** Validates a SuiteQL identifier (record type) against injection. */
 const SAFE_SUITEQL_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+/** Validates a SuiteQL field name, including dot-notation for sublist fields (e.g. "item.internalId"). */
+const SAFE_SUITEQL_FIELD = /^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$/;
+
 function validateSuiteQLIdentifier(value: string, label: string): void {
   if (!SAFE_SUITEQL_IDENTIFIER.test(value)) {
     throw new Error(`Invalid ${label}: "${value}"`);
+  }
+}
+
+function validateSuiteQLField(value: string): void {
+  if (!SAFE_SUITEQL_FIELD.test(value)) {
+    throw new Error(`Invalid field name: "${value}"`);
   }
 }
 
@@ -629,6 +638,9 @@ export function buildSuiteQL(config: {
   validateSuiteQLIdentifier(config.recordType, "record type");
   const EXCLUDED = new Set(["links"]);
   const clean = config.fields.filter((f) => !EXCLUDED.has(f));
+  for (const field of clean) {
+    validateSuiteQLField(field);
+  }
   const fields = clean.length > 0 ? clean.join(", ") : "*";
   let query = `SELECT ${fields} FROM ${config.recordType}`;
 

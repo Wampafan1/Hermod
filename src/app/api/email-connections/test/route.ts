@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { testEmailConnection } from "@/lib/email";
+import { checkSsrf } from "@/lib/ssrf";
 import type { EmailConnectionConfig } from "@/lib/email";
 
 // POST /api/email-connections/test — test SMTP connection without saving
@@ -14,6 +15,12 @@ export const POST = withAuth(async (req) => {
       { error: "Host and from address are required" },
       { status: 400 }
     );
+  }
+
+  // SSRF protection: reject private/reserved IPs
+  const ssrfError = await checkSsrf(host);
+  if (ssrfError) {
+    return NextResponse.json({ success: false, error: ssrfError }, { status: 400 });
   }
 
   const config: EmailConnectionConfig = {

@@ -60,6 +60,9 @@ const THEME_COLORS: Record<number, string> = {
   11: "#954F72", // FOLLOWED_HYPERLINK
 };
 
+/** Maximum rows a report can include. Rows beyond this are truncated with a warning. */
+export const REPORT_ROW_LIMIT = 500_000;
+
 // ─── Shared Pipeline ────────────────────────────────
 
 /** Input for the shared report pipeline (query → transform → Excel). */
@@ -113,6 +116,13 @@ export async function executeReportPipeline(input: PipelineInput): Promise<Pipel
     result = await provider.query(conn, input.sqlQuery);
   } finally {
     await conn.close();
+  }
+
+  // Enforce row limit — truncate with warning if exceeded
+  let rowLimitWarning: string | null = null;
+  if (result.rows.length > REPORT_ROW_LIMIT) {
+    rowLimitWarning = `Query returned ${result.rows.length.toLocaleString()} rows — truncated to ${REPORT_ROW_LIMIT.toLocaleString()} row limit`;
+    result.rows = result.rows.slice(0, REPORT_ROW_LIMIT);
   }
 
   let finalCols: string[];
@@ -191,7 +201,7 @@ export async function executeReportPipeline(input: PipelineInput): Promise<Pipel
     rowCount: result.rows.length,
     columns: finalCols!,
     runTimeMs,
-    forgeWarnings,
+    forgeWarnings: rowLimitWarning ? [rowLimitWarning, ...forgeWarnings] : forgeWarnings,
     forgeMetrics,
   };
 }

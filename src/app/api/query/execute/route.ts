@@ -4,6 +4,9 @@ import { withAuth } from "@/lib/api";
 import { executeQuerySchema } from "@/lib/validations/reports";
 import { getProvider, toConnectionLike } from "@/lib/providers";
 
+/** Maximum rows returned by the preview endpoint. */
+export const PREVIEW_ROW_LIMIT = 10_000;
+
 // POST /api/query/execute — run ad-hoc SQL query
 export const POST = withAuth(async (req, session) => {
   const body = await req.json();
@@ -42,11 +45,19 @@ export const POST = withAuth(async (req, session) => {
   try {
     const result = await provider.query(conn, sql);
     const executionTime = Date.now() - startTime;
+
+    const truncated = result.rows.length > PREVIEW_ROW_LIMIT;
+    const rows = truncated ? result.rows.slice(0, PREVIEW_ROW_LIMIT) : result.rows;
+
     return NextResponse.json({
       columns: result.columns,
-      rows: result.rows,
-      rowCount: result.rows.length,
+      rows,
+      rowCount: rows.length,
+      totalRows: result.rows.length,
       executionTime,
+      ...(truncated && {
+        warning: `Results truncated to ${PREVIEW_ROW_LIMIT.toLocaleString()} rows (query returned ${result.rows.length.toLocaleString()})`,
+      }),
     });
   } catch (error) {
     const message =
