@@ -213,11 +213,11 @@ export class BifrostEngine {
           // Fail-fast on fatal errors (missing dataset/table, auth)
           if (isFatalLoadError(err)) {
             clearSchemaCache();
-            await enqueueDeadLetter(route.id, routeLog.id, loadBatchIndex, rows, err);
+            await enqueueDeadLetter(route.id, routeLog!.id, loadBatchIndex, rows, err);
             errorCount += rows.length;
             throw err;
           }
-          await enqueueDeadLetter(route.id, routeLog.id, loadBatchIndex, rows, err);
+          await enqueueDeadLetter(route.id, routeLog!.id, loadBatchIndex, rows, err);
           errorCount += rows.length;
         }
 

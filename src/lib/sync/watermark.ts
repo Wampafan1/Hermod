@@ -13,7 +13,7 @@ export async function getWatermark(
   routeId: string,
   tableName: string
 ): Promise<string | null> {
-  const row = await prisma.pipelineWatermark.findFirst({
+  const row = await prisma.pipelineWatermark.findUnique({
     where: { routeId_tableName: { routeId, tableName } },
     select: { watermark: true },
   });

@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock Prisma
-const mockFindFirst = vi.fn();
+const mockFindUnique = vi.fn();
 const mockUpsert = vi.fn();
 vi.mock("@/lib/db", () => ({
   prisma: {
     pipelineWatermark: {
-      findFirst: mockFindFirst,
+      findUnique: mockFindUnique,
       upsert: mockUpsert,
     },
   },
@@ -23,17 +23,17 @@ describe("watermark service", () => {
 
   describe("getWatermark", () => {
     it("returns watermark string when found", async () => {
-      mockFindFirst.mockResolvedValueOnce({ watermark: "2026-01-15T08:30:00.000Z" });
+      mockFindUnique.mockResolvedValueOnce({ watermark: "2026-01-15T08:30:00.000Z" });
       const result = await getWatermark("route-1", "customers");
       expect(result).toBe("2026-01-15T08:30:00.000Z");
-      expect(mockFindFirst).toHaveBeenCalledWith({
+      expect(mockFindUnique).toHaveBeenCalledWith({
         where: { routeId_tableName: { routeId: "route-1", tableName: "customers" } },
         select: { watermark: true },
       });
     });
 
     it("returns null when no watermark exists", async () => {
-      mockFindFirst.mockResolvedValueOnce(null);
+      mockFindUnique.mockResolvedValueOnce(null);
       const result = await getWatermark("route-1", "new_table");
       expect(result).toBeNull();
     });

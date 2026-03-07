@@ -99,7 +99,7 @@ export const POST = withAuth(async (req, session) => {
       timeMinute: data.timeMinute,
       timezone: data.timezone,
       nextRunAt,
-      cursorConfig: data.cursorConfig ?? null,
+      cursorConfig: (data.cursorConfig ?? null) as any,
       userId: session.user.id,
     },
   });
