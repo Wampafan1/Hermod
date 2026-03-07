@@ -41,7 +41,7 @@ export const POST = withAuth(async (req, session) => {
   const destProvider = getProvider(entry.route.dest.type);
   const destConnLike = toConnectionLike(entry.route.dest);
   const destConn = await destProvider.connect(destConnLike);
-  const rows = decompressPayload(entry.payload);
+  const rows = await decompressPayload(entry.payload);
   const destConfig = entry.route.destConfig as unknown as DestConfig;
 
   try {

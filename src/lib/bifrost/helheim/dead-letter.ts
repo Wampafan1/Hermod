@@ -5,7 +5,11 @@
  * Exponential backoff retry: 5min → 30min → 2hr, max 3 retries.
  */
 
-import { gzipSync, gunzipSync } from "zlib";
+import { gzip, gunzip } from "zlib";
+import { promisify } from "util";
+
+const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
 import { prisma } from "@/lib/db";
 import type { HelheimErrorType } from "../types";
 import { DEFAULT_MAX_RETRIES, RETRY_DELAYS_SEC } from "../types";
@@ -39,19 +43,19 @@ function getNextRetryAt(currentCount: number): Date {
 
 // ─── Payload Compression ─────────────────────────────
 
-export function compressPayload(rows: Record<string, unknown>[]): string {
+export async function compressPayload(rows: Record<string, unknown>[]): Promise<string> {
   const ndjson = rows.map((r) => JSON.stringify(r)).join("\n");
-  const compressed = gzipSync(Buffer.from(ndjson, "utf8"));
+  const compressed = await gzipAsync(Buffer.from(ndjson, "utf8"));
   return compressed.toString("base64");
 }
 
-export function decompressPayload(payload: string): Record<string, unknown>[] {
-  const buffer = gunzipSync(Buffer.from(payload, "base64"));
+export async function decompressPayload(payload: string): Promise<Record<string, unknown>[]> {
+  const buffer = await gunzipAsync(Buffer.from(payload, "base64"));
   return buffer
     .toString("utf8")
     .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line));
+    .filter((line: string) => line.length > 0)
+    .map((line: string) => JSON.parse(line));
 }
 
 // ─── Enqueue ─────────────────────────────────────────
@@ -74,7 +78,7 @@ export async function enqueueDeadLetter(
       errorType: classifyError(error),
       errorMessage: errorObj.message,
       errorDetails: extractErrorDetails(error) as any,
-      payload: compressPayload(rows),
+      payload: await compressPayload(rows),
       retryCount: 0,
       maxRetries: DEFAULT_MAX_RETRIES,
       nextRetryAt: getNextRetryAt(0),

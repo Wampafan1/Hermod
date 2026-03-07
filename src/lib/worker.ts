@@ -223,7 +223,7 @@ async function main() {
             console.log(`[Worker] Retrying Helheim entry ${entry.id}`);
             await markRetrying(entry.id);
 
-            const rows = decompressPayload(entry.payload);
+            const rows = await decompressPayload(entry.payload);
             await destProvider.load!(conn, rows, destConfig);
             await markRecovered(entry.id);
             console.log(`[Worker] Helheim entry ${entry.id} recovered`);
