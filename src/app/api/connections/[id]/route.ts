@@ -143,6 +143,19 @@ export const DELETE = withAuth(async (req, session) => {
     );
   }
 
+  // Check if any Bifrost routes use this connection (as source or destination)
+  const routeCount = await prisma.bifrostRoute.count({
+    where: {
+      OR: [{ sourceId: id }, { destId: id }],
+    },
+  });
+  if (routeCount > 0) {
+    return NextResponse.json(
+      { error: `Cannot delete: ${routeCount} Bifrost route(s) use this connection` },
+      { status: 409 }
+    );
+  }
+
   await prisma.connection.delete({ where: { id } });
   return NextResponse.json({ success: true });
 });

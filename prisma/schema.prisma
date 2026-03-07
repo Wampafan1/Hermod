@@ -145,7 +145,7 @@ model Report {
   formatting   Json?      // SheetTemplate: Univer cosmetics (styles, merges, freeze)
   columnConfig Json?      // ColumnConfig[]: column mapping, order, display names, formulas
   connectionId String
-  connection   Connection @relation(fields: [connectionId], references: [id])
+  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
   blueprintId  String?
   blueprint    Blueprint? @relation(fields: [blueprintId], references: [id], onDelete: SetNull)
   userId       String
@@ -290,12 +290,12 @@ model BifrostRoute {
 
   // Source
   sourceId         String
-  source           Connection     @relation("routeSource", fields: [sourceId], references: [id])
+  source           Connection     @relation("routeSource", fields: [sourceId], references: [id], onDelete: Restrict)
   sourceConfig     Json           // { query, dataset, incrementalKey, chunkSize? }
 
   // Destination
   destId           String
-  dest             Connection     @relation("routeDest", fields: [destId], references: [id])
+  dest             Connection     @relation("routeDest", fields: [destId], references: [id], onDelete: Restrict)
   destConfig       Json           // { dataset, table, writeDisposition, autoCreateTable, schema? }
 
   // Optional forge transform
