@@ -9,6 +9,8 @@ import { prisma } from "@/lib/db";
 import { getProvider, toConnectionLike } from "@/lib/providers";
 import type { ConnectionProvider } from "@/lib/providers";
 import type { ProviderConnection } from "@/lib/providers/types";
+import type { BigQueryProvider } from "@/lib/providers/bigquery.provider";
+import { clearSchemaCache } from "@/lib/providers/bigquery.provider";
 import { enqueueDeadLetter } from "./helheim/dead-letter";
 import { validateBlueprintForStreaming } from "./forge/forge-validator";
 import { executeBlueprint } from "@/lib/mjolnir/engine/blueprint-executor";
@@ -19,6 +21,8 @@ import type {
   SourceConfig,
 } from "./types";
 import { DEFAULT_CHUNK_SIZE } from "./types";
+import type { CursorConfig } from "@/lib/sync/types";
+import { getWatermark, setWatermark, buildIncrementalClause, extractNewWatermark } from "@/lib/sync/watermark";
 
 // ─── Route Loading ───────────────────────────────────
 
@@ -35,6 +39,7 @@ export interface LoadedRoute {
   transformEnabled: boolean;
   blueprintId: string | null;
   lastCheckpoint: Date | null;
+  cursorConfig: CursorConfig | null;
   frequency: string | null;
   daysOfWeek: number[];
   dayOfMonth: number | null;
@@ -56,6 +61,7 @@ export async function loadRouteWithRelations(routeId: string): Promise<LoadedRou
     ...route,
     sourceConfig: route.sourceConfig as unknown as SourceConfig,
     destConfig: route.destConfig as unknown as DestConfig,
+    cursorConfig: route.cursorConfig as CursorConfig | null,
   };
 }
 
@@ -78,6 +84,22 @@ export class BifrostEngine {
     const sourceConn = await sourceProvider.connect(sourceConnLike);
     const destConn = await destProvider.connect(destConnLike);
 
+    let routeLog: { id: string } | null = null;
+
+    // 0. Clean up any stale "running" logs from previous crashed runs
+    await prisma.routeLog.updateMany({
+      where: {
+        routeId: route.id,
+        status: "running",
+        startedAt: { lt: new Date(Date.now() - 15 * 60_000) }, // >15 min old
+      },
+      data: {
+        status: "failed",
+        error: "Timed out — process crashed or hung before completion",
+        completedAt: new Date(),
+      },
+    });
+
     try {
       // 1. Schema validation
       await this.validateOrCreateDestTable(
@@ -88,11 +110,21 @@ export class BifrostEngine {
         destProvider
       );
 
-      // 2. Build query params
-      const params = this.buildQueryParams(route);
+      // 2. Read watermark for incremental sync
+      const cursorConfig = route.cursorConfig;
+      const tableName = route.destConfig.table;
+      let priorWatermark: string | null = null;
+
+      if (cursorConfig && cursorConfig.strategy !== "full_refresh" && cursorConfig.cursorColumn) {
+        priorWatermark = await getWatermark(route.id, tableName);
+      }
+
+      const incrementalClause = cursorConfig?.cursorColumn
+        ? buildIncrementalClause(cursorConfig.cursorColumn, cursorConfig.strategy, priorWatermark)
+        : null;
 
       // 3. Create route log
-      const routeLog = await prisma.routeLog.create({
+      routeLog = await prisma.routeLog.create({
         data: {
           routeId: route.id,
           status: "running",
@@ -127,22 +159,76 @@ export class BifrostEngine {
       let totalExtracted = 0;
       let totalLoaded = 0;
       let errorCount = 0;
-      let chunkIndex = 0;
+      let loadBatchIndex = 0;
+
+      // Batch buffer — accumulate small source chunks before flushing to
+      // the destination. Reduces BigQuery load jobs from N to N/batchSize,
+      // avoiding rate-limit errors (BigQuery allows ~10 table mods / 10s).
+      const LOAD_BATCH_SIZE = route.destConfig.chunkSize ?? DEFAULT_CHUNK_SIZE;
+      let batchBuffer: Record<string, unknown>[] = [];
 
       // Build effective source config with incremental params
       const effectiveSourceConfig: SourceConfig = {
         ...route.sourceConfig,
       };
-      if (params.last_run) {
-        // Inject last_run into the query for incremental extraction
-        const lastRunStr = params.last_run instanceof Date
-          ? params.last_run.toISOString()
-          : String(params.last_run);
-        effectiveSourceConfig.query = effectiveSourceConfig.query.replace(
-          /@last_run/g,
-          `'${lastRunStr}'`
-        );
+
+      // New path: cursorConfig + watermark — append WHERE clause to query
+      if (incrementalClause && effectiveSourceConfig.query) {
+        const q = effectiveSourceConfig.query.trimEnd().replace(/;$/, "");
+        const hasWhere = /\bWHERE\b/i.test(q);
+        effectiveSourceConfig.query = hasWhere
+          ? `${q} AND ${incrementalClause}`
+          : `${q} WHERE ${incrementalClause}`;
       }
+      // Legacy path: incrementalKey + lastCheckpoint (backward compat)
+      else if (route.sourceConfig.incrementalKey) {
+        const params = this.buildQueryParams(route);
+        if (params.last_run) {
+          const lastRunValue = params.last_run instanceof Date
+            ? params.last_run.toISOString()
+            : String(params.last_run);
+          effectiveSourceConfig.params = {
+            ...effectiveSourceConfig.params,
+            last_run: lastRunValue,
+          };
+        }
+      }
+
+      /** Flush the batch buffer to the destination. */
+      const flushBatch = async () => {
+        if (batchBuffer.length === 0) return;
+
+        const rows = batchBuffer;
+        batchBuffer = [];
+
+        try {
+          const effectiveDestConfig = loadBatchIndex === 0
+            ? route.destConfig
+            : route.destConfig.writeDisposition === "WRITE_TRUNCATE"
+              ? { ...route.destConfig, writeDisposition: "WRITE_APPEND" as const }
+              : route.destConfig;
+          const result = await this.loadWithRetry(destProvider, destConn, rows, effectiveDestConfig);
+          totalLoaded += result.rowsLoaded;
+        } catch (err) {
+          // Fail-fast on fatal errors (missing dataset/table, auth)
+          if (isFatalLoadError(err)) {
+            clearSchemaCache();
+            await enqueueDeadLetter(route.id, routeLog.id, loadBatchIndex, rows, err);
+            errorCount += rows.length;
+            throw err;
+          }
+          await enqueueDeadLetter(route.id, routeLog.id, loadBatchIndex, rows, err);
+          errorCount += rows.length;
+        }
+
+        loadBatchIndex++;
+        console.log(
+          `[Bifrost] ${route.name}: Transferred ${totalLoaded} / ${totalExtracted} rows...`
+        );
+      };
+
+      // Track cursor column values for watermark extraction
+      const cursorValues: Record<string, unknown>[] = [];
 
       for await (const chunk of sourceProvider.extract(
         sourceConn,
@@ -160,34 +246,60 @@ export class BifrostEngine {
             const result = executeBlueprint(blueprintSteps as any, { columns, rows: chunk });
             transformed = result.rows;
           } catch (err) {
-            await enqueueDeadLetter(route.id, routeLog.id, chunkIndex, chunk, err);
+            await enqueueDeadLetter(route.id, routeLog.id, loadBatchIndex, chunk, err);
             errorCount += chunk.length;
-            chunkIndex++;
             continue;
           }
         }
 
-        // Load to destination
-        try {
-          const result = await destProvider.load!(destConn, transformed, route.destConfig);
-          totalLoaded += result.rowsLoaded;
-        } catch (err) {
-          await enqueueDeadLetter(route.id, routeLog.id, chunkIndex, chunk, err);
-          errorCount += chunk.length;
+        batchBuffer.push(...transformed);
+
+        // Track cursor column values for watermark (memory-efficient: only store cursor col)
+        if (cursorConfig?.cursorColumn) {
+          for (const row of transformed) {
+            const val = row[cursorConfig.cursorColumn];
+            if (val != null) {
+              cursorValues.push({ [cursorConfig.cursorColumn]: val });
+            }
+          }
         }
 
-        chunkIndex++;
-        console.log(
-          `[Bifrost] ${route.name}: Transferred ${totalLoaded} / ${totalExtracted} rows...`
-        );
+        // Flush when buffer reaches threshold
+        if (batchBuffer.length >= LOAD_BATCH_SIZE) {
+          await flushBatch();
+        }
       }
 
-      // 6. Update checkpoint for incremental runs
-      if (totalLoaded > 0 && route.sourceConfig.incrementalKey) {
-        await prisma.bifrostRoute.update({
-          where: { id: route.id },
-          data: { lastCheckpoint: new Date() },
-        });
+      // Flush remaining rows
+      await flushBatch();
+
+      // 6. Update watermark + legacy checkpoint
+      if (totalLoaded > 0) {
+        // New watermark path
+        if (cursorConfig?.cursorColumn && cursorConfig.strategy !== "full_refresh") {
+          const newWatermark = extractNewWatermark(
+            cursorValues,
+            cursorConfig.cursorColumn,
+            cursorConfig.strategy
+          );
+          if (newWatermark) {
+            await setWatermark({
+              routeId: route.id,
+              tableName,
+              watermark: newWatermark,
+              watermarkType: cursorConfig.strategy,
+              rowsSynced: totalLoaded,
+            });
+          }
+        }
+
+        // Legacy checkpoint (always update for backward compat)
+        if (route.sourceConfig.incrementalKey || cursorConfig) {
+          await prisma.bifrostRoute.update({
+            where: { id: route.id },
+            data: { lastCheckpoint: new Date() },
+          });
+        }
       }
 
       // 7. Finalize
@@ -221,17 +333,30 @@ export class BifrostEngine {
       const duration = Date.now() - startTime;
       const errorMsg = err instanceof Error ? err.message : String(err);
 
-      // Create or update log
-      const routeLog = await prisma.routeLog.create({
-        data: {
-          routeId: route.id,
-          status: "failed",
-          error: errorMsg,
-          triggeredBy,
-          duration,
-          completedAt: new Date(),
-        },
-      });
+      if (routeLog) {
+        // Update the existing "running" log instead of creating an orphan
+        await prisma.routeLog.update({
+          where: { id: routeLog.id },
+          data: {
+            status: "failed",
+            error: errorMsg,
+            duration,
+            completedAt: new Date(),
+          },
+        });
+      } else {
+        // Error occurred before routeLog was created (e.g., schema validation)
+        routeLog = await prisma.routeLog.create({
+          data: {
+            routeId: route.id,
+            status: "failed",
+            error: errorMsg,
+            triggeredBy,
+            duration,
+            completedAt: new Date(),
+          },
+        });
+      }
 
       console.error(`[Bifrost] ${route.name}: FAILED — ${errorMsg}`);
 
@@ -249,6 +374,41 @@ export class BifrostEngine {
     }
   }
 
+  // ─── Load with Rate-Limit Retry ─────────────────────
+
+  /**
+   * Attempt a load, retrying with exponential backoff on rate-limit errors.
+   * BigQuery allows ~10 table modifications per 10 seconds; firing 90+ load
+   * jobs back-to-back will hit this wall. Retrying with backoff lets the
+   * quota recover.
+   */
+  private async loadWithRetry(
+    provider: ConnectionProvider,
+    conn: ProviderConnection,
+    rows: Record<string, unknown>[],
+    destConfig: DestConfig,
+    maxRetries = 3
+  ): Promise<import("./types").LoadResult> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await provider.load!(conn, rows, destConfig);
+      } catch (err) {
+        lastErr = err;
+        if (!isRateLimitError(err) || attempt === maxRetries) {
+          throw err;
+        }
+        // Exponential backoff: 2s, 4s, 8s
+        const delayMs = 2000 * Math.pow(2, attempt);
+        console.log(
+          `[Bifrost] Rate limited — waiting ${delayMs / 1000}s before retry ${attempt + 1}/${maxRetries}`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    throw lastErr;
+  }
+
   // ─── Schema Validation ─────────────────────────────
 
   private async validateOrCreateDestTable(
@@ -260,19 +420,39 @@ export class BifrostEngine {
   ): Promise<void> {
     const { destConfig } = route;
     if (!destProvider.getSchema) {
-      // Provider doesn't support schema inspection — skip validation
+      console.log(`[Bifrost] Dest provider "${route.dest.type}" has no getSchema — skipping validation`);
       return;
     }
+
+    console.log(
+      `[Bifrost] Checking dest schema: ${destConfig.dataset}.${destConfig.table} ` +
+      `(autoCreateTable=${destConfig.autoCreateTable})`
+    );
+
     const destSchema = await destProvider.getSchema(
       destConn,
       destConfig.dataset,
       destConfig.table
     );
 
+    console.log(
+      `[Bifrost] getSchema result: ${destSchema ? `found (${destSchema.fields.length} fields)` : "null (table/dataset missing)"}`
+    );
+
     if (!destSchema) {
       if (destConfig.autoCreateTable) {
-        // BigQuery autodetect will infer schema from the first load job.
-        // No pre-creation needed — the load call handles it.
+        // BigQuery autodetect will create the table on the first load job,
+        // but the DATASET must already exist. Ensure it does.
+        if ("ensureDataset" in destProvider) {
+          console.log(`[Bifrost] Calling ensureDataset("${destConfig.dataset}")...`);
+          await (destProvider as BigQueryProvider).ensureDataset(
+            destConn,
+            destConfig.dataset
+          );
+          console.log(`[Bifrost] ensureDataset completed`);
+        } else {
+          console.log(`[Bifrost] WARNING: dest provider has no ensureDataset method`);
+        }
         console.log(
           `[Bifrost] Table ${destConfig.dataset}.${destConfig.table} will be auto-created via load job`
         );
@@ -300,6 +480,30 @@ export class BifrostEngine {
     return params;
   }
 
+}
+
+// ─── Error Classification ────────────────────────────
+
+/** Rate-limit errors from BigQuery that are safe to retry with backoff. */
+function isRateLimitError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return msg.includes("exceeded rate limits") || msg.includes("rateLimitExceeded".toLowerCase());
+}
+
+/** Fatal errors where retrying the same operation will never succeed. */
+function isFatalLoadError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message;
+  return (
+    msg.includes("Not found: Dataset") ||
+    msg.includes("Not found: Table") ||
+    msg.includes("Access Denied") ||
+    msg.includes("Permission denied") ||
+    msg.includes("PERMISSION_DENIED") ||
+    msg.includes("Invalid project") ||
+    msg.includes("notFound")
+  );
 }
 
 // ─── Route Schedule Advancement ──────────────────────
