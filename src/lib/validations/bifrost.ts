@@ -21,27 +21,52 @@ const destConfigSchema = z.object({
   writeDisposition: z.enum(["WRITE_APPEND", "WRITE_TRUNCATE", "WRITE_EMPTY"]),
   autoCreateTable: z.boolean().default(false),
   schema: z.record(z.unknown()).nullable().optional(),
+  fieldMapping: z.record(z.string()).nullable().optional(),
+  chunkSize: z.number().int().min(100).max(100_000).optional(),
 });
 
 // ─── Cursor Config (Incremental Sync) ───────────────
 
+export const cursorStrategySchema = z.enum([
+  "timestamp_cursor", "integer_id_cursor", "rowversion_cursor", "full_refresh",
+]);
+
+export const cursorConfidenceSchema = z.enum(["high", "medium", "low"]);
+
 const cursorCandidateSchema = z.object({
   column: z.string(),
-  strategy: z.enum(["timestamp_cursor", "integer_id_cursor", "rowversion_cursor", "full_refresh"]),
+  strategy: cursorStrategySchema,
   score: z.number(),
   reason: z.string(),
 });
 
 const cursorConfigSchema = z.object({
-  strategy: z.enum(["timestamp_cursor", "integer_id_cursor", "rowversion_cursor", "full_refresh"]),
+  strategy: cursorStrategySchema,
   cursorColumn: z.string().nullable(),
   cursorColumnType: z.string().nullable(),
   primaryKey: z.string().nullable(),
-  confidence: z.enum(["high", "medium", "low"]),
+  confidence: cursorConfidenceSchema,
   reasoning: z.string(),
   warnings: z.array(z.string()),
   candidates: z.array(cursorCandidateSchema),
 }).nullable().optional();
+
+// ─── Detect Cursor ──────────────────────────────────
+
+const columnSchemaItem = z.object({
+  name: z.string().min(1),
+  type: z.string().min(1),
+  nullable: z.boolean(),
+  isPrimaryKey: z.boolean().optional(),
+  isIndexed: z.boolean().optional(),
+});
+
+export const detectCursorSchema = z.object({
+  tableName: z.string().min(1, "tableName is required"),
+  sourceSystem: z.string().default("Unknown"),
+  realm: z.string().default("alfheim"),
+  columns: z.array(columnSchemaItem).min(1, "At least one column is required"),
+});
 
 // ─── Create Route ────────────────────────────────────
 
