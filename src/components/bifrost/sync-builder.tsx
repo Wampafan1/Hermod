@@ -12,6 +12,8 @@ import {
 import { buildSuiteQL } from "@/lib/providers/netsuite.provider";
 import { canBeSource, canBeDestination } from "@/lib/providers/capabilities";
 import type { ConnectionType } from "@/lib/providers/types";
+import { CursorConfigPanel } from "./cursor-config-panel";
+import type { CursorConfig, ColumnSchema } from "@/lib/sync/types";
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -29,7 +31,8 @@ interface BlueprintOption {
 
 interface NetSuiteRecordType {
   name: string;
-  href: string;
+  label: string;
+  category: string;
 }
 
 interface NetSuiteField {
@@ -107,6 +110,9 @@ export function SyncBuilder() {
   const [timeMinute, setTimeMinute] = useState(0);
   const [timezone, setTimezone] = useState("America/Chicago");
 
+  // ── Cursor detection state ──
+  const [cursorConfig, setCursorConfig] = useState<CursorConfig | null>(null);
+
   // ── Reference data ──
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
   const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
@@ -131,7 +137,9 @@ export function SyncBuilder() {
   const filteredRecordTypes = useMemo(() => {
     if (!nsRecordSearch) return nsRecordTypes;
     const needle = nsRecordSearch.toLowerCase();
-    return nsRecordTypes.filter((rt) => rt.name.toLowerCase().includes(needle));
+    return nsRecordTypes.filter(
+      (rt) => rt.name.toLowerCase().includes(needle) || rt.label.toLowerCase().includes(needle)
+    );
   }, [nsRecordTypes, nsRecordSearch]);
 
   // O(1) lookup for selected NS fields (used in field picker checkboxes)
@@ -172,6 +180,25 @@ export function SyncBuilder() {
       destColumn: nsDestOverrides[m.sourceField] ?? m.destColumn,
     }));
   }, [nsFields, nsFieldMap, isNetSuiteSource, nsDestOverrides]);
+
+  // ── Derive column schemas for cursor detection ──
+  const detectionColumns: ColumnSchema[] = useMemo(() => {
+    if (!isNetSuiteSource || nsFields.length === 0) return [];
+    return nsFields.map((name) => {
+      const meta = nsFieldMap.get(name);
+      return {
+        name,
+        type: meta?.type ?? "STRING",
+        nullable: !meta?.mandatory,
+        isPrimaryKey: name.toLowerCase() === "internalid",
+      };
+    });
+  }, [nsFields, nsFieldMap, isNetSuiteSource]);
+
+  const cursorCacheKey = useMemo(
+    () => `${sourceId}:${nsRecordType || "sql"}:${isNetSuiteSource ? nsFields.join(",") : query.slice(0, 100)}`,
+    [sourceId, nsRecordType, nsFields, query, isNetSuiteSource]
+  );
 
   // Merge: use derived for NS, manual state for user edits
   const activeFieldMappings = isNetSuiteSource ? derivedFieldMappings : fieldMappings;
@@ -226,10 +253,16 @@ export function SyncBuilder() {
       .then((data) => {
         if (Array.isArray(data)) {
           setNsFieldList(data);
+          const allNames = data.map((f: NetSuiteField) => f.name);
           const mandatory = data
             .filter((f: NetSuiteField) => f.mandatory)
             .map((f: NetSuiteField) => f.name);
-          setNsFields((prev) => [...new Set([...prev, ...mandatory])]);
+          // Auto-select all fields on first load; otherwise just ensure mandatory are included
+          setNsFields((prev) =>
+            prev.length === 0
+              ? allNames
+              : [...new Set([...prev, ...mandatory])]
+          );
         }
       })
       .catch(() => toast.error("Failed to load fields"))
@@ -273,6 +306,7 @@ export function SyncBuilder() {
         },
         transformEnabled,
         blueprintId: transformEnabled ? blueprintId : null,
+        cursorConfig,
         frequency: frequency || null,
         daysOfWeek,
         dayOfMonth,
@@ -325,6 +359,7 @@ export function SyncBuilder() {
     setNsDestOverrides({});
     setQuery("");
     setFieldMappings([]);
+    setCursorConfig(null);
   }
 
   // ─── Render ───────────────────────────────────────────
@@ -448,35 +483,73 @@ export function SyncBuilder() {
                     <LoadingText>Loading record types...</LoadingText>
                   ) : nsRecordTypes.length > 0 ? (
                     <>
-                      <input
-                        type="text"
-                        value={nsRecordSearch}
-                        onChange={(e) => setNsRecordSearch(e.target.value)}
-                        placeholder="Search..."
-                        className="input-norse mb-1"
-                      />
-                      <div className="border border-border max-h-40 overflow-y-auto bg-void/50">
+                      <div className="flex gap-1 mb-1">
+                        <input
+                          type="text"
+                          value={nsRecordSearch}
+                          onChange={(e) => setNsRecordSearch(e.target.value)}
+                          placeholder="Search or type table name..."
+                          className="input-norse flex-1"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && nsRecordSearch.trim()) {
+                              setNsRecordType(nsRecordSearch.trim());
+                              setNsFields([]);
+                              setNsRecordSearch("");
+                            }
+                          }}
+                        />
+                        {nsRecordSearch.trim() && !filteredRecordTypes.some(
+                          (rt) => rt.name.toLowerCase() === nsRecordSearch.trim().toLowerCase()
+                        ) && (
+                          <button
+                            onClick={() => {
+                              setNsRecordType(nsRecordSearch.trim());
+                              setNsFields([]);
+                              setNsRecordSearch("");
+                            }}
+                            className="btn-ghost text-[0.5625rem] px-2 whitespace-nowrap"
+                            title="Use this exact table name"
+                          >
+                            Use &quot;{nsRecordSearch.trim()}&quot;
+                          </button>
+                        )}
+                      </div>
+                      <div className="border border-border max-h-48 overflow-y-auto bg-void/50">
                         {filteredRecordTypes.length === 0 ? (
                           <EmptyText>No matching records</EmptyText>
                         ) : (
-                          filteredRecordTypes.map((rt) => (
-                            <button
-                              key={rt.name}
-                              onClick={() => {
-                                setNsRecordType(rt.name);
-                                setNsFields([]);
-                                setNsRecordSearch("");
-                              }}
-                              aria-pressed={nsRecordType === rt.name}
-                              className={`w-full text-left px-3 py-1.5 text-xs tracking-wider border-b border-border/20 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold ${
-                                nsRecordType === rt.name
-                                  ? "bg-[#ce93d8]/10 text-[#ce93d8]"
-                                  : "text-text hover:bg-gold/[0.04]"
-                              }`}
-                            >
-                              {rt.name}
-                            </button>
-                          ))
+                          (() => {
+                            let lastCategory = "";
+                            return filteredRecordTypes.map((rt) => {
+                              const showCategory = rt.category !== lastCategory;
+                              lastCategory = rt.category;
+                              return (
+                                <div key={rt.name}>
+                                  {showCategory && (
+                                    <div className="px-3 py-1 text-[0.5625rem] uppercase tracking-[0.35em] text-gold/40 bg-deep border-b border-border/20">
+                                      {rt.category}
+                                    </div>
+                                  )}
+                                  <button
+                                    onClick={() => {
+                                      setNsRecordType(rt.name);
+                                      setNsFields([]);
+                                      setNsRecordSearch("");
+                                    }}
+                                    aria-pressed={nsRecordType === rt.name}
+                                    className={`w-full text-left px-3 py-1.5 text-xs tracking-wider border-b border-border/20 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold ${
+                                      nsRecordType === rt.name
+                                        ? "bg-[#ce93d8]/10 text-[#ce93d8]"
+                                        : "text-text hover:bg-gold/[0.04]"
+                                    }`}
+                                  >
+                                    <span>{rt.label}</span>
+                                    <span className="ml-2 text-text-dim/60 text-[0.5625rem]">{rt.name}</span>
+                                  </button>
+                                </div>
+                              );
+                            });
+                          })()
                         )}
                       </div>
                     </>
@@ -598,6 +671,25 @@ export function SyncBuilder() {
                       onChange={(e) => setIncrementalKey(e.target.value)}
                       placeholder="lastmodifieddate"
                       className="input-norse"
+                    />
+                  </div>
+                )}
+
+                {/* Cursor Detection */}
+                {nsRecordType && nsFields.length > 0 && detectionColumns.length > 0 && (
+                  <div>
+                    <label className="label-norse">Sync Strategy</label>
+                    <CursorConfigPanel
+                      tableName={nsRecordType}
+                      sourceSystem="NetSuite"
+                      columns={detectionColumns}
+                      cacheKey={cursorCacheKey}
+                      onConfirm={(config) => {
+                        setCursorConfig(config);
+                        if (config.cursorColumn) {
+                          setIncrementalKey(config.cursorColumn);
+                        }
+                      }}
                     />
                   </div>
                 )}
