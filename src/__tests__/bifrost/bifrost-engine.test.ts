@@ -65,9 +65,7 @@ vi.mock("@/lib/bifrost/helheim/dead-letter", () => ({
   enqueueDeadLetter: vi.fn().mockResolvedValue("hlh_123"),
 }));
 
-vi.mock("@/lib/providers/bigquery.provider", () => ({
-  clearSchemaCache: vi.fn(),
-}));
+vi.mock("@/lib/providers/bigquery.provider", () => ({}));
 
 vi.mock("@/lib/bifrost/forge/forge-validator", () => ({
   validateBlueprintForStreaming: vi.fn().mockReturnValue({ valid: true, statefulSteps: [], suggestion: null }),
@@ -90,7 +88,6 @@ vi.mock("@/lib/schedule-utils", () => ({
 import { BifrostEngine } from "@/lib/bifrost/engine";
 import type { LoadedRoute } from "@/lib/bifrost/engine";
 import { enqueueDeadLetter } from "@/lib/bifrost/helheim/dead-letter";
-import { clearSchemaCache } from "@/lib/providers/bigquery.provider";
 
 // ─── Test Route ──────────────────────────────────────
 
@@ -363,14 +360,14 @@ describe("BifrostEngine", () => {
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it("clears schema cache on fatal 'Not found' load error", async () => {
+  it("enqueues dead letter on fatal 'Not found' load error", async () => {
     const chunks = makeChunks(100);
     mockExtractGen.mockImplementation(() => asyncGenFromChunks(chunks));
     mockLoad.mockRejectedValue(new Error("Not found: Dataset my_project:my_dataset"));
 
     await engine.execute(makeRoute(), "manual");
 
-    expect(clearSchemaCache).toHaveBeenCalled();
+    expect(enqueueDeadLetter).toHaveBeenCalled();
   });
 
   it("batches small source chunks into fewer load calls", async () => {

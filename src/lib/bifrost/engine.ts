@@ -10,7 +10,6 @@ import { getProvider, toConnectionLike } from "@/lib/providers";
 import type { ConnectionProvider } from "@/lib/providers";
 import type { ProviderConnection } from "@/lib/providers/types";
 import type { BigQueryProvider } from "@/lib/providers/bigquery.provider";
-import { clearSchemaCache } from "@/lib/providers/bigquery.provider";
 import { enqueueDeadLetter } from "./helheim/dead-letter";
 import { validateBlueprintForStreaming } from "./forge/forge-validator";
 import { executeBlueprint } from "@/lib/mjolnir/engine/blueprint-executor";
@@ -225,7 +224,11 @@ export class BifrostEngine {
         } catch (err) {
           // Fail-fast on fatal errors (missing dataset/table, auth)
           if (isFatalLoadError(err)) {
-            clearSchemaCache();
+            // Invalidate only this table's cached schema, not all schemas
+            if ("invalidateSchema" in destProvider) {
+              const projectId = (route.dest.config as Record<string, unknown>).projectId as string;
+              (destProvider as any).invalidateSchema(projectId, route.destConfig.dataset, route.destConfig.table);
+            }
             await enqueueDeadLetter(route.id, routeLog!.id, loadBatchIndex, rows, err);
             errorCount += rows.length;
             throw err;
