@@ -45,6 +45,20 @@ export async function setWatermark(record: WatermarkRecord): Promise<void> {
 // ─── Query Helpers ───────────────────────────────────
 
 /**
+ * Rejects column names containing SQL injection vectors.
+ * Allows Unicode letters/digits (accented, CJK, etc.) but blocks
+ * quotes, semicolons, comments, and whitespace.
+ */
+const UNSAFE_IDENTIFIER_CHARS = /[;"'`\\\/\*\-\s\n\r]/;
+
+function quoteIdentifier(column: string): string {
+  if (!column || UNSAFE_IDENTIFIER_CHARS.test(column)) {
+    throw new Error(`Invalid cursor column name: "${column}"`);
+  }
+  return `"${column}"`;
+}
+
+/**
  * Build the WHERE clause fragment for incremental extraction.
  * Returns null for full_refresh or first run (no watermark).
  */
@@ -55,16 +69,38 @@ export function buildIncrementalClause(
 ): string | null {
   if (strategy === "full_refresh" || !watermark) return null;
 
+  const col = quoteIdentifier(cursorColumn);
+
   if (strategy === "timestamp_cursor") {
-    return `${cursorColumn} > '${watermark}'`;
+    // Strict ISO-8601 validation — rejects lax Date.parse formats like "Tue Jan 01 2024"
+    if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/.test(watermark)) {
+      throw new Error(`Invalid timestamp watermark: "${watermark}"`);
+    }
+    return `${col} > '${watermark}'`;
   }
   if (strategy === "integer_id_cursor") {
-    return `${cursorColumn} > ${watermark}`;
+    // Validate watermark is a valid integer
+    if (!/^\d+$/.test(watermark)) {
+      throw new Error(`Invalid integer watermark: "${watermark}"`);
+    }
+    return `${col} > ${watermark}`;
   }
   if (strategy === "rowversion_cursor") {
-    return `${cursorColumn} > 0x${watermark}`;
+    // Validate watermark is a valid hex string
+    if (!/^[0-9a-fA-F]+$/.test(watermark)) {
+      throw new Error(`Invalid rowversion watermark: "${watermark}"`);
+    }
+    return `${col} > 0x${watermark}`;
   }
   return null;
+}
+
+/** Convert a rowversion value (Buffer or string) to a hex string. */
+function toHexString(val: unknown): string {
+  if (Buffer.isBuffer(val)) {
+    return val.toString("hex");
+  }
+  return String(val);
 }
 
 /**
@@ -85,18 +121,24 @@ export function extractNewWatermark(
     const max = values.reduce((a, b) =>
       new Date(a as string) > new Date(b as string) ? a : b
     );
-    return new Date(max as string).toISOString();
+    const parsed = new Date(max as string);
+    if (isNaN(parsed.getTime())) return null;
+    return parsed.toISOString();
   }
 
   if (strategy === "integer_id_cursor") {
-    return String(Math.max(...values.map(Number)));
+    const nums = values.map(Number).filter((n) => !isNaN(n));
+    if (!nums.length) return null;
+    return String(Math.max(...nums));
   }
 
   if (strategy === "rowversion_cursor") {
-    const max = values.reduce((a, b) =>
+    const hexValues = values.map(toHexString).filter((h) => /^[0-9a-fA-F]+$/.test(h));
+    if (!hexValues.length) return null;
+    const max = hexValues.reduce((a, b) =>
       BigInt(`0x${a}`) > BigInt(`0x${b}`) ? a : b
     );
-    return String(max);
+    return max;
   }
 
   return null;
