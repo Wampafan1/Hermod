@@ -22,11 +22,46 @@ import type { SourceConfig } from "@/lib/bifrost/types";
 // ─── Constants ─────────────────────────────────────────
 
 const SUITEQL_PATH = "/services/rest/query/v1/suiteql";
-const METADATA_CATALOG_PATH = "/services/rest/record/v1/metadata-catalog/";
 const DEFAULT_PAGE_LIMIT = 1000;
 const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes
 const MAX_RETRIES = 3;
 const RETRY_BACKOFF_MS = [1000, 3000, 10000];
+
+/**
+ * Known SuiteQL table names. The REST metadata catalog returns record IDs
+ * (e.g., "assemblybuild") that don't work in SuiteQL — SuiteQL uses broader
+ * tables (e.g., "transaction" with a `type` filter). This curated list covers
+ * the most common SuiteQL-queryable tables.
+ */
+const SUITEQL_TABLES: { name: string; label: string; category: string }[] = [
+  // Transactions
+  { name: "transaction", label: "Transactions (all types)", category: "Transactions" },
+  { name: "transactionline", label: "Transaction Lines", category: "Transactions" },
+  { name: "transactionaccountingline", label: "GL Posting Lines", category: "Transactions" },
+  // Entities
+  { name: "customer", label: "Customers", category: "Entities" },
+  { name: "vendor", label: "Vendors", category: "Entities" },
+  { name: "employee", label: "Employees", category: "Entities" },
+  { name: "contact", label: "Contacts", category: "Entities" },
+  // Items
+  { name: "item", label: "Items (all types)", category: "Items" },
+  // Accounting
+  { name: "account", label: "GL Accounts", category: "Accounting" },
+  { name: "accountingperiod", label: "Accounting Periods", category: "Accounting" },
+  { name: "currency", label: "Currencies", category: "Accounting" },
+  { name: "exchangerate", label: "Exchange Rates", category: "Accounting" },
+  // Organization
+  { name: "subsidiary", label: "Subsidiaries", category: "Organization" },
+  { name: "department", label: "Departments", category: "Organization" },
+  { name: "location", label: "Locations", category: "Organization" },
+  { name: "classification", label: "Classes", category: "Organization" },
+  // Inventory
+  { name: "inventoryassignment", label: "Lot/Serial/Bin Assignments", category: "Inventory" },
+  // System
+  { name: "systemnote", label: "Audit Trail / Field Changes", category: "System" },
+  { name: "role", label: "Roles", category: "System" },
+  { name: "rolepermissions", label: "Role Permissions", category: "System" },
+];
 
 // ─── TBA Credentials ──────────────────────────────────
 
@@ -49,7 +84,8 @@ interface NetSuiteProviderConnection extends ProviderConnection {
 
 export interface NetSuiteRecordType {
   name: string;
-  href: string;
+  label: string;
+  category: string;
 }
 
 export interface NetSuiteField {
@@ -79,11 +115,12 @@ export class NetSuiteProvider implements ConnectionProvider {
       tokenSecret?: string;
     };
 
-    const accountId = cfg?.accountId as string | undefined;
-    const consumerKey = creds?.consumerKey as string | undefined;
-    const consumerSecret = creds?.consumerSecret as string | undefined;
-    const tokenId = creds?.tokenId as string | undefined;
-    const tokenSecret = creds?.tokenSecret as string | undefined;
+    // Trim all credentials — copy-paste from NetSuite UI often includes trailing whitespace
+    const accountId = (cfg?.accountId as string | undefined)?.trim();
+    const consumerKey = (creds?.consumerKey as string | undefined)?.trim();
+    const consumerSecret = (creds?.consumerSecret as string | undefined)?.trim();
+    const tokenId = (creds?.tokenId as string | undefined)?.trim();
+    const tokenSecret = (creds?.tokenSecret as string | undefined)?.trim();
 
     if (!accountId || !consumerKey || !consumerSecret || !tokenId || !tokenSecret) {
       throw new Error("NetSuite TBA credentials incomplete");
@@ -112,7 +149,7 @@ export class NetSuiteProvider implements ConnectionProvider {
       const conn = await this.connect(connection);
       const result = await this.executeSuiteQL(
         conn,
-        "SELECT companyname FROM company WHERE id = 1",
+        "SELECT CURRENT_TIMESTAMP AS ts",
         1,
         0
       );
@@ -133,22 +170,14 @@ export class NetSuiteProvider implements ConnectionProvider {
       const conn = await this.connect(connection);
       const result = await this.executeSuiteQL(
         conn,
-        "SELECT companyname FROM company WHERE id = 1",
+        "SELECT CURRENT_TIMESTAMP AS ts",
         1,
         0
       );
 
-      const accountName =
-        result.items.length > 0
-          ? String(result.items[0].companyname ?? "")
-          : undefined;
-
       return {
         success: true,
-        message: accountName
-          ? `Connected to ${accountName}`
-          : "Connection successful",
-        accountName,
+        message: `Connected to NetSuite (account ${connection.config?.accountId ?? "unknown"})`,
       };
     } catch (err) {
       const message =
@@ -178,12 +207,26 @@ export class NetSuiteProvider implements ConnectionProvider {
     const nsConn = conn as NetSuiteProviderConnection;
     const chunkSize = config.chunkSize ?? DEFAULT_PAGE_LIMIT;
 
-    let resolvedQuery = config.query;
+    // Sanitize stored queries: strip REST metadata fields and ORDER BY id
+    // (not all SuiteQL tables have an 'id' column).
+    let resolvedQuery = config.query
+      .replace(
+        /SELECT\s+(.*?)\s+FROM/i,
+        (_match, fieldList: string) => {
+          const cleaned = fieldList
+            .split(",")
+            .map((f) => f.trim())
+            .filter((f) => f.toLowerCase() !== "links")
+            .join(", ");
+          return `SELECT ${cleaned || "*"} FROM`;
+        }
+      )
+      .replace(/\s+ORDER\s+BY\s+id\s+ASC\s*$/i, "");
 
     // Substitute @last_run params if incremental
     if (config.incrementalKey) {
       // The caller may pass last_run via SourceConfig extension — handle both Date and string
-      const lastRun = (config as Record<string, unknown>).last_run;
+      const lastRun = (config as unknown as Record<string, unknown>).last_run;
       if (lastRun) {
         const lastRunStr =
           lastRun instanceof Date ? lastRun.toISOString() : String(lastRun);
@@ -217,44 +260,70 @@ export class NetSuiteProvider implements ConnectionProvider {
   // ─── Metadata Browsing (UI only, not on ConnectionProvider interface) ───
 
   /** List available record types from the metadata catalog. */
+  /**
+   * List SuiteQL-compatible record types.
+   * Returns a curated list of known tables plus any custom records
+   * discovered via SuiteQL (customrecord_* tables).
+   */
   async listRecordTypes(
     connection: NetSuiteProviderConnection
   ): Promise<NetSuiteRecordType[]> {
-    const url = `${connection.baseUrl}${METADATA_CATALOG_PATH}`;
-    const response = await this.signedRequest(connection, "GET", url);
+    const results: NetSuiteRecordType[] = [...SUITEQL_TABLES];
 
-    const data = (await response.json()) as {
-      items?: Array<{ name: string; href: string }>;
-    };
+    // Discover custom records dynamically
+    try {
+      const customRecords = await this.executeSuiteQL(
+        connection,
+        "SELECT scriptid, name FROM customrecordtype ORDER BY name",
+        1000,
+        0
+      );
+      for (const row of customRecords.items) {
+        const scriptId = String(row.scriptid ?? "").toLowerCase();
+        const name = String(row.name ?? scriptId);
+        if (scriptId) {
+          results.push({ name: scriptId, label: name, category: "Custom Records" });
+        }
+      }
+    } catch {
+      // Custom record discovery failed — return curated list only
+      console.warn("[NetSuite] Custom record discovery failed, using curated list only");
+    }
 
-    return (data.items ?? []).map((item) => ({
-      name: item.name,
-      href: item.href,
-    }));
+    return results;
   }
 
-  /** Get field metadata for a specific record type. */
+  /** Get field metadata for a specific record type via SuiteQL introspection. */
   async getRecordFields(
     connection: NetSuiteProviderConnection,
     recordType: string
   ): Promise<NetSuiteField[]> {
-    const url = `${connection.baseUrl}${METADATA_CATALOG_PATH}nsrecord/${encodeURIComponent(recordType)}`;
-    const response = await this.signedRequest(connection, "GET", url);
-    const data = (await response.json()) as {
-      properties?: Record<
-        string,
-        { type?: string; title?: string; nullable?: boolean }
-      >;
-    };
+    // Use SuiteQL SELECT * with limit 1 to discover available columns.
+    // This is more reliable than the metadata catalog which returns 405
+    // for individual record schemas on many NetSuite accounts.
+    const result = await this.executeSuiteQL(
+      connection,
+      `SELECT * FROM ${recordType}`,
+      1,
+      0
+    );
 
-    if (!data.properties) return [];
+    if (result.items.length === 0) {
+      // Record type exists but has no rows — column names unavailable
+      return [];
+    }
 
-    return Object.entries(data.properties).map(([name, meta]) => ({
-      name,
-      type: mapNetSuiteType(meta.type),
-      label: meta.title ?? name,
-      mandatory: meta.nullable === false,
-    }));
+    // Extract field names from the first row and infer types from values.
+    // Filter out "links" — it's HATEOAS metadata, not an actual column.
+    const METADATA_KEYS = new Set(["links"]);
+    return Object.entries(result.items[0])
+      .filter(([name]) => !METADATA_KEYS.has(name))
+      .map(([name, value]) => ({
+        name,
+        type: inferTypeFromValue(value),
+        label: name,
+        mandatory: false,
+      }));
   }
 
   /** List public saved searches via SuiteQL. */
@@ -365,15 +434,21 @@ export class NetSuiteProvider implements ConnectionProvider {
           const errorBody = await response.text().catch(() => "");
           const parsed = tryParseJson(errorBody);
           const nsError = extractNetSuiteError(parsed, response.status);
-          throw new Error(nsError);
+          const err = new Error(nsError);
+          // Tag 4xx errors (except 429, handled above) as non-retryable
+          if (response.status >= 400 && response.status < 500) {
+            (err as Error & { nonRetryable?: boolean }).nonRetryable = true;
+          }
+          throw err;
         }
 
         return response;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
 
-        // Don't retry auth errors or bad queries
+        // Don't retry auth errors, bad queries, or any 4xx client error
         if (
+          (lastError as Error & { nonRetryable?: boolean }).nonRetryable ||
           lastError.message.includes("INVALID_LOGIN") ||
           lastError.message.includes("INVALID_QUERY") ||
           lastError.message.includes("INSUFFICIENT_PERMISSION")
@@ -482,6 +557,20 @@ function mapNetSuiteType(nsType?: string): string {
   return "STRING";
 }
 
+/** Infer a BigQuery-compatible type from a sample SuiteQL value. */
+function inferTypeFromValue(value: unknown): string {
+  if (value === null || value === undefined) return "STRING";
+  if (typeof value === "boolean") return "BOOLEAN";
+  if (typeof value === "number") return Number.isInteger(value) ? "INTEGER" : "FLOAT";
+  if (typeof value === "string") {
+    // Check for date-like patterns: "2024-01-15" or "1/15/2024 12:00:00 AM"
+    if (/^\d{4}-\d{2}-\d{2}/.test(value) || /^\d{1,2}\/\d{1,2}\/\d{4}/.test(value)) {
+      return "TIMESTAMP";
+    }
+  }
+  return "STRING";
+}
+
 function extractNetSuiteError(
   parsed: Record<string, unknown> | null,
   status: number
@@ -527,14 +616,20 @@ export function buildSuiteQL(config: {
   fields: string[];
   filter?: string | null;
 }): string {
-  const fields =
-    config.fields.length > 0 ? config.fields.join(", ") : "*";
+  const EXCLUDED = new Set(["links"]);
+  const clean = config.fields.filter((f) => !EXCLUDED.has(f));
+  const fields = clean.length > 0 ? clean.join(", ") : "*";
   let query = `SELECT ${fields} FROM ${config.recordType}`;
 
   if (config.filter) {
     query += ` WHERE ${config.filter}`;
   }
 
-  query += " ORDER BY id ASC";
+  // Only add ORDER BY id if 'id' is among the selected fields — not all
+  // SuiteQL tables have an 'id' column (e.g. itemAssemblyItemBom).
+  const hasId = clean.some((f) => f.toLowerCase() === "id");
+  if (hasId) {
+    query += " ORDER BY id ASC";
+  }
   return query;
 }
