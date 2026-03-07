@@ -22,6 +22,28 @@ export const POST = withAuth(async (req, session) => {
     return NextResponse.json({ error: "Route not found" }, { status: 404 });
   }
 
+  // Atomically check for concurrent runs and create a lock log in one transaction
+  // to eliminate the TOCTOU race between findFirst and routeLog.create
+  const lockResult = await prisma.$transaction(async (tx) => {
+    const activeRun = await tx.routeLog.findFirst({
+      where: { routeId: id, status: "running" },
+      select: { id: true },
+    });
+    if (activeRun) return null;
+
+    return tx.routeLog.create({
+      data: { routeId: id!, status: "running", triggeredBy: "manual" },
+      select: { id: true },
+    });
+  }, { isolationLevel: "Serializable" });
+
+  if (!lockResult) {
+    return NextResponse.json(
+      { error: "Route is already running" },
+      { status: 409 }
+    );
+  }
+
   const loaded: LoadedRoute = {
     ...route,
     sourceConfig: route.sourceConfig as unknown as SourceConfig,
@@ -30,15 +52,20 @@ export const POST = withAuth(async (req, session) => {
   };
 
   const engine = new BifrostEngine();
-  const result = await Promise.race([
-    engine.execute(loaded, "manual"),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("Route execution timed out after 10 minutes")),
-        ROUTE_TIMEOUT_MS
-      )
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("Route execution timed out after 10 minutes")),
+      ROUTE_TIMEOUT_MS
+    );
+  });
 
-  return NextResponse.json(result);
+  try {
+    const result = await Promise.race([engine.execute(loaded, "manual", lockResult.id), timeout]);
+    clearTimeout(timer!);
+    return NextResponse.json(result);
+  } catch (err) {
+    clearTimeout(timer!);
+    throw err;
+  }
 });

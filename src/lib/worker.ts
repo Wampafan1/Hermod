@@ -23,14 +23,13 @@ interface SendReportJob {
   scheduleId: string;
 }
 
-/** Race a promise against a timeout. */
+/** Race a promise against a timeout, cleaning up the timer on completion. */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`[Worker] ${label} timed out after ${ms / 1000}s`)), ms)
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`[Worker] ${label} timed out after ${ms / 1000}s`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer!));
 }
 
 async function main() {
