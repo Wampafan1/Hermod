@@ -307,6 +307,7 @@ model BifrostRoute {
   frequency        String?        // "DAILY", "WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY"
   daysOfWeek       Int[]          @default([])
   dayOfMonth       Int?
+  monthsOfYear     Int[]          @default([])
   timeHour         Int            @default(7)
   timeMinute       Int            @default(0)
   timezone         String         @default("America/Chicago")

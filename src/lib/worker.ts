@@ -142,6 +142,7 @@ async function main() {
           frequency: true,
           daysOfWeek: true,
           dayOfMonth: true,
+          monthsOfYear: true,
           timeHour: true,
           timeMinute: true,
           timezone: true,

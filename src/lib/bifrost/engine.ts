@@ -73,7 +73,8 @@ export class BifrostEngine {
    */
   async execute(
     route: LoadedRoute,
-    triggeredBy: "schedule" | "manual" | "webhook"
+    triggeredBy: "schedule" | "manual" | "webhook",
+    existingRouteLogId?: string
   ): Promise<RouteJobResult> {
     const startTime = Date.now();
     const sourceProvider = getProvider(route.source.type);
@@ -123,14 +124,18 @@ export class BifrostEngine {
         ? buildIncrementalClause(cursorConfig.cursorColumn, cursorConfig.strategy, priorWatermark)
         : null;
 
-      // 3. Create route log
-      routeLog = await prisma.routeLog.create({
-        data: {
-          routeId: route.id,
-          status: "running",
-          triggeredBy,
-        },
-      });
+      // 3. Create or reuse route log (manual trigger pre-creates for atomic locking)
+      if (existingRouteLogId) {
+        routeLog = { id: existingRouteLogId };
+      } else {
+        routeLog = await prisma.routeLog.create({
+          data: {
+            routeId: route.id,
+            status: "running",
+            triggeredBy,
+          },
+        });
+      }
 
       // 4. Pre-fetch blueprint if transform is enabled (once, not per-chunk)
       let blueprintSteps: Array<{ type: string; order: number; config: Record<string, unknown> }> | null = null;
@@ -172,13 +177,11 @@ export class BifrostEngine {
         ...route.sourceConfig,
       };
 
-      // New path: cursorConfig + watermark — append WHERE clause to query
+      // New path: cursorConfig + watermark — wrap query as subquery for safe WHERE injection
+      // Avoids regex matching WHERE in CTEs/subqueries/string literals
       if (incrementalClause && effectiveSourceConfig.query) {
         const q = effectiveSourceConfig.query.trimEnd().replace(/;$/, "");
-        const hasWhere = /\bWHERE\b/i.test(q);
-        effectiveSourceConfig.query = hasWhere
-          ? `${q} AND ${incrementalClause}`
-          : `${q} WHERE ${incrementalClause}`;
+        effectiveSourceConfig.query = `SELECT * FROM (${q}) AS __incr WHERE ${incrementalClause}`;
       }
       // Legacy path: incrementalKey + lastCheckpoint (backward compat)
       else if (route.sourceConfig.incrementalKey) {
@@ -194,12 +197,19 @@ export class BifrostEngine {
         }
       }
 
+      // Track running max watermark — only advanced on successful loads
+      let runningMaxWatermark: string | null = null;
+      // Pending max from current batch buffer (not yet confirmed loaded)
+      let pendingBatchMax: string | null = null;
+
       /** Flush the batch buffer to the destination. */
       const flushBatch = async () => {
         if (batchBuffer.length === 0) return;
 
         const rows = batchBuffer;
+        const batchMax = pendingBatchMax;
         batchBuffer = [];
+        pendingBatchMax = null;
 
         try {
           const effectiveDestConfig = loadBatchIndex === 0
@@ -209,6 +219,23 @@ export class BifrostEngine {
               : route.destConfig;
           const result = await this.loadWithRetry(destProvider, destConn, rows, effectiveDestConfig);
           totalLoaded += result.rowsLoaded;
+
+          // Only advance watermark after confirmed load
+          if (batchMax) {
+            if (!runningMaxWatermark) {
+              runningMaxWatermark = batchMax;
+            } else {
+              const combined = [
+                { [cursorConfig!.cursorColumn!]: runningMaxWatermark },
+                { [cursorConfig!.cursorColumn!]: batchMax },
+              ];
+              runningMaxWatermark = extractNewWatermark(
+                combined,
+                cursorConfig!.cursorColumn!,
+                cursorConfig!.strategy
+              ) ?? runningMaxWatermark;
+            }
+          }
         } catch (err) {
           // Fail-fast on fatal errors (missing dataset/table, auth)
           if (isFatalLoadError(err)) {
@@ -219,6 +246,7 @@ export class BifrostEngine {
           }
           await enqueueDeadLetter(route.id, routeLog!.id, loadBatchIndex, rows, err);
           errorCount += rows.length;
+          // batchMax is intentionally NOT promoted — those rows failed to load
         }
 
         loadBatchIndex++;
@@ -226,9 +254,6 @@ export class BifrostEngine {
           `[Bifrost] ${route.name}: Transferred ${totalLoaded} / ${totalExtracted} rows...`
         );
       };
-
-      // Track cursor column values for watermark extraction
-      const cursorValues: Record<string, unknown>[] = [];
 
       for await (const chunk of sourceProvider.extract(
         sourceConn,
@@ -254,12 +279,26 @@ export class BifrostEngine {
 
         batchBuffer.push(...transformed);
 
-        // Track cursor column values for watermark (memory-efficient: only store cursor col)
-        if (cursorConfig?.cursorColumn) {
-          for (const row of transformed) {
-            const val = row[cursorConfig.cursorColumn];
-            if (val != null) {
-              cursorValues.push({ [cursorConfig.cursorColumn]: val });
+        // Track pending watermark max for this batch (promoted only after successful load)
+        if (cursorConfig?.cursorColumn && cursorConfig.strategy !== "full_refresh") {
+          const chunkMax = extractNewWatermark(
+            transformed as Record<string, unknown>[],
+            cursorConfig.cursorColumn,
+            cursorConfig.strategy
+          );
+          if (chunkMax) {
+            if (!pendingBatchMax) {
+              pendingBatchMax = chunkMax;
+            } else {
+              const combined = [
+                { [cursorConfig.cursorColumn]: pendingBatchMax },
+                { [cursorConfig.cursorColumn]: chunkMax },
+              ];
+              pendingBatchMax = extractNewWatermark(
+                combined,
+                cursorConfig.cursorColumn,
+                cursorConfig.strategy
+              ) ?? pendingBatchMax;
             }
           }
         }
@@ -276,21 +315,14 @@ export class BifrostEngine {
       // 6. Update watermark + legacy checkpoint
       if (totalLoaded > 0) {
         // New watermark path
-        if (cursorConfig?.cursorColumn && cursorConfig.strategy !== "full_refresh") {
-          const newWatermark = extractNewWatermark(
-            cursorValues,
-            cursorConfig.cursorColumn,
-            cursorConfig.strategy
-          );
-          if (newWatermark) {
-            await setWatermark({
-              routeId: route.id,
-              tableName,
-              watermark: newWatermark,
-              watermarkType: cursorConfig.strategy,
-              rowsSynced: totalLoaded,
-            });
-          }
+        if (cursorConfig?.cursorColumn && cursorConfig.strategy !== "full_refresh" && runningMaxWatermark) {
+          await setWatermark({
+            routeId: route.id,
+            tableName,
+            watermark: runningMaxWatermark,
+            watermarkType: cursorConfig.strategy,
+            rowsSynced: totalLoaded,
+          });
         }
 
         // Legacy checkpoint (always update for backward compat)
@@ -513,6 +545,7 @@ export async function advanceRouteNextRun(route: {
   frequency: string | null;
   daysOfWeek: number[];
   dayOfMonth: number | null;
+  monthsOfYear?: number[];
   timeHour: number;
   timeMinute: number;
   timezone: string;
@@ -524,6 +557,7 @@ export async function advanceRouteNextRun(route: {
       frequency: route.frequency as any,
       daysOfWeek: route.daysOfWeek,
       dayOfMonth: route.dayOfMonth,
+      monthsOfYear: route.monthsOfYear,
       timeHour: route.timeHour,
       timeMinute: route.timeMinute,
       timezone: route.timezone,
