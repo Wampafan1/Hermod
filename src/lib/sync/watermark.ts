@@ -118,12 +118,13 @@ export function extractNewWatermark(
   if (!values.length) return null;
 
   if (strategy === "timestamp_cursor") {
-    const max = values.reduce((a, b) =>
-      new Date(a as string) > new Date(b as string) ? a : b
-    );
-    const parsed = new Date(max as string);
-    if (isNaN(parsed.getTime())) return null;
-    return parsed.toISOString();
+    // Values may be Date objects (from drivers) or strings — coerce uniformly
+    const dates = values
+      .map((v) => (v instanceof Date ? v : new Date(String(v))))
+      .filter((d) => !isNaN(d.getTime()));
+    if (!dates.length) return null;
+    const max = dates.reduce((a, b) => (a > b ? a : b));
+    return max.toISOString();
   }
 
   if (strategy === "integer_id_cursor") {
