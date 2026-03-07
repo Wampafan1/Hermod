@@ -27,6 +27,14 @@ const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes
 const MAX_RETRIES = 3;
 const RETRY_BACKOFF_MS = [1000, 3000, 10000];
 
+/** Validates a SuiteQL identifier (record type or field name) against injection. */
+const SAFE_SUITEQL_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+function validateSuiteQLIdentifier(value: string, label: string): void {
+  if (!SAFE_SUITEQL_IDENTIFIER.test(value)) {
+    throw new Error(`Invalid ${label}: "${value}"`);
+  }
+}
+
 /**
  * Known SuiteQL table names. The REST metadata catalog returns record IDs
  * (e.g., "assemblybuild") that don't work in SuiteQL — SuiteQL uses broader
@@ -302,6 +310,7 @@ export class NetSuiteProvider implements ConnectionProvider {
     // Use SuiteQL SELECT * with limit 1 to discover available columns.
     // This is more reliable than the metadata catalog which returns 405
     // for individual record schemas on many NetSuite accounts.
+    validateSuiteQLIdentifier(recordType, "record type");
     const result = await this.executeSuiteQL(
       connection,
       `SELECT * FROM ${recordType}`,
@@ -617,6 +626,7 @@ export function buildSuiteQL(config: {
   fields: string[];
   filter?: string | null;
 }): string {
+  validateSuiteQLIdentifier(config.recordType, "record type");
   const EXCLUDED = new Set(["links"]);
   const clean = config.fields.filter((f) => !EXCLUDED.has(f));
   const fields = clean.length > 0 ? clean.join(", ") : "*";
