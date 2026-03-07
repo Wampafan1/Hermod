@@ -96,15 +96,7 @@ async function main() {
           `[Worker] Enqueuing report: ${schedule.report.name} (schedule=${schedule.id})`
         );
 
-        // Enqueue the job
-        await boss.send("send-report", {
-          reportId: schedule.reportId,
-          scheduleId: schedule.id,
-        }, {
-          singletonKey: `report-${schedule.reportId}`,
-        });
-
-        // Advance nextRunAt
+        // Advance nextRunAt FIRST to prevent re-enqueue on crash
         const nextRun = advanceNextRun(
           {
             frequency: schedule.frequency,
@@ -121,6 +113,14 @@ async function main() {
         await prisma.schedule.update({
           where: { id: schedule.id },
           data: { nextRunAt: nextRun },
+        });
+
+        // THEN enqueue the job (if crash here, we miss one run — safer than duplicate)
+        await boss.send("send-report", {
+          reportId: schedule.reportId,
+          scheduleId: schedule.id,
+        }, {
+          singletonKey: `report-${schedule.reportId}`,
         });
 
         console.log(`[Worker] Next run for ${schedule.report.name}: ${nextRun.toISOString()}`);
@@ -152,10 +152,11 @@ async function main() {
       await Promise.all(
         dueRoutes.map(async (route) => {
           console.log(`[Worker] Enqueuing Bifrost route: ${route.name} (route=${route.id})`);
-          await boss.send("run-route", { routeId: route.id, triggeredBy: "schedule" }, {
-            singletonKey: route.id, // Prevent duplicate jobs for the same route
-          });
+          // Advance nextRunAt FIRST to prevent re-enqueue on crash
           await advanceRouteNextRun(route);
+          await boss.send("run-route", { routeId: route.id, triggeredBy: "schedule" }, {
+            singletonKey: route.id,
+          });
         })
       );
 
