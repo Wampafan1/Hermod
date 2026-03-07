@@ -23,6 +23,12 @@ interface SendReportJob {
   scheduleId: string;
 }
 
+/** Extract a safe error message without leaking credentials. */
+function safeErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 /** Race a promise against a timeout, cleaning up the timer on completion. */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -167,7 +173,7 @@ async function main() {
       // ─── Helheim Retries (batched by destination) ────
       await processHelheimRetries();
     } catch (error) {
-      console.error("[Worker] Scheduler tick error:", error);
+      console.error("[Worker] Scheduler tick error:", safeErrorMessage(error));
     }
   }
 
@@ -229,13 +235,13 @@ async function main() {
             console.log(`[Worker] Helheim entry ${entry.id} recovered`);
           } catch (retryErr) {
             await markRetryFailed(entry.id, entry.retryCount, entry.maxRetries, retryErr);
-            console.error(`[Worker] Helheim retry failed for ${entry.id}:`, retryErr);
+            console.error(`[Worker] Helheim retry failed for ${entry.id}:`, safeErrorMessage(retryErr));
           }
         }
 
         await conn.close();
       } catch (err) {
-        console.error(`[Worker] Helheim batch error for route ${routeId}:`, err);
+        console.error(`[Worker] Helheim batch error for route ${routeId}:`, safeErrorMessage(err));
       }
     }
   }
@@ -244,7 +250,7 @@ async function main() {
   try {
     await withTimeout(schedulerTick(), TICK_TIMEOUT_MS, "Initial scheduler tick");
   } catch (err) {
-    console.error(err);
+    console.error("[Worker] Initial tick error:", safeErrorMessage(err));
   }
 
   // Poll every 60 seconds (with timeout per tick)
@@ -252,7 +258,7 @@ async function main() {
     try {
       await withTimeout(schedulerTick(), TICK_TIMEOUT_MS, "Scheduler tick");
     } catch (err) {
-      console.error(err);
+      console.error("[Worker] Tick error:", safeErrorMessage(err));
     }
   }, POLL_INTERVAL);
   console.log(`[Worker] Scheduler polling every ${POLL_INTERVAL / 1000}s`);
@@ -262,6 +268,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("[Worker] Fatal error:", error);
+  console.error("[Worker] Fatal error:", safeErrorMessage(error));
   process.exit(1);
 });
