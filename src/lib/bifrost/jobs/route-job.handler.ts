@@ -7,6 +7,7 @@
 
 import { BifrostEngine, loadRouteWithRelations } from "../engine";
 import type { RouteJobPayload, RouteJobResult } from "../types";
+import { withTimeout } from "@/lib/async-utils";
 
 const SCHEDULED_ROUTE_TIMEOUT_MS = 30 * 60_000; // 30 minutes
 
@@ -35,26 +36,15 @@ export async function handleRouteJob(job: {
   }
 
   const engine = new BifrostEngine();
+  const result = await withTimeout(
+    engine.execute(route, triggeredBy),
+    SCHEDULED_ROUTE_TIMEOUT_MS,
+    `Route ${routeId} execution`
+  );
 
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`Route execution timed out after ${SCHEDULED_ROUTE_TIMEOUT_MS / 60_000} minutes`)),
-      SCHEDULED_ROUTE_TIMEOUT_MS
-    );
-  });
+  console.log(
+    `[Bifrost] Route ${routeId} ${result.status}: ${result.totalLoaded}/${result.totalExtracted} rows`
+  );
 
-  try {
-    const result = await Promise.race([engine.execute(route, triggeredBy), timeout]);
-    clearTimeout(timer!);
-
-    console.log(
-      `[Bifrost] Route ${routeId} ${result.status}: ${result.totalLoaded}/${result.totalExtracted} rows`
-    );
-
-    return result;
-  } catch (err) {
-    clearTimeout(timer!);
-    throw err;
-  }
+  return result;
 }

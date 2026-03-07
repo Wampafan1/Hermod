@@ -4,6 +4,7 @@ import { BifrostEngine } from "@/lib/bifrost/engine";
 import type { LoadedRoute } from "@/lib/bifrost/engine";
 import type { SourceConfig, DestConfig } from "@/lib/bifrost/types";
 import { prisma } from "@/lib/db";
+import { withTimeout } from "@/lib/async-utils";
 
 const ROUTE_TIMEOUT_MS = 10 * 60_000; // 10 minutes max for manual trigger
 
@@ -52,20 +53,10 @@ export const POST = withAuth(async (req, session) => {
   };
 
   const engine = new BifrostEngine();
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error("Route execution timed out after 10 minutes")),
-      ROUTE_TIMEOUT_MS
-    );
-  });
-
-  try {
-    const result = await Promise.race([engine.execute(loaded, "manual", lockResult.id), timeout]);
-    clearTimeout(timer!);
-    return NextResponse.json(result);
-  } catch (err) {
-    clearTimeout(timer!);
-    throw err;
-  }
+  const result = await withTimeout(
+    engine.execute(loaded, "manual", lockResult.id),
+    ROUTE_TIMEOUT_MS,
+    "Route execution"
+  );
+  return NextResponse.json(result);
 });

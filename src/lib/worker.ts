@@ -13,6 +13,7 @@ import {
   markRetryFailed,
 } from "./bifrost/helheim/dead-letter";
 import { getProvider, toConnectionLike } from "./providers";
+import { withTimeout, safeErrorMessage } from "./async-utils";
 
 const prisma = new PrismaClient();
 const POLL_INTERVAL = 60_000; // 60 seconds
@@ -21,21 +22,6 @@ const TICK_TIMEOUT_MS = 5 * 60_000; // 5 minutes — max time for a scheduler ti
 interface SendReportJob {
   reportId: string;
   scheduleId: string;
-}
-
-/** Extract a safe error message without leaking credentials. */
-function safeErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-/** Race a promise against a timeout, cleaning up the timer on completion. */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`[Worker] ${label} timed out after ${ms / 1000}s`)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer!));
 }
 
 async function main() {

@@ -3,7 +3,6 @@ import { prisma } from "@/lib/db";
 import { getProvider, toConnectionLike } from "@/lib/providers";
 import { sendReportEmail, toEmailConfig } from "@/lib/email";
 import ExcelJS from "exceljs";
-import { format } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import type { SheetTemplate } from "@/components/reports/univer-sheet";
 import type { ColumnConfig } from "@/lib/column-config";
