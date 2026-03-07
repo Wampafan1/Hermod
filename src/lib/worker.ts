@@ -16,14 +16,41 @@ import { getProvider, toConnectionLike } from "./providers";
 
 const prisma = new PrismaClient();
 const POLL_INTERVAL = 60_000; // 60 seconds
+const TICK_TIMEOUT_MS = 5 * 60_000; // 5 minutes — max time for a scheduler tick
 
 interface SendReportJob {
   reportId: string;
   scheduleId: string;
 }
 
+/** Race a promise against a timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`[Worker] ${label} timed out after ${ms / 1000}s`)), ms)
+    ),
+  ]);
+}
+
 async function main() {
   console.log("[Worker] Starting Hermod worker...");
+
+  // Clean up stale "running" route logs from previous crashed runs
+  const staleResult = await prisma.routeLog.updateMany({
+    where: {
+      status: "running",
+      startedAt: { lt: new Date(Date.now() - 15 * 60_000) },
+    },
+    data: {
+      status: "failed",
+      error: "Timed out — process crashed or hung before completion",
+      completedAt: new Date(),
+    },
+  });
+  if (staleResult.count > 0) {
+    console.log(`[Worker] Cleaned up ${staleResult.count} stale "running" route log(s)`);
+  }
 
   const boss = getBoss();
   await boss.start();
@@ -53,6 +80,8 @@ async function main() {
   async function schedulerTick() {
     try {
       const now = new Date();
+
+      // ─── Report Schedules ───────────────────────────
       const dueSchedules = await prisma.schedule.findMany({
         where: {
           enabled: true,
@@ -72,6 +101,8 @@ async function main() {
         await boss.send("send-report", {
           reportId: schedule.reportId,
           scheduleId: schedule.id,
+        }, {
+          singletonKey: `report-${schedule.reportId}`,
         });
 
         // Advance nextRunAt
@@ -121,7 +152,9 @@ async function main() {
       await Promise.all(
         dueRoutes.map(async (route) => {
           console.log(`[Worker] Enqueuing Bifrost route: ${route.name} (route=${route.id})`);
-          await boss.send("run-route", { routeId: route.id, triggeredBy: "schedule" });
+          await boss.send("run-route", { routeId: route.id, triggeredBy: "schedule" }, {
+            singletonKey: route.id, // Prevent duplicate jobs for the same route
+          });
           await advanceRouteNextRun(route);
         })
       );
@@ -130,50 +163,97 @@ async function main() {
         console.log(`[Worker] Enqueued ${dueRoutes.length} Bifrost route(s)`);
       }
 
-      // ─── Helheim Retries ─────────────────────────────
-      const dueRetries = await getDueRetries();
-      for (const entry of dueRetries) {
-        try {
-          console.log(`[Worker] Retrying Helheim entry ${entry.id}`);
-          await markRetrying(entry.id);
-
-          const route = await prisma.bifrostRoute.findUniqueOrThrow({
-            where: { id: entry.routeId },
-            include: {
-              dest: { select: { id: true, type: true, config: true, credentials: true } },
-            },
-          });
-
-          const destProvider = getProvider(route.dest.type);
-          const destConnLike = toConnectionLike(route.dest);
-          const destConn = await destProvider.connect(destConnLike);
-          const rows = decompressPayload(entry.payload);
-          const destConfig = route.destConfig as any;
-
-          try {
-            await destProvider.load!(destConn, rows, destConfig);
-            await markRecovered(entry.id);
-            console.log(`[Worker] Helheim entry ${entry.id} recovered`);
-          } catch (retryErr) {
-            await markRetryFailed(entry.id, entry.retryCount, entry.maxRetries, retryErr);
-            console.error(`[Worker] Helheim retry failed for ${entry.id}:`, retryErr);
-          } finally {
-            await destConn.close();
-          }
-        } catch (err) {
-          console.error(`[Worker] Helheim retry error for ${entry.id}:`, err);
-        }
-      }
+      // ─── Helheim Retries (batched by destination) ────
+      await processHelheimRetries();
     } catch (error) {
       console.error("[Worker] Scheduler tick error:", error);
     }
   }
 
-  // Initial tick
-  await schedulerTick();
+  /**
+   * Process due Helheim retries, batching by routeId to reuse
+   * a single destination connection per route.
+   */
+  async function processHelheimRetries() {
+    const dueRetries = await getDueRetries();
+    if (dueRetries.length === 0) return;
 
-  // Poll every 60 seconds
-  setInterval(schedulerTick, POLL_INTERVAL);
+    // Group retries by routeId to batch connection usage
+    const byRoute = new Map<string, typeof dueRetries>();
+    for (const entry of dueRetries) {
+      const group = byRoute.get(entry.routeId) ?? [];
+      group.push(entry);
+      byRoute.set(entry.routeId, group);
+    }
+
+    for (const [routeId, entries] of byRoute) {
+      try {
+        // Skip retries if the route is currently executing — avoid
+        // concurrent load jobs that cause duplicates and rate-limit cascades.
+        const activeRun = await prisma.routeLog.findFirst({
+          where: { routeId, status: "running" },
+          select: { id: true },
+        });
+        if (activeRun) {
+          console.log(`[Worker] Skipping Helheim retries for route ${routeId} — route is currently running`);
+          continue;
+        }
+
+        const route = await prisma.bifrostRoute.findUniqueOrThrow({
+          where: { id: routeId },
+          include: {
+            dest: { select: { id: true, type: true, config: true, credentials: true } },
+          },
+        });
+
+        const destProvider = getProvider(route.dest.type);
+        const destConnLike = toConnectionLike(route.dest);
+        const conn = await destProvider.connect(destConnLike);
+        // NEVER use the route's original writeDisposition for retries —
+        // WRITE_TRUNCATE would wipe all previously loaded data.
+        const destConfig = {
+          ...(route.destConfig as any),
+          writeDisposition: "WRITE_APPEND",
+        };
+
+        // Process all entries for this route on one connection
+        for (const entry of entries) {
+          try {
+            console.log(`[Worker] Retrying Helheim entry ${entry.id}`);
+            await markRetrying(entry.id);
+
+            const rows = decompressPayload(entry.payload);
+            await destProvider.load!(conn, rows, destConfig);
+            await markRecovered(entry.id);
+            console.log(`[Worker] Helheim entry ${entry.id} recovered`);
+          } catch (retryErr) {
+            await markRetryFailed(entry.id, entry.retryCount, entry.maxRetries, retryErr);
+            console.error(`[Worker] Helheim retry failed for ${entry.id}:`, retryErr);
+          }
+        }
+
+        await conn.close();
+      } catch (err) {
+        console.error(`[Worker] Helheim batch error for route ${routeId}:`, err);
+      }
+    }
+  }
+
+  // Initial tick (with timeout protection)
+  try {
+    await withTimeout(schedulerTick(), TICK_TIMEOUT_MS, "Initial scheduler tick");
+  } catch (err) {
+    console.error(err);
+  }
+
+  // Poll every 60 seconds (with timeout per tick)
+  setInterval(async () => {
+    try {
+      await withTimeout(schedulerTick(), TICK_TIMEOUT_MS, "Scheduler tick");
+    } catch (err) {
+      console.error(err);
+    }
+  }, POLL_INTERVAL);
   console.log(`[Worker] Scheduler polling every ${POLL_INTERVAL / 1000}s`);
 
   // Start SFTP file watcher

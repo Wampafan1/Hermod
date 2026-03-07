@@ -203,6 +203,20 @@ export async function runReport(
   reportId: string,
   scheduleId: string
 ): Promise<{ id: string; status: string }> {
+  // Idempotency guard: skip if this report already ran successfully in the last 5 minutes
+  const recentRun = await prisma.runLog.findFirst({
+    where: {
+      reportId,
+      status: "SUCCESS",
+      startedAt: { gte: new Date(Date.now() - 5 * 60_000) },
+    },
+    select: { id: true },
+  });
+  if (recentRun) {
+    console.log(`[Report] Skipping duplicate run for report ${reportId} — recent successful run exists`);
+    return { id: recentRun.id, status: "skipped" };
+  }
+
   const runLog = await prisma.runLog.create({
     data: { reportId, status: "RUNNING" },
   });
