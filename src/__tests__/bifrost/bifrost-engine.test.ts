@@ -12,7 +12,11 @@ const {
   mockLoad,
   mockGetSchema,
   mockCreateTable,
+  mockMergeInto,
+  mockDropTable,
   mockConnect,
+  mockGetWatermark,
+  mockSetWatermark,
 } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
   mockUpdate: vi.fn(),
@@ -23,7 +27,11 @@ const {
   mockLoad: vi.fn(),
   mockGetSchema: vi.fn(),
   mockCreateTable: vi.fn(),
+  mockMergeInto: vi.fn(),
+  mockDropTable: vi.fn(),
   mockConnect: vi.fn(),
+  mockGetWatermark: vi.fn(),
+  mockSetWatermark: vi.fn(),
 }));
 
 vi.mock("@prisma/client", () => ({
@@ -53,12 +61,28 @@ vi.mock("@/lib/providers", () => ({
     load: mockLoad,
     getSchema: mockGetSchema,
     createTable: mockCreateTable,
+    mergeInto: mockMergeInto,
+    dropTable: mockDropTable,
+    ensureDataset: vi.fn().mockResolvedValue(undefined),
   }),
   toConnectionLike: (conn: any) => ({
     type: conn.type,
     config: conn.config ?? {},
     credentials: {},
   }),
+}));
+
+vi.mock("@/lib/sync/watermark", () => ({
+  getWatermark: mockGetWatermark,
+  setWatermark: mockSetWatermark,
+  buildIncrementalClause: vi.fn().mockReturnValue("lastmodifieddate > '2026-03-01'"),
+  extractNewWatermark: vi.fn().mockImplementation(
+    (rows: Record<string, unknown>[], col: string) => {
+      if (!rows.length) return null;
+      const vals = rows.map((r) => r[col]).filter(Boolean);
+      return vals.length > 0 ? String(vals[vals.length - 1]) : null;
+    }
+  ),
 }));
 
 vi.mock("@/lib/bifrost/helheim/dead-letter", () => ({
@@ -396,4 +420,157 @@ describe("BifrostEngine", () => {
 
   // Stale "running" log cleanup is handled by worker.ts at startup,
   // not by the engine on every execution — see worker.ts lines 39-52.
+
+  // ─── MERGE (Upsert) Tests ──────────────────────────
+
+  describe("MERGE mode (incremental upsert)", () => {
+    const cursorConfig = {
+      strategy: "timestamp_cursor" as const,
+      cursorColumn: "lastmodifieddate",
+      cursorColumnType: "TIMESTAMP",
+      primaryKey: "id",
+      confidence: "high" as const,
+      reasoning: "test",
+      warnings: [],
+      candidates: [],
+    };
+
+    function makeMergeRoute(overrides?: Partial<LoadedRoute>): LoadedRoute {
+      return makeRoute({
+        cursorConfig,
+        destConfig: {
+          dataset: "ds",
+          table: "items",
+          writeDisposition: "WRITE_APPEND",
+          autoCreateTable: true,
+          chunkSize: 100,
+        },
+        ...overrides,
+      });
+    }
+
+    beforeEach(() => {
+      mockGetWatermark.mockResolvedValue("2026-03-01T00:00:00Z");
+      mockSetWatermark.mockResolvedValue(undefined);
+      mockMergeInto.mockResolvedValue({ rowsMerged: 0 });
+      mockDropTable.mockResolvedValue(undefined);
+    });
+
+    it("uses MERGE when cursorConfig has primaryKey and table exists", async () => {
+      const chunks = [[
+        { id: 1, name: "A", lastmodifieddate: "2026-03-05" },
+        { id: 2, name: "B", lastmodifieddate: "2026-03-06" },
+      ]];
+      mockExtractGen.mockImplementation(() => asyncGenFromChunks(chunks));
+      mockLoad.mockResolvedValue({ rowsLoaded: 2, errors: [] });
+      // Table exists
+      mockGetSchema.mockResolvedValue({ fields: [{ name: "id", type: "FLOAT64", mode: "NULLABLE" }] });
+
+      const result = await engine.execute(makeMergeRoute(), "schedule");
+
+      expect(result.status).toBe("completed");
+      expect(result.totalLoaded).toBe(2);
+
+      // Load should target staging table, not the real table
+      const loadCall = mockLoad.mock.calls[0];
+      const destConfig = loadCall[2];
+      expect(destConfig.table).toContain("__staging_");
+
+      // MERGE should be called
+      expect(mockMergeInto).toHaveBeenCalledWith(
+        expect.anything(),
+        "ds",
+        "items",
+        expect.stringContaining("__staging_"),
+        "id",
+        expect.arrayContaining(["id", "name", "lastmodifieddate"])
+      );
+
+      // Staging table should be cleaned up
+      expect(mockDropTable).toHaveBeenCalledWith(
+        expect.anything(),
+        "ds",
+        expect.stringContaining("__staging_")
+      );
+    });
+
+    it("falls back to direct WRITE_TRUNCATE when table does not exist (first run)", async () => {
+      const chunks = [[{ id: 1, name: "A", lastmodifieddate: "2026-03-05" }]];
+      mockExtractGen.mockImplementation(() => asyncGenFromChunks(chunks));
+      mockLoad.mockResolvedValue({ rowsLoaded: 1, errors: [] });
+      // Table does NOT exist
+      mockGetSchema.mockResolvedValue(null);
+
+      const result = await engine.execute(makeMergeRoute(), "schedule");
+
+      expect(result.status).toBe("completed");
+      // Should NOT use MERGE — table didn't exist
+      expect(mockMergeInto).not.toHaveBeenCalled();
+      expect(mockDropTable).not.toHaveBeenCalled();
+    });
+
+    it("skips MERGE when cursorConfig has no primaryKey", async () => {
+      const chunks = [[{ id: 1, lastmodifieddate: "2026-03-05" }]];
+      mockExtractGen.mockImplementation(() => asyncGenFromChunks(chunks));
+      mockLoad.mockResolvedValue({ rowsLoaded: 1, errors: [] });
+      mockGetSchema.mockResolvedValue({ fields: [{ name: "id", type: "FLOAT64", mode: "NULLABLE" }] });
+
+      const route = makeMergeRoute({
+        cursorConfig: { ...cursorConfig, primaryKey: null },
+      });
+
+      await engine.execute(route, "schedule");
+
+      // Without primaryKey, no MERGE
+      expect(mockMergeInto).not.toHaveBeenCalled();
+    });
+
+    it("skips MERGE for full_refresh strategy", async () => {
+      const chunks = [[{ id: 1, lastmodifieddate: "2026-03-05" }]];
+      mockExtractGen.mockImplementation(() => asyncGenFromChunks(chunks));
+      mockLoad.mockResolvedValue({ rowsLoaded: 1, errors: [] });
+      mockGetSchema.mockResolvedValue({ fields: [{ name: "id", type: "FLOAT64", mode: "NULLABLE" }] });
+
+      const route = makeMergeRoute({
+        cursorConfig: { ...cursorConfig, strategy: "full_refresh" as any },
+      });
+
+      await engine.execute(route, "schedule");
+
+      expect(mockMergeInto).not.toHaveBeenCalled();
+    });
+
+    it("propagates MERGE errors and preserves staging table for debugging", async () => {
+      const chunks = [[{ id: 1, lastmodifieddate: "2026-03-05" }]];
+      mockExtractGen.mockImplementation(() => asyncGenFromChunks(chunks));
+      mockLoad.mockResolvedValue({ rowsLoaded: 1, errors: [] });
+      mockGetSchema.mockResolvedValue({ fields: [{ name: "id", type: "FLOAT64", mode: "NULLABLE" }] });
+      mockMergeInto.mockRejectedValue(new Error("MERGE syntax error"));
+
+      const result = await engine.execute(makeMergeRoute(), "schedule");
+
+      expect(result.status).toBe("failed");
+      // Staging table cleanup is still attempted (in finally block)
+      expect(mockDropTable).toHaveBeenCalled();
+    });
+
+    it("handles multiple batches with MERGE", async () => {
+      // 2 chunks of 100 → hits batch size threshold, 2 load calls
+      const chunks = makeChunks(100, 100);
+      mockExtractGen.mockImplementation(() => asyncGenFromChunks(chunks));
+      mockLoad.mockResolvedValue({ rowsLoaded: 100, errors: [] });
+      mockGetSchema.mockResolvedValue({ fields: [{ name: "id", type: "FLOAT64", mode: "NULLABLE" }] });
+
+      const result = await engine.execute(makeMergeRoute(), "schedule");
+
+      expect(result.status).toBe("completed");
+      expect(result.totalLoaded).toBe(200);
+      // All loads target staging table
+      for (const call of mockLoad.mock.calls) {
+        expect(call[2].table).toContain("__staging_");
+      }
+      // Single MERGE at the end
+      expect(mockMergeInto).toHaveBeenCalledTimes(1);
+    });
+  });
 });
