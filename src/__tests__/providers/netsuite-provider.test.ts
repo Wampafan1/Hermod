@@ -889,7 +889,9 @@ describe("NetSuiteProvider", () => {
       const conn = (await provider.connect(makeConnection())) as any;
       const fields = await provider.getRecordFields(conn, "item");
 
-      // Catalog fields are trusted (all kept), plus SELECT *-only fields supplemented.
+      // Catalog fields validated against SELECT *: only queryable fields kept.
+      // salesdescription excluded (in catalog but not in SELECT * result).
+      // extrafield supplemented (in SELECT * but not in catalog).
       // Sorted: standard alpha, then custom alpha.
       const names = fields.map((f) => f.name);
       expect(names).toEqual([
@@ -898,7 +900,6 @@ describe("NetSuiteProvider", () => {
         "costcategory",
         "extrafield",       // from SELECT * only (not in catalog)
         "lastmodifieddate",
-        "salesdescription",  // from catalog — kept even though SELECT * didn't return it
         "custitem_ava_taxcode",
         "custitem_category",
         "custitem_lowvolt",
@@ -906,11 +907,10 @@ describe("NetSuiteProvider", () => {
 
       const fieldMap = Object.fromEntries(fields.map((f) => [f.name, f]));
 
-      // Type mapping — catalog provides rich types
+      // Type mapping — catalog provides rich types for validated fields
       expect(fieldMap.autoleadtime.type).toBe("BOOLEAN");
       expect(fieldMap.averagecost.type).toBe("FLOAT");
       expect(fieldMap.lastmodifieddate.type).toBe("TIMESTAMP");
-      expect(fieldMap.salesdescription.type).toBe("STRING");
       expect(fieldMap.custitem_lowvolt.type).toBe("BOOLEAN");
       expect(fieldMap.custitem_ava_taxcode.type).toBe("STRING");
       expect(fieldMap.costcategory.type).toBe("INTEGER");
@@ -922,7 +922,6 @@ describe("NetSuiteProvider", () => {
       expect(fieldMap.autoleadtime.isCustom).toBe(false);
       expect(fieldMap.averagecost.isCustom).toBe(false);
       expect(fieldMap.costcategory.isCustom).toBe(false);
-      expect(fieldMap.salesdescription.isCustom).toBe(false);
       expect(fieldMap.extrafield.isCustom).toBe(false);
       expect(fieldMap.custitem_lowvolt.isCustom).toBe(true);
       expect(fieldMap.custitem_ava_taxcode.isCustom).toBe(true);
@@ -930,7 +929,6 @@ describe("NetSuiteProvider", () => {
 
       // Labels preserved from catalog titles (not lowercased)
       expect(fieldMap.autoleadtime.label).toBe("Auto-Calculate Lead Time");
-      expect(fieldMap.salesdescription.label).toBe("Sales Description");
       expect(fieldMap.custitem_lowvolt.label).toBe("Low Voltage");
       expect(fieldMap.costcategory.label).toBe("Cost Category");
       expect(fieldMap.custitem_category.label).toBe("Category");
@@ -940,17 +938,17 @@ describe("NetSuiteProvider", () => {
       // Mandatory from nullable
       expect(fieldMap.lastmodifieddate.mandatory).toBe(true);
       expect(fieldMap.autoleadtime.mandatory).toBe(false);
-      expect(fieldMap.salesdescription.mandatory).toBe(false);
 
       // isReference flag — only object types with id property
       expect(fieldMap.costcategory.isReference).toBe(true);
       expect(fieldMap.custitem_category.isReference).toBe(true);
       expect(fieldMap.autoleadtime.isReference).toBe(false);
       expect(fieldMap.averagecost.isReference).toBe(false);
-      expect(fieldMap.salesdescription.isReference).toBe(false);
       expect(fieldMap.lastmodifieddate.isReference).toBe(false);
 
-      // Excluded: links (array), itemVendor (sub-record with totalResults)
+      // Excluded: salesdescription (catalog-only, not in SELECT *),
+      // links (array), itemVendor (sub-record with totalResults)
+      expect(names).not.toContain("salesdescription");
       expect(names).not.toContain("links");
       expect(names).not.toContain("itemvendor");
     });
