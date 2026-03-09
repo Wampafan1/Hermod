@@ -58,6 +58,16 @@ function jsonResponse(
   };
 }
 
+/** Mock a 404 response for the metadata-catalog GET (so getRecordFields falls through to SuiteQL). */
+function catalogNotFound() {
+  return jsonResponse({ message: "Not found" }, 404);
+}
+
+/** Mock a 400 response for the customfield SuiteQL query (table not available on all accounts). */
+function customFieldNotFound() {
+  return jsonResponse({ title: "Invalid search", detail: "Record 'customfield' was not found." }, 400);
+}
+
 // ─── Test suite ─────────────────────────────────────
 
 describe("NetSuiteProvider", () => {
@@ -650,20 +660,23 @@ describe("NetSuiteProvider", () => {
 
   describe("getRecordFields", () => {
     it("infers types from sample SuiteQL row values", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          items: [{
-            id: 42,
-            name: "Acme Widget",
-            amount: 19.99,
-            isactive: true,
-            datecreated: "2024-01-15 08:30:00",
-            count: 100,
-            memo: null,
-          }],
-          hasMore: false,
-        })
-      );
+      mockFetch
+        .mockResolvedValueOnce(catalogNotFound())
+        .mockResolvedValueOnce(
+          jsonResponse({
+            items: [{
+              id: 42,
+              name: "Acme Widget",
+              amount: 19.99,
+              isactive: true,
+              datecreated: "2024-01-15 08:30:00",
+              count: 100,
+              memo: null,
+            }],
+            hasMore: false,
+          })
+        )
+        .mockResolvedValueOnce(customFieldNotFound());
 
       const conn = (await provider.connect(makeConnection())) as any;
       const fields = await provider.getRecordFields(conn, "salesOrder");
@@ -680,12 +693,16 @@ describe("NetSuiteProvider", () => {
     });
 
     it("uses field name as label", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          items: [{ entityid: "CUST001", companyname: "Acme" }],
-          hasMore: false,
-        })
-      );
+      // "customer" maps to itself → 1 catalog attempt
+      mockFetch
+        .mockResolvedValueOnce(catalogNotFound())
+        .mockResolvedValueOnce(
+          jsonResponse({
+            items: [{ entityid: "CUST001", companyname: "Acme" }],
+            hasMore: false,
+          })
+        )
+        .mockResolvedValueOnce(customFieldNotFound());
 
       const conn = (await provider.connect(makeConnection())) as any;
       const fields = await provider.getRecordFields(conn, "customer");
@@ -697,9 +714,16 @@ describe("NetSuiteProvider", () => {
     });
 
     it("returns empty array when record type has no rows", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({ items: [], hasMore: false })
-      );
+      mockFetch
+        .mockResolvedValueOnce(catalogNotFound())           // catalog
+        .mockResolvedValueOnce(                              // SELECT * (empty)
+          jsonResponse({ items: [], hasMore: false })
+        )
+        // Falls to getFieldsFromSuiteQL which does its own SELECT * + customfield
+        .mockResolvedValueOnce(                              // getFieldsFromSuiteQL SELECT *
+          jsonResponse({ items: [], hasMore: false })
+        )
+        .mockResolvedValueOnce(customFieldNotFound());       // customfield
 
       const conn = (await provider.connect(makeConnection())) as any;
       const fields = await provider.getRecordFields(conn, "nonexistent");
@@ -707,27 +731,37 @@ describe("NetSuiteProvider", () => {
       expect(fields).toEqual([]);
     });
 
-    it("sends SELECT * FROM {recordType} with limit 1", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({ items: [{ id: 1 }], hasMore: false })
-      );
+    it("sends SELECT * FROM {recordType} with limit 1 (SuiteQL fallback)", async () => {
+      // "customer" maps to itself → 1 catalog attempt
+      mockFetch
+        .mockResolvedValueOnce(catalogNotFound())
+        .mockResolvedValueOnce(
+          jsonResponse({ items: [{ id: 1 }], hasMore: false })
+        )
+        .mockResolvedValueOnce(customFieldNotFound());
 
       const conn = (await provider.connect(makeConnection())) as any;
       await provider.getRecordFields(conn, "customer");
 
-      const [, opts] = mockFetch.mock.calls[0];
+      // Call 0 = metadata-catalog GET (404), call 1 = SuiteQL SELECT *
+      const [, opts] = mockFetch.mock.calls[1];
       const body = JSON.parse(opts.body);
-      expect(body.q).toBe("SELECT * FROM customer");
+      expect(body.q).toBe("SELECT * FROM customer FETCH FIRST 1 ROWS ONLY");
       expect(opts.headers.Prefer).toContain("max-page-size=1");
     });
 
     it("detects date strings with slash format as TIMESTAMP", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          items: [{ lastmodified: "3/15/2024 12:00:00 AM" }],
-          hasMore: false,
-        })
-      );
+      // "transaction" maps to "salesOrder" → 2 catalog attempts (salesOrder, transaction)
+      mockFetch
+        .mockResolvedValueOnce(catalogNotFound())
+        .mockResolvedValueOnce(catalogNotFound())
+        .mockResolvedValueOnce(
+          jsonResponse({
+            items: [{ lastmodified: "3/15/2024 12:00:00 AM" }],
+            hasMore: false,
+          })
+        )
+        .mockResolvedValueOnce(customFieldNotFound());
 
       const conn = (await provider.connect(makeConnection())) as any;
       const fields = await provider.getRecordFields(conn, "transaction");
@@ -735,18 +769,190 @@ describe("NetSuiteProvider", () => {
       expect(fields[0].type).toBe("TIMESTAMP");
     });
 
-    it("sets all fields as non-mandatory (SuiteQL cannot determine this)", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          items: [{ id: 1, name: "Test" }],
-          hasMore: false,
-        })
-      );
+    it("sets all fields as non-mandatory (SuiteQL fallback)", async () => {
+      // "customer" maps to itself → 1 catalog attempt
+      mockFetch
+        .mockResolvedValueOnce(catalogNotFound())
+        .mockResolvedValueOnce(
+          jsonResponse({
+            items: [{ id: 1, name: "Test" }],
+            hasMore: false,
+          })
+        )
+        .mockResolvedValueOnce(customFieldNotFound());
 
       const conn = (await provider.connect(makeConnection())) as any;
       const fields = await provider.getRecordFields(conn, "customer");
 
       expect(fields.every((f) => f.mandatory === false)).toBe(true);
+    });
+
+    it("uses metadata-catalog when available (standard + custom fields)", async () => {
+      // Mock 1: Catalog response for inventoryItem
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          type: "object",
+          properties: {
+            autoLeadTime: {
+              title: "Auto-Calculate Lead Time",
+              type: "boolean",
+              nullable: true,
+            },
+            averageCost: {
+              title: "Average Cost",
+              type: "number",
+              format: "float",
+              nullable: true,
+            },
+            lastModifiedDate: {
+              title: "Last Modified Date",
+              type: "string",
+              format: "date-time",
+              nullable: false,
+            },
+            custitem_lowvolt: {
+              title: "Low Voltage",
+              type: "boolean",
+              nullable: true,
+              "x-ns-custom-field": true,
+            },
+            custitem_ava_taxcode: {
+              title: "AvaTax Taxcode",
+              type: "string",
+              nullable: true,
+              "x-ns-custom-field": true,
+            },
+            // Subtype-specific field — should be INCLUDED even though SELECT *
+            // on an unfiltered item table may not return it (needs itemtype filter)
+            salesDescription: {
+              title: "Sales Description",
+              type: "string",
+              nullable: true,
+            },
+            // Reference field — should be INCLUDED as INTEGER
+            costCategory: {
+              title: "Cost Category",
+              type: "object",
+              nullable: true,
+              properties: { id: {}, refName: {}, externalId: {}, links: {} },
+            },
+            // Custom reference field — should be INCLUDED
+            custitem_category: {
+              title: "Category",
+              type: "object",
+              nullable: true,
+              "x-ns-custom-field": true,
+              properties: { id: {}, refName: {}, externalId: {}, links: {} },
+            },
+            // Sub-record — should be SKIPPED (has totalResults, no id)
+            itemVendor: {
+              title: "Item Vendor",
+              type: "object",
+              nullable: true,
+              properties: { links: {}, totalResults: {}, count: {}, hasMore: {}, offset: {} },
+            },
+            // Array — should be SKIPPED
+            links: {
+              title: "Links",
+              type: "array",
+            },
+          },
+        })
+      );
+
+      // Mock 2: SuiteQL SELECT * — supplements catalog with extra columns.
+      // salesdescription absent here (subtype-specific, needs itemtype filter)
+      // but should still appear in results because catalog is trusted.
+      // extrafield is a column only SELECT * knows about (not in catalog).
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          items: [{
+            autoleadtime: "T",
+            averagecost: 12.5,
+            costcategory: 3,
+            lastmodifieddate: "3/8/2026",
+            custitem_ava_taxcode: "TAX01",
+            custitem_category: 7,
+            custitem_lowvolt: "F",
+            extrafield: "bonus",
+            links: [],
+          }],
+          hasMore: false,
+        })
+      );
+
+      // Mock 3: customfield query — no extra custom fields
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ items: [], hasMore: false })
+      );
+
+      const conn = (await provider.connect(makeConnection())) as any;
+      const fields = await provider.getRecordFields(conn, "item");
+
+      // Catalog fields are trusted (all kept), plus SELECT *-only fields supplemented.
+      // Sorted: standard alpha, then custom alpha.
+      const names = fields.map((f) => f.name);
+      expect(names).toEqual([
+        "autoleadtime",
+        "averagecost",
+        "costcategory",
+        "extrafield",       // from SELECT * only (not in catalog)
+        "lastmodifieddate",
+        "salesdescription",  // from catalog — kept even though SELECT * didn't return it
+        "custitem_ava_taxcode",
+        "custitem_category",
+        "custitem_lowvolt",
+      ]);
+
+      const fieldMap = Object.fromEntries(fields.map((f) => [f.name, f]));
+
+      // Type mapping — catalog provides rich types
+      expect(fieldMap.autoleadtime.type).toBe("BOOLEAN");
+      expect(fieldMap.averagecost.type).toBe("FLOAT");
+      expect(fieldMap.lastmodifieddate.type).toBe("TIMESTAMP");
+      expect(fieldMap.salesdescription.type).toBe("STRING");
+      expect(fieldMap.custitem_lowvolt.type).toBe("BOOLEAN");
+      expect(fieldMap.custitem_ava_taxcode.type).toBe("STRING");
+      expect(fieldMap.costcategory.type).toBe("INTEGER");
+      expect(fieldMap.custitem_category.type).toBe("INTEGER");
+      // SELECT *-only field gets type inferred from value
+      expect(fieldMap.extrafield.type).toBe("STRING");
+
+      // isCustom flag
+      expect(fieldMap.autoleadtime.isCustom).toBe(false);
+      expect(fieldMap.averagecost.isCustom).toBe(false);
+      expect(fieldMap.costcategory.isCustom).toBe(false);
+      expect(fieldMap.salesdescription.isCustom).toBe(false);
+      expect(fieldMap.extrafield.isCustom).toBe(false);
+      expect(fieldMap.custitem_lowvolt.isCustom).toBe(true);
+      expect(fieldMap.custitem_ava_taxcode.isCustom).toBe(true);
+      expect(fieldMap.custitem_category.isCustom).toBe(true);
+
+      // Labels preserved from catalog titles (not lowercased)
+      expect(fieldMap.autoleadtime.label).toBe("Auto-Calculate Lead Time");
+      expect(fieldMap.salesdescription.label).toBe("Sales Description");
+      expect(fieldMap.custitem_lowvolt.label).toBe("Low Voltage");
+      expect(fieldMap.costcategory.label).toBe("Cost Category");
+      expect(fieldMap.custitem_category.label).toBe("Category");
+      // SELECT *-only field uses column name as label
+      expect(fieldMap.extrafield.label).toBe("extrafield");
+
+      // Mandatory from nullable
+      expect(fieldMap.lastmodifieddate.mandatory).toBe(true);
+      expect(fieldMap.autoleadtime.mandatory).toBe(false);
+      expect(fieldMap.salesdescription.mandatory).toBe(false);
+
+      // isReference flag — only object types with id property
+      expect(fieldMap.costcategory.isReference).toBe(true);
+      expect(fieldMap.custitem_category.isReference).toBe(true);
+      expect(fieldMap.autoleadtime.isReference).toBe(false);
+      expect(fieldMap.averagecost.isReference).toBe(false);
+      expect(fieldMap.salesdescription.isReference).toBe(false);
+      expect(fieldMap.lastmodifieddate.isReference).toBe(false);
+
+      // Excluded: links (array), itemVendor (sub-record with totalResults)
+      expect(names).not.toContain("links");
+      expect(names).not.toContain("itemvendor");
     });
   });
 

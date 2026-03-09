@@ -32,6 +32,22 @@ const SAFE_SUITEQL_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 /** Validates a SuiteQL field name, including dot-notation for sublist fields (e.g. "item.internalId"). */
 const SAFE_SUITEQL_FIELD = /^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$/;
 
+/**
+ * Maps SuiteQL table names to REST metadata-catalog record type names.
+ * SuiteQL uses broad tables (e.g., "item", "transaction") while REST
+ * uses specific subtypes (e.g., "inventoryItem", "salesOrder").
+ * We map the common SuiteQL table names to their most common REST equivalent.
+ */
+const SUITEQL_TO_REST_RECORD_MAP: Record<string, string> = {
+  item: "inventoryItem",
+  transaction: "salesOrder",
+  transactionline: "salesOrder",
+  customer: "customer",
+  vendor: "vendor",
+  employee: "employee",
+  contact: "contact",
+};
+
 function validateSuiteQLIdentifier(value: string, label: string): void {
   if (!SAFE_SUITEQL_IDENTIFIER.test(value)) {
     throw new Error(`Invalid ${label}: "${value}"`);
@@ -110,6 +126,8 @@ export interface NetSuiteField {
   type: string;
   label?: string;
   mandatory?: boolean;
+  isCustom?: boolean;
+  isReference?: boolean;
 }
 
 export interface NetSuiteSavedSearch {
@@ -264,7 +282,7 @@ export class NetSuiteProvider implements ConnectionProvider {
       );
 
       if (result.items.length > 0) {
-        yield result.items;
+        yield result.items.map(stripHateoasFields);
       } else if (offset === 0) {
         // First page returned no rows — yield empty to signal "no data"
         yield [];
@@ -311,15 +329,215 @@ export class NetSuiteProvider implements ConnectionProvider {
     return results;
   }
 
-  /** Get field metadata for a specific record type via SuiteQL introspection. */
+  /**
+   * Get field metadata for a specific record type.
+   *
+   * Strategy:
+   * 1. Try the REST metadata-catalog endpoint — returns all fields (standard + custom)
+   *    with proper labels and types in a single call.
+   * 2. If that fails (405 on many accounts), fall back to SuiteQL introspection:
+   *    a) SELECT * with limit 1 for standard fields
+   *    b) Query customfield table to discover custom fields missing from the sample row
+   */
   async getRecordFields(
     connection: NetSuiteProviderConnection,
     recordType: string
   ): Promise<NetSuiteField[]> {
-    // Use SuiteQL SELECT * with limit 1 to discover available columns.
-    // This is more reliable than the metadata catalog which returns 405
-    // for individual record schemas on many NetSuite accounts.
     validateSuiteQLIdentifier(recordType, "record type");
+
+    // The REST metadata catalog describes a SPECIFIC record subtype (e.g.,
+    // inventoryItem) while SuiteQL queries the GENERIC union table (e.g., item).
+    // Some catalog fields are subtype-specific (e.g., salesdescription only
+    // applies to InvtPart rows). These fields ARE valid on the SuiteQL table
+    // but require a WHERE itemtype filter. The catalog is trusted as the source
+    // of truth for field existence; SELECT * only supplements with extra columns.
+
+    let catalogFields: NetSuiteField[] = [];
+    try {
+      catalogFields = await this.getFieldsFromMetadataCatalog(connection, recordType);
+    } catch {
+      // Catalog unavailable — fall through
+    }
+
+    // Use SELECT * to discover columns the catalog may not know about
+    // (e.g., fields from other subtypes or system columns). This does NOT
+    // filter the catalog — subtype-specific fields may not appear in an
+    // unfiltered SELECT * but are still valid with an itemtype filter.
+    let suiteqlRow: Record<string, unknown> | null = null;
+    let suiteqlColumns: Set<string> = new Set();
+    try {
+      const result = await this.executeSuiteQL(
+        connection,
+        `SELECT * FROM ${recordType} FETCH FIRST 1 ROWS ONLY`,
+        1,
+        0
+      );
+      const METADATA_KEYS = new Set(["links"]);
+      if (result.items.length > 0) {
+        suiteqlRow = result.items[0];
+        suiteqlColumns = new Set(
+          Object.keys(suiteqlRow).filter((k) => !METADATA_KEYS.has(k))
+        );
+      }
+    } catch {
+      // SELECT * failed — continue with catalog only
+    }
+
+    const fieldMap = new Map<string, NetSuiteField>();
+
+    if (catalogFields.length > 0) {
+      // Trust all catalog fields — they're valid on the SuiteQL table
+      // (may require itemtype filter for subtype-specific fields)
+      for (const f of catalogFields) {
+        fieldMap.set(f.name, f);
+      }
+
+      // Supplement with SuiteQL columns not in the catalog
+      for (const col of suiteqlColumns) {
+        if (!fieldMap.has(col)) {
+          fieldMap.set(col, {
+            name: col,
+            type: suiteqlRow ? inferTypeFromValue(suiteqlRow[col]) : "STRING",
+            label: col,
+            mandatory: false,
+            isCustom: isCustomFieldName(col),
+          });
+        }
+      }
+    } else if (suiteqlColumns.size > 0 && suiteqlRow) {
+      // No catalog — build from SELECT * row with type inference
+      for (const col of suiteqlColumns) {
+        fieldMap.set(col, {
+          name: col,
+          type: inferTypeFromValue(suiteqlRow[col]),
+          label: col,
+          mandatory: false,
+          isCustom: isCustomFieldName(col),
+        });
+      }
+    } else {
+      // Neither source returned data — try legacy SuiteQL fallback
+      return this.getFieldsFromSuiteQL(connection, recordType);
+    }
+
+    // Discover custom fields from the customfield table that may be missing
+    // from both catalog and SELECT * (null-valued custom fields are often
+    // omitted from SuiteQL results).
+    try {
+      const customFields = await this.executeSuiteQL(
+        connection,
+        `SELECT scriptid, label, fieldtype FROM customfield WHERE appliesto = '${mapRecordTypeToAppliesto(recordType)}'`,
+        1000,
+        0
+      );
+      for (const row of customFields.items) {
+        const scriptId = String(row.scriptid ?? "").toLowerCase();
+        if (!scriptId || fieldMap.has(scriptId)) continue;
+        fieldMap.set(scriptId, {
+          name: scriptId,
+          type: mapCustomFieldType(String(row.fieldtype ?? "")),
+          label: String(row.label ?? scriptId),
+          mandatory: false,
+          isCustom: true,
+        });
+      }
+    } catch {
+      // customfield table may not be accessible
+    }
+
+    // Sort: standard first, then custom, alphabetical within each group
+    return Array.from(fieldMap.values()).sort((a, b) => {
+      if (a.isCustom !== b.isCustom) return a.isCustom ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  /** Fetch fields from the REST metadata-catalog endpoint. */
+  private async getFieldsFromMetadataCatalog(
+    connection: NetSuiteProviderConnection,
+    recordType: string
+  ): Promise<NetSuiteField[]> {
+    // SuiteQL table names differ from REST record type names.
+    // Try the REST name first, then fall back to the SuiteQL name.
+    const mapped = SUITEQL_TO_REST_RECORD_MAP[recordType.toLowerCase()];
+    const restNames = mapped && mapped !== recordType
+      ? [mapped, recordType]
+      : [recordType];
+
+    let response: Response | null = null;
+    for (const name of restNames) {
+      const url = `${connection.baseUrl}/services/rest/record/v1/metadata-catalog/${name}`;
+      try {
+        response = await this.signedRequest(connection, "GET", url, undefined, {
+          Accept: "application/schema+json",
+        });
+        break;
+      } catch {
+        // Try next name
+      }
+    }
+
+    if (!response) throw new Error("Metadata catalog not available");
+
+    const data = (await response.json()) as {
+      properties?: Record<string, {
+        title?: string;
+        type?: string;
+        format?: string;
+        enum?: string[];
+        nullable?: boolean;
+        "x-ns-custom-field"?: boolean;
+      }>;
+    };
+
+    if (!data.properties) return [];
+
+    const SKIP_KEYS = new Set(["links", "id", "refName"]);
+    const fields: NetSuiteField[] = [];
+
+    for (const [name, meta] of Object.entries(data.properties)) {
+      if (SKIP_KEYS.has(name)) continue;
+      // Skip arrays (e.g., links)
+      if (meta.type === "array") continue;
+      // For object types, distinguish reference fields (valid SuiteQL columns that
+      // return an internal ID) from sub-record/sublist collections (not queryable).
+      // Reference fields have { id, refName } in properties; sublists have
+      // { totalResults, count, hasMore, offset } — paginated collection markers.
+      if (meta.type === "object") {
+        const props = meta.properties as Record<string, unknown> | undefined;
+        const isReference = props && "id" in props && !("totalResults" in props);
+        if (!isReference) continue;
+      }
+
+      // SuiteQL requires lowercase identifiers — the catalog returns camelCase
+      // (e.g., "salesDescription") but SuiteQL only accepts "salesdescription".
+      const fieldName = name.toLowerCase();
+      const custom = meta["x-ns-custom-field"] === true || isCustomFieldName(fieldName);
+      const isRef = meta.type === "object";
+      const fieldType = isRef ? "INTEGER" : mapCatalogType(meta.type, meta.format);
+      fields.push({
+        name: fieldName,
+        type: fieldType,
+        label: meta.title ?? name,
+        mandatory: meta.nullable === false,
+        isCustom: custom,
+        isReference: isRef,
+      });
+    }
+
+    // Sort: standard fields first, then custom fields, alphabetical within each group
+    return fields.sort((a, b) => {
+      if (a.isCustom !== b.isCustom) return a.isCustom ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  /** Fallback: discover fields via SuiteQL SELECT * + customfield query. */
+  private async getFieldsFromSuiteQL(
+    connection: NetSuiteProviderConnection,
+    recordType: string
+  ): Promise<NetSuiteField[]> {
+    // Standard fields from SELECT * (limit 1)
     const result = await this.executeSuiteQL(
       connection,
       `SELECT * FROM ${recordType}`,
@@ -327,22 +545,53 @@ export class NetSuiteProvider implements ConnectionProvider {
       0
     );
 
-    if (result.items.length === 0) {
-      // Record type exists but has no rows — column names unavailable
-      return [];
+    const METADATA_KEYS = new Set(["links"]);
+    const fieldMap = new Map<string, NetSuiteField>();
+
+    if (result.items.length > 0) {
+      for (const [name, value] of Object.entries(result.items[0])) {
+        if (METADATA_KEYS.has(name)) continue;
+        fieldMap.set(name, {
+          name,
+          type: inferTypeFromValue(value),
+          label: name,
+          mandatory: false,
+          isCustom: isCustomFieldName(name),
+        });
+      }
     }
 
-    // Extract field names from the first row and infer types from values.
-    // Filter out "links" — it's HATEOAS metadata, not an actual column.
-    const METADATA_KEYS = new Set(["links"]);
-    return Object.entries(result.items[0])
-      .filter(([name]) => !METADATA_KEYS.has(name))
-      .map(([name, value]) => ({
-        name,
-        type: inferTypeFromValue(value),
-        label: name,
-        mandatory: false,
-      }));
+    // Discover custom fields that may be missing from the sample row
+    // (null-valued custom fields are often omitted from SuiteQL results)
+    try {
+      const customFields = await this.executeSuiteQL(
+        connection,
+        `SELECT scriptid, label, fieldtype FROM customfield WHERE appliesto = '${mapRecordTypeToAppliesto(recordType)}'`,
+        1000,
+        0
+      );
+
+      for (const row of customFields.items) {
+        const scriptId = String(row.scriptid ?? "").toLowerCase();
+        if (!scriptId || fieldMap.has(scriptId)) continue;
+
+        fieldMap.set(scriptId, {
+          name: scriptId,
+          type: mapCustomFieldType(String(row.fieldtype ?? "")),
+          label: String(row.label ?? scriptId),
+          mandatory: false,
+          isCustom: true,
+        });
+      }
+    } catch {
+      // customfield table may not be accessible — continue with what we have
+    }
+
+    // Sort: standard first, then custom, alphabetical within each
+    return Array.from(fieldMap.values()).sort((a, b) => {
+      if (a.isCustom !== b.isCustom) return a.isCustom ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    });
   }
 
   /** List public saved searches via SuiteQL. */
@@ -372,6 +621,7 @@ export class NetSuiteProvider implements ConnectionProvider {
     hasMore: boolean;
     totalResults?: number;
   }> {
+    if (offset === 0) console.log(`[NetSuite] Executing query: ${query}`);
     const url = `${connection.baseUrl}${SUITEQL_PATH}`;
     const body = JSON.stringify({ q: query });
     const headers: Record<string, string> = {
@@ -623,8 +873,59 @@ function tryParseJson(text: string): Record<string, unknown> | null {
   }
 }
 
+/** Strip HATEOAS metadata fields injected by the NetSuite REST API. */
+function stripHateoasFields(row: Record<string, unknown>): Record<string, unknown> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { links, _links, ...rest } = row;
+  return rest;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Check if a field name is a NetSuite custom field. */
+function isCustomFieldName(name: string): boolean {
+  return /^(custitem|custbody|custcol|custrecord|custevent|custentity)_/i.test(name);
+}
+
+/** Map REST metadata-catalog JSON schema type/format to our type system. */
+function mapCatalogType(jsonType?: string, format?: string): string {
+  if (format === "date-time" || format === "date") return "TIMESTAMP";
+  if (format === "int64" || format === "int32") return "INTEGER";
+  if (format === "float" || format === "double") return "FLOAT";
+  if (jsonType === "boolean") return "BOOLEAN";
+  if (jsonType === "integer" || jsonType === "number") {
+    return format === "float" || format === "double" ? "FLOAT" : "INTEGER";
+  }
+  return "STRING";
+}
+
+/** Map NetSuite customfield.fieldtype values to our type system. */
+function mapCustomFieldType(fieldType: string): string {
+  const t = fieldType.toUpperCase();
+  if (t === "CHECKBOX") return "BOOLEAN";
+  if (t === "DATE" || t === "DATETIMETZ") return "TIMESTAMP";
+  if (t === "INTEGER" || t === "INTEGERNUMBER") return "INTEGER";
+  if (t === "FLOAT" || t === "CURRENCY" || t === "PERCENT" || t === "DECIMALNUMBER") return "FLOAT";
+  return "STRING"; // TEXT, TEXTAREA, SELECT, MULTISELECT, RICHTEXT, etc.
+}
+
+/**
+ * Map a SuiteQL record type name to the NetSuite customfield.appliesto value.
+ * NetSuite uses specific enum values like ITEM, ENTITY, TRANSACTION, etc.
+ */
+function mapRecordTypeToAppliesto(recordType: string): string {
+  const mapping: Record<string, string> = {
+    item: "ITEM",
+    customer: "ENTITY",
+    vendor: "ENTITY",
+    employee: "ENTITY",
+    contact: "ENTITY",
+    transaction: "TRANSACTION",
+    transactionline: "TRANSACTIONCOLUMN",
+  };
+  return mapping[recordType.toLowerCase()] ?? recordType.toUpperCase();
 }
 
 // ─── SuiteQL Builder ─────────────────────────────────────
