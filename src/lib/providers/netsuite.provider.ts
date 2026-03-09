@@ -347,10 +347,13 @@ export class NetSuiteProvider implements ConnectionProvider {
 
     // The REST metadata catalog describes a SPECIFIC record subtype (e.g.,
     // inventoryItem) while SuiteQL queries the GENERIC union table (e.g., item).
-    // The catalog may advertise fields that don't exist on this account's SuiteQL
-    // schema (e.g., salesdescription appears in the inventoryItem catalog but
-    // isn't queryable on the item table for some accounts). We validate catalog
-    // fields against SELECT * and exclude any that aren't confirmed by SuiteQL.
+    // The catalog is trusted for field discovery — it provides rich metadata
+    // (types, labels, isReference, mandatory). SELECT * only supplements with
+    // columns the catalog doesn't know about.
+    //
+    // NOTE: SELECT * cannot be used to validate/filter catalog fields because
+    // NetSuite omits null-valued columns from JSON responses. A field that's
+    // null in the first row won't appear in SELECT * but is still queryable.
 
     let catalogFields: NetSuiteField[] = [];
     try {
@@ -359,8 +362,8 @@ export class NetSuiteProvider implements ConnectionProvider {
       // Catalog unavailable — fall through
     }
 
-    // SELECT * returns the actual queryable columns for this account/table.
-    // Used to validate catalog fields and discover columns the catalog misses.
+    // SELECT * discovers columns the catalog may not know about (system columns,
+    // fields from other subtypes). It does NOT filter catalog fields.
     let suiteqlRow: Record<string, unknown> | null = null;
     let suiteqlColumns: Set<string> = new Set();
     try {
@@ -378,28 +381,15 @@ export class NetSuiteProvider implements ConnectionProvider {
         );
       }
     } catch {
-      // SELECT * failed — continue with catalog only (best effort)
+      // SELECT * failed — continue with catalog only
     }
 
     const fieldMap = new Map<string, NetSuiteField>();
 
-    if (catalogFields.length > 0 && suiteqlColumns.size > 0) {
-      // Both sources available — intersect: only keep catalog fields that are
-      // confirmed queryable by SELECT *. The catalog may advertise fields that
-      // don't exist on this account (account-specific features, disabled fields).
-      const excluded: string[] = [];
+    if (catalogFields.length > 0) {
+      // Trust all catalog fields
       for (const f of catalogFields) {
-        if (suiteqlColumns.has(f.name)) {
-          fieldMap.set(f.name, f);
-        } else {
-          excluded.push(f.name);
-        }
-      }
-      if (excluded.length > 0) {
-        console.warn(
-          `[NetSuite] ${excluded.length} catalog field(s) not found in SuiteQL ` +
-          `${recordType} table (excluded): ${excluded.join(", ")}`
-        );
+        fieldMap.set(f.name, f);
       }
 
       // Supplement with SuiteQL columns not in the catalog
@@ -413,11 +403,6 @@ export class NetSuiteProvider implements ConnectionProvider {
             isCustom: isCustomFieldName(col),
           });
         }
-      }
-    } else if (catalogFields.length > 0) {
-      // Catalog only (SELECT * failed) — trust catalog as best effort
-      for (const f of catalogFields) {
-        fieldMap.set(f.name, f);
       }
     } else if (suiteqlColumns.size > 0 && suiteqlRow) {
       // No catalog — build from SELECT * row with type inference
