@@ -214,10 +214,10 @@ export function HistoryList({ initialRuns, initialCursor, reports }: HistoryList
       {/* Error detail modal */}
       {errorModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setErrorModal(null)}>
-          <div className="bg-deep border border-border-mid max-w-lg w-full mx-4" onClick={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" className="bg-deep border border-border-mid max-w-lg w-full mx-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <h3 className="heading-norse text-sm">Error Details</h3>
-              <button onClick={() => setErrorModal(null)} className="text-text-dim hover:text-text text-xl">
+              <button aria-label="Close" onClick={() => setErrorModal(null)} className="text-text-dim hover:text-text text-xl">
                 &times;
               </button>
             </div>

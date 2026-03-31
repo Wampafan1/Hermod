@@ -504,12 +504,15 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
           onClick={() => setShowPreview(false)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
             className="bg-deep border border-border-mid w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <h3 className="heading-norse text-sm">Email Preview</h3>
               <button
+                aria-label="Close preview"
                 onClick={() => setShowPreview(false)}
                 className="text-text-dim hover:text-text text-xl"
               >

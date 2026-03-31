@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 interface RouteListItem {
   id: string;
@@ -30,6 +31,8 @@ const STATUS_DOT: Record<string, string> = {
 export function RouteList() {
   const [routes, setRoutes] = useState<RouteListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [runningRouteId, setRunningRouteId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const toast = useToast();
   const router = useRouter();
 
@@ -64,6 +67,7 @@ export function RouteList() {
   }
 
   async function runNow(id: string, name: string) {
+    setRunningRouteId(id);
     toast.success(`Running ${name}...`);
     try {
       const res = await fetch(`/api/bifrost/routes/${id}/run`, { method: "POST" });
@@ -79,11 +83,19 @@ export function RouteList() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Run failed";
       toast.error(msg);
+    } finally {
+      setRunningRouteId(null);
     }
   }
 
-  async function deleteRoute(id: string, name: string) {
-    if (!confirm(`Delete route "${name}"? This cannot be undone.`)) return;
+  function deleteRoute(id: string, name: string) {
+    setDeleteTarget({ id, name });
+  }
+
+  async function executeDelete() {
+    if (!deleteTarget) return;
+    const { id, name } = deleteTarget;
+    setDeleteTarget(null);
     try {
       const res = await fetch(`/api/bifrost/routes/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete route");
@@ -134,17 +146,18 @@ export function RouteList() {
           </Link>
         </div>
       ) : (
-        <div className="border border-border bg-deep overflow-hidden">
-          <table className="w-full text-xs">
+        <div className="border border-border bg-deep">
+          <div className="overflow-x-auto">
+          <table className="w-full text-xs min-w-[700px]">
             <thead>
               <tr className="border-b border-border text-text-dim tracking-[0.15em] uppercase">
-                <th className="px-4 py-3 text-left font-normal">Status</th>
-                <th className="px-4 py-3 text-left font-normal">Name</th>
-                <th className="px-4 py-3 text-left font-normal">Source</th>
-                <th className="px-4 py-3 text-left font-normal">Destination</th>
-                <th className="px-4 py-3 text-left font-normal">Last Run</th>
-                <th className="px-4 py-3 text-left font-normal">Next Run</th>
-                <th className="px-4 py-3 text-right font-normal">Actions</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Status</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Name</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Source</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Destination</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Last Run</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Next Run</th>
+                <th scope="col" className="px-4 py-3 text-right font-normal">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -164,7 +177,9 @@ export function RouteList() {
                         <span className={`w-2 h-2 rounded-full ${statusColor}`} />
                         <button
                           onClick={() => toggleEnabled(route.id, route.enabled)}
-                          className={`text-[0.6rem] tracking-wider uppercase px-2 py-0.5 border ${
+                          aria-pressed={route.enabled}
+                          aria-label={`Route ${route.name} is ${route.enabled ? "enabled" : "disabled"}`}
+                          className={`text-[0.6rem] tracking-wider uppercase px-3 py-2 sm:px-2 sm:py-0.5 border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold ${
                             route.enabled
                               ? "border-emerald-500/30 text-emerald-400"
                               : "border-border text-text-dim"
@@ -209,19 +224,20 @@ export function RouteList() {
                       <div className="flex items-center justify-end gap-2">
                         <button
                           onClick={() => runNow(route.id, route.name)}
-                          className="btn-subtle text-[0.6rem] px-2 py-1"
+                          disabled={runningRouteId === route.id}
+                          className="btn-subtle text-[0.6rem] px-3 py-2 sm:px-2 sm:py-1"
                         >
-                          Run Now
+                          {runningRouteId === route.id ? "Running..." : "Run Now"}
                         </button>
                         <Link
                           href={`/bifrost/${route.id}/history`}
-                          className="btn-subtle text-[0.6rem] px-2 py-1"
+                          className="btn-subtle text-[0.6rem] px-3 py-2 sm:px-2 sm:py-1"
                         >
                           Logs
                         </Link>
                         <button
                           onClick={() => deleteRoute(route.id, route.name)}
-                          className="btn-subtle text-[0.6rem] px-2 py-1 text-ember/70 hover:text-ember"
+                          className="btn-subtle text-[0.6rem] px-3 py-2 sm:px-2 sm:py-1 text-ember/70 hover:text-ember"
                         >
                           Delete
                         </button>
@@ -232,8 +248,17 @@ export function RouteList() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Route"
+        message={deleteTarget ? `Route "${deleteTarget.name}" will be permanently removed. This cannot be undone.` : ""}
+        onConfirm={executeDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

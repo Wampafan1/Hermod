@@ -135,13 +135,13 @@ export function RouteHistory({ routeId }: { routeId: string }) {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border text-text-dim tracking-[0.15em] uppercase">
-                <th className="px-4 py-3 text-left font-normal">Status</th>
-                <th className="px-4 py-3 text-left font-normal">Started</th>
-                <th className="px-4 py-3 text-left font-normal">Duration</th>
-                <th className="px-4 py-3 text-left font-normal">Extracted</th>
-                <th className="px-4 py-3 text-left font-normal">Loaded</th>
-                <th className="px-4 py-3 text-left font-normal">Errors</th>
-                <th className="px-4 py-3 text-left font-normal">Trigger</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Status</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Started</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Duration</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Extracted</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Loaded</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Errors</th>
+                <th scope="col" className="px-4 py-3 text-left font-normal">Trigger</th>
               </tr>
             </thead>
             <tbody>
