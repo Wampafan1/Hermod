@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 interface Schedule {
   id: string;
@@ -19,9 +21,15 @@ interface Schedule {
 
 const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+function formatRecipientCount(n: number): string {
+  return `${n} recipient${n !== 1 ? "s" : ""}`;
+}
+
 export function ScheduleList({ schedules }: { schedules: Schedule[] }) {
   const router = useRouter();
   const toast = useToast();
+  const [sendNowTarget, setSendNowTarget] = useState<Schedule | null>(null);
+  const [sending, setSending] = useState(false);
 
   async function handleToggle(id: string) {
     try {
@@ -35,6 +43,27 @@ export function ScheduleList({ schedules }: { schedules: Schedule[] }) {
       router.refresh();
     } catch {
       toast.error("Network error");
+    }
+  }
+
+  async function handleSendNow() {
+    if (!sendNowTarget) return;
+    setSending(true);
+    try {
+      const res = await fetch(`/api/schedules/${sendNowTarget.id}/send-now`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Send failed");
+        return;
+      }
+      toast.success(`Sent to ${formatRecipientCount(data.recipientCount)}`);
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setSending(false);
+      setSendNowTarget(null);
     }
   }
 
@@ -77,66 +106,91 @@ export function ScheduleList({ schedules }: { schedules: Schedule[] }) {
   }
 
   return (
-    <div className="bg-deep border border-border overflow-hidden">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border">
-            <th className="label-norse text-left px-4 py-3">Report</th>
-            <th className="label-norse text-left px-4 py-3">Frequency</th>
-            <th className="label-norse text-left px-4 py-3">Next Run</th>
-            <th className="label-norse text-left px-4 py-3">Recipients</th>
-            <th className="label-norse text-center px-4 py-3">Enabled</th>
-            <th className="text-right px-4 py-3"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {schedules.map((s) => (
-            <tr key={s.id} className="border-b border-border hover:bg-gold/[0.02]">
-              <td className="px-4 py-3 text-text">
-                {s.report.name}
-              </td>
-              <td className="px-4 py-3 text-text-dim text-xs tracking-wide">
-                {describeFrequency(s)}
-              </td>
-              <td className="px-4 py-3 text-text-dim text-xs">
-                {s.nextRunAt
-                  ? new Date(s.nextRunAt).toLocaleString()
-                  : "\u2014"}
-              </td>
-              <td className="px-4 py-3 text-text-dim text-xs">
-                {s.recipients.length} recipient{s.recipients.length !== 1 ? "s" : ""}
-              </td>
-              <td className="px-4 py-3 text-center">
-                <button
-                  onClick={() => handleToggle(s.id)}
-                  className={`relative inline-flex h-5 w-9 items-center transition-colors ${
-                    s.enabled
-                      ? "bg-gold-dim border border-gold"
-                      : "bg-deep border border-border-mid"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-3 w-3 rounded-full transition-transform ${
-                      s.enabled
-                        ? "translate-x-[18px] bg-gold-bright"
-                        : "translate-x-1 bg-text-dim"
-                    }`}
-                  />
-                </button>
-              </td>
-              <td className="px-4 py-3 text-right">
-                <button
-                  onClick={() => router.push(`/reports/${s.report.id}/schedule`)}
-                  className="btn-subtle"
-                >
-                  Edit
-                </button>
-              </td>
+    <>
+      <div className="bg-deep border border-border overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border">
+              <th scope="col" className="label-norse text-left px-4 py-3">Report</th>
+              <th scope="col" className="label-norse text-left px-4 py-3">Frequency</th>
+              <th scope="col" className="label-norse text-left px-4 py-3">Next Run</th>
+              <th scope="col" className="label-norse text-left px-4 py-3">Recipients</th>
+              <th scope="col" className="label-norse text-center px-4 py-3">Enabled</th>
+              <th scope="col" className="text-right px-4 py-3"><span className="sr-only">Actions</span></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {schedules.map((s) => (
+              <tr key={s.id} className="border-b border-border hover:bg-gold/[0.02]">
+                <td className="px-4 py-3 text-text">
+                  {s.report.name}
+                </td>
+                <td className="px-4 py-3 text-text-dim text-xs tracking-wide">
+                  {describeFrequency(s)}
+                </td>
+                <td className="px-4 py-3 text-text-dim text-xs">
+                  {s.nextRunAt
+                    ? new Date(s.nextRunAt).toLocaleString()
+                    : "\u2014"}
+                </td>
+                <td className="px-4 py-3 text-text-dim text-xs">
+                  {formatRecipientCount(s.recipients.length)}
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <button
+                    onClick={() => handleToggle(s.id)}
+                    className={`relative inline-flex h-5 w-9 items-center transition-colors ${
+                      s.enabled
+                        ? "bg-gold-dim border border-gold"
+                        : "bg-deep border border-border-mid"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3 w-3 rounded-full transition-transform ${
+                        s.enabled
+                          ? "translate-x-[18px] bg-gold-bright"
+                          : "translate-x-1 bg-text-dim"
+                      }`}
+                    />
+                  </button>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="inline-flex items-center gap-2">
+                    <button
+                      onClick={() => setSendNowTarget(s)}
+                      className="btn-subtle text-frost hover:text-gold-bright"
+                    >
+                      Send Now
+                    </button>
+                    <button
+                      onClick={() => router.push(`/reports/${s.report.id}/schedule`)}
+                      className="btn-subtle"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <ConfirmDialog
+        open={!!sendNowTarget}
+        title="Send Now"
+        message={
+          sendNowTarget
+            ? `Send ${sendNowTarget.report.name} now to ${formatRecipientCount(sendNowTarget.recipients.length)}?`
+            : ""
+        }
+        confirmLabel="Send"
+        confirmVariant="primary"
+        loading={sending}
+        onConfirm={handleSendNow}
+        onCancel={() => { if (!sending) setSendNowTarget(null); }}
+      />
+    </>
   );
 }
 
