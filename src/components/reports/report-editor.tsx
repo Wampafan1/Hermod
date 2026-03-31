@@ -10,7 +10,7 @@ import { ReportConfig } from "./report-config";
 import { useToast } from "@/components/toast";
 import { useHermodLoading } from "@/components/hermod-loading-context";
 import type { ColumnConfig } from "@/lib/column-config";
-import { syncWidthsFromTemplate } from "@/lib/column-config";
+import { syncWidthsFromTemplate, extractTemplatePixelWidths } from "@/lib/column-config";
 
 const SqlEditor = dynamic(
   () => import("./sql-editor").then((m) => m.SqlEditor),
@@ -75,12 +75,14 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [loaded, setLoaded] = useState(isNew);
+  const [showPreview, setShowPreview] = useState(false);
 
   const templateRef = useRef<SheetTemplate | null>(null);
   const columnConfigRef = useRef<ColumnConfig[]>([]);
   const rawColumnsRef = useRef<string[]>([]);
   const rawRowsRef = useRef<Record<string, unknown>[]>([]);
   const sheetExtractRef = useRef<(() => SheetTemplate | null) | null>(null);
+  const baselinePixelWidthsRef = useRef<Map<string, number>>(new Map());
 
   // Keep refs in sync
   useEffect(() => {
@@ -116,9 +118,13 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
           setTemplate(tmpl);
           templateRef.current = tmpl;
           setStartRow(tmpl.startRow ?? 0);
+          // Capture baseline pixel widths so we can detect Univer drag-resize
+          baselinePixelWidthsRef.current = extractTemplatePixelWidths(tmpl);
+          console.log('[LOAD:report-editor] baseline from DB:', Object.fromEntries(Array.from(baselinePixelWidthsRef.current.entries()).map(([k,v]) => [k.slice(0,6), v])));
         }
         if (report.columnConfig && Array.isArray(report.columnConfig)) {
           const migrated = migrateConfigWidths(report.columnConfig as ColumnConfig[]);
+          console.log('[LOAD:report-editor] config widths from DB:', migrated.map(c => ({ id: c.id.slice(0,6), name: c.displayName, width: c.width })));
           setColumnConfig(migrated);
           columnConfigRef.current = migrated;
         }
@@ -153,6 +159,10 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
   }
 
   const handleTemplateChange = useCallback((tmpl: SheetTemplate) => {
+    if (tmpl?.snapshot?.sheets) {
+      const sh = Object.values(tmpl.snapshot.sheets)[0];
+      console.log('[handleTemplateChange:report-editor] auto-save/unmount template columnData widths:', sh?.columnData ? Object.fromEntries(Object.entries(sh.columnData).map(([k,v]) => [k, (v as {w?:number}).w])) : 'NONE');
+    }
     templateRef.current = tmpl;
     // Don't setHasChanges here — template auto-save fires every 5s and would
     // immediately re-dirty after every save. The extract-before-save ensures
@@ -162,6 +172,7 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
 
   const handleColumnConfigChange = useCallback(
     (newConfig: ColumnConfig[]) => {
+      console.log('[handleColumnConfigChange:report-editor] new widths:', newConfig.map(c => ({ id: c.id.slice(0,6), name: c.displayName, width: c.width })));
       setColumnConfig(newConfig);
       setHasChanges(true);
       // Recompute mapped data synchronously using refs for raw data
@@ -237,16 +248,34 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
       toast.error("Name and connection are required");
       return;
     }
+    console.log('[handleSave:report-editor] === SAVE START ===');
+    console.log('[handleSave:report-editor] columnConfigRef widths BEFORE extract:', columnConfigRef.current.map(c => ({ id: c.id.slice(0,6), name: c.displayName, width: c.width })));
+    console.log('[handleSave:report-editor] baselinePixelWidths BEFORE sync:', Object.fromEntries(Array.from(baselinePixelWidthsRef.current.entries()).map(([k,v]) => [k.slice(0,6), v])));
     // Force-extract live template before saving (covers <5s auto-save gap)
     if (sheetExtractRef.current) {
       const tmpl = sheetExtractRef.current();
       if (tmpl) templateRef.current = tmpl;
     }
-    // Sync Univer column widths → column config so export uses the latest widths
+    if (templateRef.current?.snapshot?.sheets) {
+      const sh = Object.values(templateRef.current.snapshot.sheets)[0];
+      console.log('[handleSave:report-editor] extracted template columnData:', sh?.columnData ? Object.fromEntries(Object.entries(sh.columnData).map(([k,v]) => [k, (v as {w?:number}).w])) : 'NONE');
+      console.log('[handleSave:report-editor] extracted template columnMap:', templateRef.current.columnMap ? Object.fromEntries(Object.entries(templateRef.current.columnMap).map(([k,v]) => [k.slice(0,6), v])) : 'NONE');
+    }
+    // Sync Univer column widths → column config, but ONLY for columns whose
+    // Univer pixel width actually changed (user dragged the column border).
+    // Unchanged columns keep their config-panel value across saves and reloads.
     if (templateRef.current && columnConfigRef.current.length > 0) {
-      const synced = syncWidthsFromTemplate(columnConfigRef.current, templateRef.current);
+      const synced = syncWidthsFromTemplate(
+        columnConfigRef.current,
+        templateRef.current,
+        baselinePixelWidthsRef.current,
+      );
+      console.log('[handleSave:report-editor] synced widths AFTER syncWidthsFromTemplate:', synced.map(c => ({ id: c.id.slice(0,6), name: c.displayName, width: c.width })));
       setColumnConfig(synced);
       columnConfigRef.current = synced;
+      // Update baseline so the next save doesn't re-sync these columns
+      baselinePixelWidthsRef.current = extractTemplatePixelWidths(templateRef.current);
+      console.log('[handleSave:report-editor] new baseline AFTER save:', Object.fromEntries(Array.from(baselinePixelWidthsRef.current.entries()).map(([k,v]) => [k.slice(0,6), v])));
     }
     setSaving(true);
     try {
@@ -259,6 +288,7 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
         columnConfig: columnConfigRef.current.length > 0 ? columnConfigRef.current : undefined,
         blueprintId,
       };
+      console.log('[handleSave:report-editor] PAYLOAD columnConfig widths:', payload.columnConfig ? (payload.columnConfig as ColumnConfig[]).map((c: ColumnConfig) => ({ id: c.id.slice(0,6), name: c.displayName, width: c.width })) : 'NONE');
       const url = isNew ? "/api/reports" : `/api/reports/${reportId}`;
       const method = isNew ? "POST" : "PUT";
       const res = await fetch(url, {
@@ -458,7 +488,44 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
           hasChanges={hasChanges}
           isNew={isNew}
         />
+        {!isNew && (
+          <button
+            onClick={() => setShowPreview(true)}
+            className="btn-ghost w-full text-xs mt-2"
+          >
+            Preview Email
+          </button>
+        )}
       </div>
+
+      {showPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setShowPreview(false)}
+        >
+          <div
+            className="bg-deep border border-border-mid w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h3 className="heading-norse text-sm">Email Preview</h3>
+              <button
+                onClick={() => setShowPreview(false)}
+                className="text-text-dim hover:text-text text-xl"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <iframe
+                src={`/api/reports/${reportId}/email-preview`}
+                className="w-full h-full min-h-[60vh] border-0 bg-white"
+                title="Email preview"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
