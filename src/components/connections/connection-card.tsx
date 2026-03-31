@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+import { formatDistanceToNow } from "date-fns";
+import { useToast } from "@/components/toast";
 import type { ConnectionType } from "@/lib/providers/types";
 
 export interface UnifiedConnection {
@@ -64,6 +67,25 @@ function getDetailLine(connection: UnifiedConnection): string | null {
 
 export function ConnectionCard({ connection, onEdit, onDelete }: ConnectionCardProps) {
   const detail = getDetailLine(connection);
+  const toast = useToast();
+  const [testing, setTesting] = useState(false);
+
+  async function handleTest() {
+    setTesting(true);
+    try {
+      const res = await fetch(`/api/connections/${connection.id}/test`, { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("Connection is healthy");
+      } else {
+        toast.error(data.error || "Connection test failed");
+      }
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setTesting(false);
+    }
+  }
 
   return (
     <div className="card-norse">
@@ -78,8 +100,27 @@ export function ConnectionCard({ connection, onEdit, onDelete }: ConnectionCardP
               {detail}
             </p>
           )}
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                connection.status === "OK"
+                  ? "bg-emerald-500"
+                  : connection.status === "FAILED"
+                    ? "bg-red-500"
+                    : "bg-gray-600"
+              }`}
+            />
+            <span className="text-[0.6rem] text-text-dim tracking-wider">
+              {connection.lastTestedAt
+                ? `Tested ${formatDistanceToNow(new Date(connection.lastTestedAt), { addSuffix: true })}`
+                : "Never tested"}
+            </span>
+          </div>
         </div>
         <div className="flex gap-2">
+          <button onClick={handleTest} disabled={testing} className="btn-subtle text-frost hover:text-gold-bright">
+            {testing ? "Testing..." : "Test"}
+          </button>
           <button onClick={onEdit} className="btn-subtle">
             Edit
           </button>
