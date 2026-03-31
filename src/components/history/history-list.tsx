@@ -171,16 +171,18 @@ export function HistoryList({ initialRuns, initialCursor, reports }: HistoryList
                 <tr key={run.id} className="border-b border-border hover:bg-gold/[0.02]">
                   <td className="px-4 py-3 text-text">{run.report.name}</td>
                   <td className="px-4 py-3">
-                    <span
-                      className={`${STATUS_BADGES[run.status] ?? "badge-neutral"} ${run.status === "FAILED" ? "cursor-pointer" : ""}`}
-                      onClick={() =>
-                        run.status === "FAILED" && run.error
-                          ? setErrorModal(run.error)
-                          : null
-                      }
-                    >
-                      {run.status}
-                    </span>
+                    {run.status === "FAILED" && run.error ? (
+                      <button
+                        className={`${STATUS_BADGES[run.status]} cursor-pointer`}
+                        onClick={() => setErrorModal(run.error!)}
+                      >
+                        {run.status}
+                      </button>
+                    ) : (
+                      <span className={STATUS_BADGES[run.status] ?? "badge-neutral"}>
+                        {run.status}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-text-dim">{run.rowCount ?? "\u2014"}</td>
                   <td className="px-4 py-3 text-text-dim text-xs">{relativeTime(run.startedAt)}</td>
@@ -214,9 +216,9 @@ export function HistoryList({ initialRuns, initialCursor, reports }: HistoryList
       {/* Error detail modal */}
       {errorModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setErrorModal(null)}>
-          <div role="dialog" aria-modal="true" className="bg-deep border border-border-mid max-w-lg w-full mx-4" onClick={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-labelledby="error-detail-title" className="bg-deep border border-border-mid max-w-lg w-full mx-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <h3 className="heading-norse text-sm">Error Details</h3>
+              <h3 id="error-detail-title" className="heading-norse text-sm">Error Details</h3>
               <button aria-label="Close" onClick={() => setErrorModal(null)} className="text-text-dim hover:text-text text-xl">
                 &times;
               </button>
