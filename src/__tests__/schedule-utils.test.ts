@@ -246,3 +246,69 @@ describe("describeSchedule", () => {
     expect(desc).toContain("9:00 AM");
   });
 });
+
+describe("DST transitions", () => {
+  // US DST 2026: spring forward March 8, fall back November 1
+  // America/Chicago: CST (UTC-6) → CDT (UTC-5) on Mar 8 at 2:00 AM
+
+  it("calculateNextRun preserves time across spring-forward DST", () => {
+    // March 7, 2026 at 8:00 AM CST (UTC-6) = 14:00 UTC
+    const before = new Date("2026-03-07T14:00:00Z");
+    const result = calculateNextRun(
+      {
+        frequency: "DAILY",
+        daysOfWeek: [],
+        dayOfMonth: null,
+        monthsOfYear: [],
+        timeHour: 8,
+        timeMinute: 0,
+        timezone: "America/Chicago",
+      },
+      before
+    );
+    // March 8 is spring-forward day. 8:00 AM CDT (UTC-5) = 13:00 UTC
+    expect(result.getUTCHours()).toBe(13);
+    expect(result.getUTCDate()).toBe(8);
+  });
+
+  it("advanceNextRun biweekly preserves time across spring-forward DST", () => {
+    // Feb 22 at 8:00 AM CST (UTC-6) = 14:00 UTC
+    const lastRun = new Date("2026-02-22T14:00:00Z");
+    const result = advanceNextRun(
+      {
+        frequency: "BIWEEKLY",
+        daysOfWeek: [0], // Sunday
+        dayOfMonth: null,
+        monthsOfYear: [],
+        timeHour: 8,
+        timeMinute: 0,
+        timezone: "America/Chicago",
+      },
+      lastRun
+    );
+    // 2 weeks later = March 8 (spring-forward day)
+    // 8:00 AM CDT (UTC-5) = 13:00 UTC
+    expect(result.getUTCHours()).toBe(13);
+    expect(result.getUTCDate()).toBe(8);
+  });
+
+  it("calculateNextRun preserves time across fall-back DST", () => {
+    // Oct 31, 2026 at 8:00 AM CDT (UTC-5) = 13:00 UTC
+    const before = new Date("2026-10-31T13:00:00Z");
+    const result = calculateNextRun(
+      {
+        frequency: "DAILY",
+        daysOfWeek: [],
+        dayOfMonth: null,
+        monthsOfYear: [],
+        timeHour: 8,
+        timeMinute: 0,
+        timezone: "America/Chicago",
+      },
+      before
+    );
+    // Nov 1 is fall-back day. 8:00 AM CST (UTC-6) = 14:00 UTC
+    expect(result.getUTCHours()).toBe(14);
+    expect(result.getUTCDate()).toBe(1);
+  });
+});
