@@ -27,7 +27,14 @@ export const GET = withAuth(async (req, session) => {
 // POST /api/bifrost/routes — Create a new route
 export const POST = withAuth(async (req, session) => {
   const body = await req.json();
-  const data = createRouteSchema.parse(body);
+  const parsed = createRouteSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Validation failed", details: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+  const data = parsed.data;
 
   // Validate source Connection belongs to user
   const source = await prisma.connection.findFirst({

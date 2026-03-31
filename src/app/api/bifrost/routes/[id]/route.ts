@@ -36,7 +36,14 @@ export const PUT = withAuth(async (req, session) => {
   }
 
   const body = await req.json();
-  const data = updateRouteSchema.parse(body);
+  const parsed = updateRouteSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Validation failed", details: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+  const data = parsed.data;
 
   // Recalculate nextRunAt if schedule fields changed
   let nextRunAt: Date | null | undefined;
@@ -72,6 +79,8 @@ export const PUT = withAuth(async (req, session) => {
       ...(data.timeHour !== undefined && { timeHour: data.timeHour }),
       ...(data.timeMinute !== undefined && { timeMinute: data.timeMinute }),
       ...(data.timezone !== undefined && { timezone: data.timezone }),
+      ...(data.cursorConfig !== undefined && { cursorConfig: data.cursorConfig as any }),
+      ...(data.needsFullReload !== undefined && { needsFullReload: data.needsFullReload }),
       ...(nextRunAt !== undefined && { nextRunAt }),
     },
   });
