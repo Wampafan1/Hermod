@@ -179,6 +179,8 @@ model Schedule {
   pgBossJobId       String?          // pg-boss job reference
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
+
+  @@index([enabled, nextRunAt])
 }
 
 enum ScheduleFrequency {
@@ -212,6 +214,7 @@ model RunLog {
   completedAt DateTime?
 
   @@index([reportId, status])
+  @@index([startedAt])
 }
 
 enum RunStatus {
@@ -316,6 +319,7 @@ model BifrostRoute {
   nextRunAt        DateTime?
   lastCheckpoint   DateTime?      // Incremental: last successful run timestamp
   cursorConfig     Json?          // CursorConfig: AI-detected cursor strategy (setup-time only)
+  needsFullReload  Boolean        @default(false)
 
   // Ownership
   userId           String
@@ -330,6 +334,7 @@ model BifrostRoute {
 
   @@index([sourceId])
   @@index([destId])
+  @@index([enabled, nextRunAt])
 }
 
 model RouteLog {
@@ -348,6 +353,7 @@ model RouteLog {
   completedAt      DateTime?
 
   @@index([routeId, status])
+  @@index([routeId, startedAt])
 }
 
 model HelheimEntry {
