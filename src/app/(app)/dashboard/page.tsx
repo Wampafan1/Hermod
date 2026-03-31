@@ -5,7 +5,9 @@ import Link from "next/link";
 export default async function DashboardPage() {
   const session = await requireAuth();
 
-  const [reportCount, connectionCount, recentRuns, upcomingSchedules] =
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  const [reportCount, connectionCount, recentRuns, upcomingSchedules, runCount30d] =
     await Promise.all([
       prisma.report.count({ where: { userId: session.user.id } }),
       prisma.connection.count({ where: { userId: session.user.id } }),
@@ -28,6 +30,12 @@ export default async function DashboardPage() {
         take: 5,
         include: { report: { select: { name: true } } },
       }),
+      prisma.runLog.count({
+        where: {
+          report: { userId: session.user.id },
+          startedAt: { gte: thirtyDaysAgo },
+        },
+      }),
     ]);
 
   return (
@@ -48,7 +56,7 @@ export default async function DashboardPage() {
           <StatCard label="Connections" value={connectionCount} rune="ᚷ" />
         </Link>
         <Link href="/history">
-          <StatCard label="Runs (30d)" value={recentRuns.length} rune="ᚺ" />
+          <StatCard label="Runs (30d)" value={runCount30d} rune="ᚺ" />
         </Link>
       </div>
 
