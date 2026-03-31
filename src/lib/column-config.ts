@@ -179,28 +179,85 @@ export function migrateConfigWidths(config: ColumnConfig[]): ColumnConfig[] {
   }));
 }
 
+/** Template type used by width-sync helpers */
+type TemplateWidthSource = {
+  snapshot?: { sheets?: Record<string, { columnData?: Record<number, { w?: number }> }> };
+  columnMap?: Record<string, number>;
+} | null;
+
+/**
+ * Extract a map of config-ID → Univer pixel width from a template snapshot.
+ * Used to establish a baseline so we can detect Univer drag-resize on save.
+ */
+export function extractTemplatePixelWidths(
+  template: TemplateWidthSource,
+): Map<string, number> {
+  const result = new Map<string, number>();
+  if (!template?.snapshot?.sheets || !template?.columnMap) {
+    return result;
+  }
+
+  const firstSheet = Object.values(template.snapshot.sheets)[0];
+  if (!firstSheet?.columnData) {
+    return result;
+  }
+
+  for (const [configId, tmplPos] of Object.entries(template.columnMap)) {
+    const tmplCol = firstSheet.columnData[tmplPos];
+    if (tmplCol?.w) {
+      result.set(configId, tmplCol.w);
+    }
+  }
+  return result;
+}
+
 /**
  * Sync column widths from a Univer template snapshot back into the column config.
- * Called before saving so the config (single source of truth for export) always
- * reflects the latest Univer drag-resize widths.
+ *
+ * Only syncs columns whose Univer pixel width has **changed** since the
+ * `baseline` was captured (i.e., the user dragged the column border in Univer).
+ * All other columns keep their current config width — this preserves values
+ * set via the column-config panel across saves and page reloads.
+ *
+ * @param baseline - Map of config-ID → pixel width captured at load / last save.
+ *   Pass an empty map on first load to sync everything; on subsequent saves the
+ *   baseline prevents stale Univer values from clobbering manual edits.
  */
 export function syncWidthsFromTemplate(
   config: ColumnConfig[],
-  template: { snapshot?: { sheets?: Record<string, { columnData?: Record<number, { w?: number }> }> }; columnMap?: Record<string, number> } | null
+  template: TemplateWidthSource,
+  baseline?: ReadonlyMap<string, number>,
 ): ColumnConfig[] {
-  if (!template?.snapshot?.sheets || !template?.columnMap) return config;
+  if (!template?.snapshot?.sheets || !template?.columnMap) {
+    return config;
+  }
 
   const firstSheet = Object.values(template.snapshot.sheets)[0];
-  if (!firstSheet?.columnData) return config;
+  if (!firstSheet?.columnData) {
+    return config;
+  }
 
   const columnData = firstSheet.columnData;
 
   return config.map((entry) => {
     const tmplPos = template.columnMap![entry.id];
-    if (tmplPos === undefined) return entry;
+    if (tmplPos === undefined) {
+      return entry;
+    }
 
     const tmplCol = columnData[tmplPos];
-    if (!tmplCol?.w) return entry;
+    if (!tmplCol?.w) {
+      return entry;
+    }
+
+    // If a baseline exists, only sync when the pixel width actually changed
+    // (i.e., user resized the column in Univer). Unchanged → keep config value.
+    if (baseline && baseline.size > 0) {
+      const baseW = baseline.get(entry.id);
+      if (baseW !== undefined && tmplCol.w === baseW) {
+        return entry;
+      }
+    }
 
     // Convert Univer pixel width to Excel character-width units
     const excelWidth = Math.round((tmplCol.w / UNIVER_PX_PER_EXCEL_WIDTH) * 100) / 100;
