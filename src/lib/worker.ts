@@ -12,6 +12,7 @@ import {
   markRecovered,
   markRetryFailed,
 } from "./bifrost/helheim/dead-letter";
+import { inferSchemaFromRows, normalizeRowDates, getDateColumns } from "./bifrost/engine";
 import { getProvider, toConnectionLike } from "./providers";
 import { withTimeout, safeErrorMessage } from "./async-utils";
 
@@ -220,7 +221,12 @@ async function main() {
             }
 
             const rows = await decompressPayload(entry.payload);
-            await destProvider.load!(conn, rows, destConfig);
+            // Infer explicit schema from the chunk data to prevent BigQuery
+            // autodetect from guessing wrong types (same as engine first-batch path).
+            const schema = inferSchemaFromRows(rows);
+            const dateCols = getDateColumns(schema);
+            if (dateCols.size > 0) normalizeRowDates(rows, dateCols);
+            await destProvider.load!(conn, rows, { ...destConfig, schema });
             await markRecovered(entry.id);
             console.log(`[Worker] Helheim entry ${entry.id} recovered`);
           } catch (retryErr) {
@@ -252,6 +258,23 @@ async function main() {
     }
   }, POLL_INTERVAL);
   console.log(`[Worker] Scheduler polling every ${POLL_INTERVAL / 1000}s`);
+
+  // ─── Graceful Shutdown ─────────────────────────
+  async function shutdown(signal: string) {
+    console.log(`[Worker] Received ${signal}, shutting down...`);
+    try {
+      const { markInFlightJobsFailed } = await import("./worker-shutdown");
+      await markInFlightJobsFailed(prisma);
+    } catch (err) {
+      console.error("[Worker] Shutdown cleanup error:", safeErrorMessage(err));
+    }
+    await boss.stop({ graceful: true, timeout: 10_000 });
+    await prisma.$disconnect();
+    process.exit(0);
+  }
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 
   // Start SFTP file watcher
   startSftpWatcher(prisma);
