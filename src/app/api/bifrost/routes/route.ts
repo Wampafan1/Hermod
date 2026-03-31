@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { createRouteSchema } from "@/lib/validations/bifrost";
@@ -94,9 +95,9 @@ export const POST = withAuth(async (req, session) => {
     data: {
       name: data.name,
       sourceId: data.sourceId,
-      sourceConfig: data.sourceConfig as any,
+      sourceConfig: data.sourceConfig as Prisma.InputJsonValue,
       destId: data.destId,
-      destConfig: data.destConfig as any,
+      destConfig: data.destConfig as Prisma.InputJsonValue,
       transformEnabled: data.transformEnabled,
       blueprintId: data.blueprintId ?? null,
       frequency: data.frequency ?? null,
@@ -106,7 +107,7 @@ export const POST = withAuth(async (req, session) => {
       timeMinute: data.timeMinute,
       timezone: data.timezone,
       nextRunAt,
-      cursorConfig: (data.cursorConfig ?? null) as any,
+      cursorConfig: (data.cursorConfig ?? null) as Prisma.InputJsonValue,
       userId: session.user.id,
     },
   });

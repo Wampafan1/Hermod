@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { createReportSchema } from "@/lib/validations/reports";
@@ -62,8 +63,8 @@ export const POST = withAuth(async (req, session) => {
       description: parsed.data.description,
       sqlQuery: parsed.data.sqlQuery,
       connectionId: parsed.data.connectionId,
-      formatting: parsed.data.formatting as any ?? undefined,
-      columnConfig: parsed.data.columnConfig as any ?? undefined,
+      formatting: parsed.data.formatting as Prisma.InputJsonValue ?? undefined,
+      columnConfig: parsed.data.columnConfig as Prisma.InputJsonValue ?? undefined,
       userId: session.user.id,
     },
   });

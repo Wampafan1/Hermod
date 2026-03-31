@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { updateRouteSchema } from "@/lib/validations/bifrost";
@@ -68,9 +69,9 @@ export const PUT = withAuth(async (req, session) => {
       ...(data.name !== undefined && { name: data.name }),
       ...(data.enabled !== undefined && { enabled: data.enabled }),
       ...(data.sourceId !== undefined && { sourceId: data.sourceId }),
-      ...(data.sourceConfig !== undefined && { sourceConfig: data.sourceConfig as any }),
+      ...(data.sourceConfig !== undefined && { sourceConfig: data.sourceConfig as Prisma.InputJsonValue }),
       ...(data.destId !== undefined && { destId: data.destId }),
-      ...(data.destConfig !== undefined && { destConfig: data.destConfig as any }),
+      ...(data.destConfig !== undefined && { destConfig: data.destConfig as Prisma.InputJsonValue }),
       ...(data.transformEnabled !== undefined && { transformEnabled: data.transformEnabled }),
       ...(data.blueprintId !== undefined && { blueprintId: data.blueprintId }),
       ...(data.frequency !== undefined && { frequency: data.frequency }),
@@ -79,7 +80,7 @@ export const PUT = withAuth(async (req, session) => {
       ...(data.timeHour !== undefined && { timeHour: data.timeHour }),
       ...(data.timeMinute !== undefined && { timeMinute: data.timeMinute }),
       ...(data.timezone !== undefined && { timezone: data.timezone }),
-      ...(data.cursorConfig !== undefined && { cursorConfig: data.cursorConfig as any }),
+      ...(data.cursorConfig !== undefined && { cursorConfig: data.cursorConfig as Prisma.InputJsonValue }),
       ...(data.needsFullReload !== undefined && { needsFullReload: data.needsFullReload }),
       ...(nextRunAt !== undefined && { nextRunAt }),
     },
