@@ -2,6 +2,7 @@ import { BlueprintStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getProvider, toConnectionLike } from "@/lib/providers";
 import { sendReportEmail, toEmailConfig } from "@/lib/email";
+import type { EmailConnectionConfig } from "@/lib/email";
 import ExcelJS from "exceljs";
 import { formatInTimeZone } from "date-fns-tz";
 import type { SheetTemplate } from "@/components/reports/univer-sheet";
@@ -233,6 +234,11 @@ export async function runReport(
 
   const startTime = Date.now();
 
+  let notifyConfig: EmailConnectionConfig | null = null;
+  let reportName = "";
+  let reportUserEmail = "";
+  let scheduleTz = "America/Chicago";
+
   try {
     const report = await prisma.report.findUniqueOrThrow({
       where: { id: reportId },
@@ -250,6 +256,11 @@ export async function runReport(
       throw new Error("No email connection configured for this schedule. Add one in the schedule settings.");
     }
     const emailConfig = toEmailConfig(schedule.emailConnection);
+
+    notifyConfig = emailConfig;
+    reportName = report.name;
+    reportUserEmail = report.user?.email || "";
+    scheduleTz = schedule.timezone || "America/Chicago";
 
     const recipients = schedule.recipients.map((r) => r.email);
     if (recipients.length === 0) throw new Error("No recipients");
@@ -335,6 +346,28 @@ export async function runReport(
         completedAt: new Date(),
       },
     });
+
+    // Best-effort failure notification to report owner
+    if (notifyConfig && reportUserEmail) {
+      try {
+        const { buildFailureNotificationEmail } = await import("./failure-notification");
+        const { sendNotificationEmail } = await import("./email");
+        const notification = buildFailureNotificationEmail({
+          reportName,
+          errorMessage: message,
+          timestamp: formatInTimeZone(new Date(), scheduleTz, "yyyy-MM-dd HH:mm:ss"),
+        });
+        await sendNotificationEmail({
+          connection: notifyConfig,
+          to: [reportUserEmail],
+          subject: notification.subject,
+          body: notification.text,
+        });
+      } catch (notifyErr) {
+        console.error("[Report] Failed to send failure notification:", notifyErr instanceof Error ? notifyErr.message : notifyErr);
+      }
+    }
+
     throw error;
   }
 }
