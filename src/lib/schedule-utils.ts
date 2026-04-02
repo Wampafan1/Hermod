@@ -4,6 +4,8 @@ import {
   addDays,
   addWeeks,
   addMonths,
+  addHours,
+  addMinutes,
   setHours,
   setMinutes,
   setSeconds,
@@ -38,6 +40,16 @@ export function calculateNextRun(
   const nowInTz = toZonedTime(after, timezone);
 
   switch (frequency) {
+    case "EVERY_15_MIN":
+      return nextInterval(nowInTz, 15, timezone);
+    case "EVERY_30_MIN":
+      return nextInterval(nowInTz, 30, timezone);
+    case "HOURLY":
+      return nextInterval(nowInTz, 60, timezone);
+    case "EVERY_4_HOURS":
+      return nextInterval(nowInTz, 240, timezone);
+    case "EVERY_12_HOURS":
+      return nextInterval(nowInTz, 720, timezone);
     case "DAILY":
       return nextDaily(nowInTz, timeHour, timeMinute, timezone);
     case "WEEKLY":
@@ -58,6 +70,12 @@ export function calculateNextRun(
     default:
       throw new Error(`Unknown frequency: ${frequency}`);
   }
+}
+
+/** For sub-daily frequencies: next run is simply now + interval minutes */
+function nextInterval(now: Date, intervalMinutes: number, tz: string): Date {
+  const candidate = addMinutes(now, intervalMinutes);
+  return toUtc(candidate, tz);
 }
 
 function setTime(date: Date, hour: number, minute: number): Date {

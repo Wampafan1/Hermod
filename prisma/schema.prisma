@@ -184,6 +184,11 @@ model Schedule {
 }
 
 enum ScheduleFrequency {
+  EVERY_15_MIN
+  EVERY_30_MIN
+  HOURLY
+  EVERY_4_HOURS
+  EVERY_12_HOURS
   DAILY
   WEEKLY
   BIWEEKLY
@@ -261,6 +266,7 @@ enum ConnectionType {
   BIGQUERY
   NETSUITE
   SFTP
+  REST_API
 }
 
 enum ConnectionStatus {
@@ -392,4 +398,56 @@ model PipelineWatermark {
 
   @@unique([routeId, tableName])
   @@index([routeId])
+}
+
+// ─── Alfheim (API Catalog) ──────────────────────────
+
+enum ApiAuthType {
+  API_KEY
+  BEARER
+  BASIC
+  OAUTH2
+  CUSTOM
+}
+
+model ApiCatalogConnector {
+  id            String        @id @default(cuid())
+  slug          String        @unique
+  name          String
+  description   String
+  category      String
+  subcategory   String?
+  logoUrl       String?
+  docsUrl       String?
+  popularity    Int           @default(0)
+  enabled       Boolean       @default(true)
+  authType      ApiAuthType
+  baseUrl       String
+  authConfig    Json
+  pagination    Json
+  rateLimiting  Json?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  createdBy     String?
+  objects       ApiCatalogObject[]
+
+  @@index([category])
+  @@index([enabled])
+}
+
+model ApiCatalogObject {
+  id              String               @id @default(cuid())
+  connectorId     String
+  connector       ApiCatalogConnector   @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  slug            String
+  name            String
+  description     String?
+  endpoint        String
+  method          String               @default("GET")
+  responseRoot    String
+  incrementalKey  String?
+  defaultParams   Json?
+  schema          Json
+
+  @@unique([connectorId, slug])
 }

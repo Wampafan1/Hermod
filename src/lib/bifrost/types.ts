@@ -14,7 +14,14 @@ export interface SourceConfig {
   // NetSuite structured config (used by UI to reconstruct picker state)
   recordType?: string;
   fields?: string[];
+  referenceFields?: string[]; // fields requiring BUILTIN.DF() wrapping in SuiteQL
   filter?: string | null;
+
+  // REST API extraction config (populated from ApiCatalogObject)
+  objectSlug?: string;       // which catalog object to extract (e.g. "v1-orders")
+  endpoint?: string;         // path appended to connection baseUrl
+  responseRoot?: string;     // JSON path to data array in response (e.g. "data.items")
+  schema?: import("@/lib/alfheim/types").SchemaMapping;
 }
 
 export interface DestConfig {

@@ -23,7 +23,7 @@ import type {
 } from "./types";
 import { DEFAULT_CHUNK_SIZE } from "./types";
 import type { CursorConfig } from "@/lib/sync/types";
-import { getWatermark, setWatermark, buildIncrementalClause, extractNewWatermark } from "@/lib/sync/watermark";
+import { getWatermark, setWatermark, deleteWatermark, buildIncrementalClause, extractNewWatermark } from "@/lib/sync/watermark";
 
 // ─── Route Loading ───────────────────────────────────
 
@@ -41,6 +41,7 @@ export interface LoadedRoute {
   blueprintId: string | null;
   lastCheckpoint: Date | null;
   cursorConfig: CursorConfig | null;
+  needsFullReload: boolean;
   frequency: string | null;
   daysOfWeek: number[];
   dayOfMonth: number | null;
@@ -204,6 +205,30 @@ export function getDateColumns(schema: SchemaDefinition | null | undefined): Set
   );
 }
 
+// ─── SuiteQL Timestamp Formatting ────────────────────
+
+/** Default far-past watermark for NetSuite first runs (SuiteQL date-only format). */
+const NETSUITE_DEFAULT_WATERMARK = "1/1/2000";
+
+/**
+ * Convert an ISO-8601 timestamp to SuiteQL's date-only format: M/D/YYYY.
+ * SuiteQL rejects bare string literals with time components — only M/D/YYYY works.
+ * The >= operator on a date-only value matches anything on or after that date,
+ * which is acceptable for daily incremental sync (worst case: re-sync one extra day).
+ */
+export function formatForSuiteQL(isoTimestamp: string): string {
+  const d = new Date(isoTimestamp);
+  if (isNaN(d.getTime())) {
+    throw new Error(`Invalid timestamp for SuiteQL conversion: "${isoTimestamp}"`);
+  }
+
+  const month = d.getUTCMonth() + 1;
+  const day = d.getUTCDate();
+  const year = d.getUTCFullYear();
+
+  return `${month}/${day}/${year}`;
+}
+
 // ─── Engine ──────────────────────────────────────────
 
 export class BifrostEngine {
@@ -245,7 +270,7 @@ export class BifrostEngine {
         priorWatermark = await getWatermark(route.id, tableName);
       }
 
-      const incrementalClause = cursorConfig?.cursorColumn
+      let incrementalClause = cursorConfig?.cursorColumn
         ? buildIncrementalClause(cursorConfig.cursorColumn, cursorConfig.strategy, priorWatermark)
         : null;
 
@@ -302,11 +327,150 @@ export class BifrostEngine {
         ...route.sourceConfig,
       };
 
-      // New path: cursorConfig + watermark — wrap query as subquery for safe WHERE injection
-      // Avoids regex matching WHERE in CTEs/subqueries/string literals
-      if (incrementalClause && effectiveSourceConfig.query) {
+      // ── Inject REST API connection details into sourceConfig ──
+      console.log(`[Bifrost] source.type="${route.source.type}" (isREST=${route.source.type === "REST_API"})`);
+      if (route.source.type === "REST_API") {
+        const srcConfig = sourceConnLike.config;
+        const catalogSlug = srcConfig.catalogSlug as string | undefined;
+
+        // objectSlug may be missing on routes created before the variant merge.
+        // Fall back to deriving it from the query field (e.g., "/orders" → "orders")
+        const objectSlug = effectiveSourceConfig.objectSlug
+          ?? (effectiveSourceConfig.query?.replace(/^\/+/, "").split("?")[0] || undefined);
+
+        console.log(`[Bifrost REST] catalogSlug=${catalogSlug}, objectSlug=${objectSlug}, srcConfigKeys=${Object.keys(srcConfig).join(",")}`);
+
+        // Resolve endpoint/schema from the catalog object
+        if (catalogSlug && objectSlug) {
+          // Single query with OR for exact slug + v1-/v2- prefixed variants
+          const slugCandidates = [objectSlug, `v1-${objectSlug}`, `v2-${objectSlug}`];
+          const catalogObject = await prisma.apiCatalogObject.findFirst({
+            where: {
+              connector: { slug: catalogSlug },
+              slug: { in: slugCandidates },
+            },
+            orderBy: { slug: "asc" }, // prefer exact match (shortest)
+          });
+          if (catalogObject) {
+            effectiveSourceConfig.endpoint = catalogObject.endpoint;
+            effectiveSourceConfig.responseRoot = catalogObject.responseRoot;
+            effectiveSourceConfig.schema = catalogObject.schema as SourceConfig["schema"];
+            console.log(`[Bifrost REST] Resolved ${objectSlug} → endpoint=${catalogObject.endpoint}`);
+          } else {
+            console.warn(`[Bifrost REST] No catalog object found for ${catalogSlug}/${objectSlug}`);
+            // Last resort: use query as endpoint path
+            if (effectiveSourceConfig.query && !effectiveSourceConfig.endpoint) {
+              effectiveSourceConfig.endpoint = effectiveSourceConfig.query;
+              console.log(`[Bifrost REST] Falling back to query as endpoint: ${effectiveSourceConfig.query}`);
+            }
+          }
+        } else if (!effectiveSourceConfig.endpoint && effectiveSourceConfig.query) {
+          // No catalog info at all — use query as endpoint
+          effectiveSourceConfig.endpoint = effectiveSourceConfig.query;
+        }
+
+        // Resolve pagination: connection config → catalog connector fallback
+        let resolvedPagination = srcConfig.pagination as Record<string, unknown> | undefined;
+        if (!resolvedPagination || !resolvedPagination.type) {
+          // Connection was saved with empty pagination — pull from catalog connector
+          if (catalogSlug) {
+            const catalogConn = await prisma.apiCatalogConnector.findUnique({
+              where: { slug: catalogSlug },
+              select: { pagination: true },
+            });
+            if (catalogConn?.pagination) {
+              resolvedPagination = catalogConn.pagination as Record<string, unknown>;
+              console.log(`[Bifrost REST] Resolved pagination from catalog: type=${resolvedPagination.type}`);
+            }
+          }
+        }
+
+        // Pass connection details so the REST provider can authenticate
+        effectiveSourceConfig.params = {
+          ...effectiveSourceConfig.params,
+          __restConnection: {
+            baseUrl: srcConfig.baseUrl,
+            authType: srcConfig.authType,
+            authConfig: srcConfig.authConfig,
+            credentials: sourceConnLike.credentials,
+            pagination: resolvedPagination ?? { type: "none" },
+            rateLimiting: srcConfig.rateLimiting,
+          },
+        };
+      }
+
+      // ── Handle needsFullReload (schema evolution) ──
+      // Must run BEFORE @last_run substitution so the watermark is nullified
+      // and the query uses the far-past default (fetching ALL rows).
+      if (route.needsFullReload) {
+        console.log(`[Bifrost] ${route.name}: Full reload triggered (schema change)`);
+
+        // Drop the destination table if it exists
+        if (destTableExists && "dropTable" in destProvider) {
+          await (destProvider as BigQueryProvider).dropTable(
+            destConn,
+            route.destConfig.dataset,
+            route.destConfig.table
+          );
+          console.log(`[Bifrost] ${route.name}: Destination table dropped for full reload`);
+        }
+
+        // Clear the watermark so incremental clause is skipped
+        await deleteWatermark(route.id, tableName);
+        priorWatermark = null;
+        incrementalClause = null;
+      }
+
+      // Inline @last_run substitution — must happen BEFORE the subquery wrap check,
+      // and regardless of whether incrementalClause is set (first run has no watermark
+      // but the query still contains @last_run and needs a default value).
+      if (effectiveSourceConfig.query?.includes("@last_run")) {
+        const isNetSuite = route.source.type.toLowerCase() === "netsuite";
+        let watermarkFormatted: string;
+
+        if (priorWatermark) {
+          watermarkFormatted = isNetSuite
+            ? formatForSuiteQL(priorWatermark)
+            : priorWatermark;
+        } else {
+          // First run — no prior watermark, use far-past default
+          watermarkFormatted = isNetSuite
+            ? NETSUITE_DEFAULT_WATERMARK
+            : new Date(0).toISOString();
+        }
+
+        effectiveSourceConfig.query = effectiveSourceConfig.query.replace(
+          /@last_run/g,
+          `'${watermarkFormatted}'`
+        );
+      }
+      // No @last_run placeholder — inject incremental WHERE clause into query.
+      else if (incrementalClause && effectiveSourceConfig.query) {
         const q = effectiveSourceConfig.query.trimEnd().replace(/;$/, "");
-        effectiveSourceConfig.query = `SELECT * FROM (${q}) AS __incr WHERE ${incrementalClause}`;
+        const isNetSuite = route.source.type.toLowerCase() === "netsuite";
+
+        if (isNetSuite) {
+          // SuiteQL doesn't support derived tables, double-quoted identifiers,
+          // or ISO-8601 dates — rebuild clause with native SuiteQL formatting.
+          const col = cursorConfig!.cursorColumn;
+          const wmFormatted = cursorConfig!.strategy === "timestamp_cursor" && priorWatermark
+            ? formatForSuiteQL(priorWatermark)
+            : priorWatermark!;
+          const nativeClause = `${col} > '${wmFormatted}'`;
+          const orderByMatch = q.match(/\bORDER\s+BY\b/i);
+          if (orderByMatch && orderByMatch.index !== undefined) {
+            const beforeOrder = q.slice(0, orderByMatch.index).trimEnd();
+            const orderByPart = q.slice(orderByMatch.index);
+            const hasWhere = /\bWHERE\b/i.test(beforeOrder);
+            effectiveSourceConfig.query = `${beforeOrder} ${hasWhere ? "AND" : "WHERE"} ${nativeClause} ${orderByPart}`;
+          } else {
+            const hasWhere = /\bWHERE\b/i.test(q);
+            effectiveSourceConfig.query = `${q} ${hasWhere ? "AND" : "WHERE"} ${nativeClause}`;
+          }
+        } else {
+          // Postgres, BigQuery, etc. — safe to wrap as subquery
+          effectiveSourceConfig.query = `SELECT * FROM (${q}) AS __incr WHERE ${incrementalClause}`;
+        }
       }
       // Legacy path: incrementalKey + lastCheckpoint (backward compat)
       else if (route.sourceConfig.incrementalKey) {
@@ -327,14 +491,11 @@ export class BifrostEngine {
       // Pending max from current batch buffer (not yet confirmed loaded)
       let pendingBatchMax: string | null = null;
 
-      // Determine if this route should use MERGE (upsert) instead of APPEND.
-      // Conditions: incremental cursor with a primaryKey AND target table exists.
-      // First run (table doesn't exist) uses WRITE_TRUNCATE to create the table,
-      // then subsequent runs MERGE to avoid duplicates.
       const useMerge = !!(
         cursorConfig &&
         cursorConfig.primaryKey &&
         cursorConfig.strategy !== "full_refresh" &&
+        !route.needsFullReload &&
         destTableExists &&
         "mergeInto" in destProvider
       );
@@ -368,12 +529,42 @@ export class BifrostEngine {
         batchBuffer = [];
         pendingBatchMax = null;
 
+        console.log(
+          `[Bifrost] ${route.name}: Buffer size: ${rows.length} before flush attempt ` +
+          `(batch #${loadBatchIndex}, writeDisposition=${schemaDestConfig.writeDisposition})`
+        );
+
         try {
           // Infer explicit schema from the first batch (before any load jobs).
           // Deferred to flush time so ALL accumulated rows are scanned, not just
           // the first chunk. The schema is reused for every subsequent load job.
           if (loadBatchIndex === 0 && !route.destConfig.schema) {
             const inferred = inferSchemaFromRows(rows);
+
+            // Merge with sourceConfig.fields — NetSuite omits null fields from
+            // JSON, so fields that are all-null in the first batch won't appear
+            // in the inferred schema. Add any missing fields as STRING.
+            if (effectiveSourceConfig.fields?.length) {
+              const inferredNames = new Set(inferred.fields.map((f) => f.name));
+              let added = 0;
+              for (const fieldName of effectiveSourceConfig.fields) {
+                if (!inferredNames.has(fieldName)) {
+                  inferred.fields.push({
+                    name: fieldName,
+                    type: "STRING",
+                    mode: "NULLABLE",
+                  });
+                  added++;
+                }
+              }
+              if (added > 0) {
+                console.log(
+                  `[Bifrost] Added ${added} missing field(s) from sourceConfig.fields as STRING ` +
+                  `(absent from first batch due to null values)`
+                );
+              }
+            }
+
             schemaDestConfig = { ...schemaDestConfig, schema: inferred };
             console.log(
               `[Bifrost] Inferred explicit schema (${inferred.fields.length} fields) ` +
@@ -394,6 +585,10 @@ export class BifrostEngine {
               : schemaDestConfig;
           const result = await this.loadWithRetry(destProvider, destConn, rows, effectiveDestConfig);
           totalLoaded += result.rowsLoaded;
+          console.log(
+            `[Bifrost] ${route.name}: Load job result: success — ${result.rowsLoaded} rows loaded` +
+            (result.errors?.length ? `, ${result.errors.length} errors: ${JSON.stringify(result.errors.slice(0, 3))}` : "")
+          );
 
           // Only advance watermark after confirmed load
           if (batchMax) {
@@ -412,6 +607,18 @@ export class BifrostEngine {
             }
           }
         } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          // BigQuery client attaches detailed errors on the exception object
+          const bqErrors = (err as any)?.errors ?? (err as any)?.response?.errors ?? null;
+          console.error(
+            `[Bifrost] ${route.name}: Load job result: ERROR — ${errMsg}` +
+            ` (fatal=${isFatalLoadError(err)}, batch #${loadBatchIndex}, ${rows.length} rows)`
+          );
+          if (bqErrors) {
+            console.error(
+              `[Bifrost] BigQuery load errors: ${JSON.stringify(bqErrors, null, 2)}`
+            );
+          }
           // Fail-fast on fatal errors (missing dataset/table, auth)
           if (isFatalLoadError(err)) {
             // Invalidate only this table's cached schema, not all schemas
@@ -423,6 +630,9 @@ export class BifrostEngine {
             errorCount += rows.length;
             throw err;
           }
+          console.error(
+            `[Bifrost] flushBatch error (dead-lettering batch): ${errMsg}`
+          );
           await enqueueDeadLetter(route.id, routeLog!.id, loadBatchIndex, rows, err);
           errorCount += rows.length;
           // batchMax is intentionally NOT promoted — those rows failed to load
@@ -564,6 +774,14 @@ export class BifrostEngine {
             data: { lastCheckpoint: new Date() },
           });
         }
+      }
+
+      // Clear needsFullReload flag after successful execution
+      if (route.needsFullReload) {
+        await prisma.bifrostRoute.update({
+          where: { id: route.id },
+          data: { needsFullReload: false },
+        });
       }
 
       // 7. Finalize
