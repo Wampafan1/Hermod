@@ -8,6 +8,7 @@ import {
   markRetryFailed,
 } from "@/lib/bifrost/helheim/dead-letter";
 import { getProvider, toConnectionLike } from "@/lib/providers";
+import { inferSchemaFromRows, normalizeRowDates, getDateColumns } from "@/lib/bifrost/engine";
 import type { DestConfig } from "@/lib/bifrost/types";
 
 // POST /api/bifrost/helheim/[id]/retry — Manual retry
@@ -48,7 +49,10 @@ export const POST = withAuth(async (req, session) => {
   const destConfig = entry.route.destConfig as unknown as DestConfig;
 
   try {
-    const result = await destProvider.load!(destConn, rows, destConfig);
+    const schema = inferSchemaFromRows(rows);
+    const dateCols = getDateColumns(schema);
+    if (dateCols.size > 0) normalizeRowDates(rows, dateCols);
+    const result = await destProvider.load!(destConn, rows, { ...destConfig, schema });
     await markRecovered(entry.id);
     return NextResponse.json({ status: "recovered", rowsLoaded: result.rowsLoaded });
   } catch (err) {

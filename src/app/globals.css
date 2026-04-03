@@ -1,28 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Inconsolata:wght@300;500;700&family=Source+Sans+3:ital,wght@0,300;0,400;0,600;0,700;1,400&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Design Tokens ─── */
+/* ─── Design Tokens: Forged in Asgard ─── */
+/* Parchment + Iron + Gold — "Illuminated Manuscript meets Data Terminal" */
 :root {
-  --void: #04060f;
-  --deep: #080c1a;
-  --gold: #c9933a;
-  --gold-bright: #f0b84a;
-  --gold-dim: rgba(201, 147, 58, 0.3);
-  --ember: #e85d20;
-  --frost: #7eb8d4;
-  --text: #d4c4a0;
-  --text-dim: rgba(212, 196, 160, 0.55);
-  --surface: rgba(4, 6, 15, 0.9);
-  --surface-raised: rgba(8, 12, 26, 0.95);
-  --border: rgba(201, 147, 58, 0.1);
-  --border-mid: rgba(201, 147, 58, 0.3);
-  --success: #22c55e;
-  --success-dim: rgba(34, 197, 94, 0.15);
-  --error: #ef4444;
-  --error-dim: rgba(239, 68, 68, 0.15);
-  --warning: #f59e0b;
-  --warning-dim: rgba(245, 158, 11, 0.15);
+  /* Parchment surfaces (light) */
+  --void: #F4ECD8;              /* page background — warm aged vellum */
+  --deep: #EDE4CC;              /* card/panel background — slightly darker parchment */
+  --scroll: #E5D9B8;            /* hover states, secondary surfaces */
+  --surface: #EDE4CC;
+  --surface-raised: #E5D9B8;
+
+  /* Iron sidebar (dark) — the book's binding */
+  --iron: #2D2A24;              /* sidebar bg — wrought iron */
+  --iron-light: #4A4035;        /* sidebar hover — aged iron */
+  --carbon: #1A1815;            /* code editor bg — polished dark stone */
+
+  /* Gold accents — hammered, not shiny */
+  --gold: #8B6914;              /* primary accent — forged gold */
+  --gold-bright: #A67C1A;       /* hover state — burnished gold */
+  --gold-leaf: #C4962A;         /* highlights, selected states */
+  --gold-dim: rgba(139, 105, 20, 0.15); /* subtle borders, tints */
+
+  /* Text — iron-gall ink on parchment */
+  --text: #2D2A24;              /* primary text — wrought iron */
+  --text-dim: #6B6358;          /* secondary text — aged iron, WCAG AA on parchment */
+  --text-muted: #968B7B;        /* tertiary — labels, timestamps */
+
+  /* Borders — burnt parchment edges */
+  --border: #D4C49E;            /* default border — burnt parchment */
+  --border-mid: #C4B48A;        /* stronger border — deeper parchment */
+  --burnt: #D4C49E;             /* alias for decorative use */
+
+  /* Status — natural Viking palette */
+  --ember: #B8450E;             /* warm ember for alerts */
+  --frost: #2D5F7E;             /* fjord blue for info */
+  --success: #2D6B3F;           /* forest verdant */
+  --success-dim: rgba(45, 107, 63, 0.12);
+  --error: #8B2020;             /* oxblood */
+  --error-dim: rgba(139, 32, 32, 0.1);
+  --warning: #B8860B;           /* amber resin */
+  --warning-dim: rgba(184, 134, 11, 0.1);
 }
 
 /* ─── Base Reset ─── */
@@ -34,11 +55,12 @@
   }
 
   body {
-    font-family: var(--font-inconsolata), monospace;
+    font-family: var(--font-source-serif), Georgia, serif;
     color: var(--text);
     background: var(--void);
-    letter-spacing: 0.04em;
-    line-height: 1.8;
+    letter-spacing: 0.01em;
+    line-height: 1.6;
+    font-size: 1rem;
   }
 
   /* Focus ring */
@@ -49,36 +71,37 @@
 
   /* Scrollbar */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
     background: var(--void);
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--gold-dim);
+    background: var(--border);
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--gold);
+    background: var(--border-mid);
   }
 }
 
 /* ─── Component Classes ─── */
 @layer components {
-  /* ── Buttons ── */
+  /* ── Buttons — Forged Metal ── */
   .btn-primary {
     position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    padding: 0.5rem 1.25rem;
+    padding: 0.5rem 1.5rem;
+    min-height: 2.25rem;
     background: var(--gold);
     color: var(--void);
-    font-family: var(--font-inconsolata), monospace;
+    font-family: var(--font-space-grotesk), sans-serif;
     font-size: 0.8125rem;
     font-weight: 600;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     overflow: hidden;
     transition: background 0.3s;
@@ -113,21 +136,22 @@
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    padding: 0.5rem 1.25rem;
+    padding: 0.5rem 1.5rem;
+    min-height: 2.25rem;
     background: transparent;
-    border: 1px solid var(--gold-dim);
-    color: var(--text);
-    font-family: var(--font-inconsolata), monospace;
+    border: 1px solid var(--gold);
+    color: var(--gold);
+    font-family: var(--font-space-grotesk), sans-serif;
     font-size: 0.8125rem;
-    font-weight: 400;
-    letter-spacing: 0.1em;
+    font-weight: 500;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     transition: all 0.3s;
     cursor: pointer;
   }
   .btn-ghost:hover {
-    background: rgba(201, 147, 58, 0.08);
-    border-color: var(--gold);
+    background: var(--gold-dim);
+    border-color: var(--gold-bright);
     color: var(--gold-bright);
   }
   .btn-ghost:disabled {
@@ -140,14 +164,15 @@
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    padding: 0.5rem 1.25rem;
+    padding: 0.5rem 1.5rem;
+    min-height: 2.25rem;
     background: transparent;
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    border: 1px solid var(--error);
     color: var(--error);
-    font-family: var(--font-inconsolata), monospace;
+    font-family: var(--font-space-grotesk), sans-serif;
     font-size: 0.8125rem;
-    font-weight: 400;
-    letter-spacing: 0.1em;
+    font-weight: 500;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     transition: all 0.3s;
     cursor: pointer;
@@ -161,35 +186,36 @@
     background: none;
     border: none;
     color: var(--text-dim);
-    font-family: var(--font-inconsolata), monospace;
+    font-family: var(--font-space-grotesk), sans-serif;
     font-size: 0.75rem;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     cursor: pointer;
     transition: color 0.3s;
   }
   .btn-subtle:hover {
-    color: var(--gold-bright);
+    color: var(--gold);
   }
 
-  /* ── Inputs ── */
+  /* ── Inputs — Vellum surfaces ── */
   .input-norse {
     width: 100%;
     padding: 0.5rem 0.75rem;
     background: var(--deep);
     border: 1px solid var(--border);
     color: var(--text);
-    font-family: var(--font-inconsolata), monospace;
-    font-size: 0.8125rem;
-    letter-spacing: 0.04em;
-    transition: border-color 0.3s;
+    font-family: var(--font-source-serif), Georgia, serif;
+    font-size: 0.875rem;
+    letter-spacing: 0.01em;
+    transition: border-color 0.3s, box-shadow 0.3s;
   }
   .input-norse::placeholder {
-    color: var(--text-dim);
+    color: var(--text-muted, var(--text-dim));
   }
   .input-norse:focus {
     outline: none;
     border-color: var(--gold);
+    box-shadow: 0 0 0 2px var(--gold-dim);
   }
   .input-norse:disabled {
     opacity: 0.5;
@@ -201,27 +227,28 @@
     background: var(--deep);
     border: 1px solid var(--border);
     color: var(--text);
-    font-family: var(--font-inconsolata), monospace;
-    font-size: 0.8125rem;
-    letter-spacing: 0.04em;
-    transition: border-color 0.3s;
+    font-family: var(--font-source-serif), Georgia, serif;
+    font-size: 0.875rem;
+    letter-spacing: 0.01em;
+    transition: border-color 0.3s, box-shadow 0.3s;
     cursor: pointer;
   }
   .select-norse:focus {
     outline: none;
     border-color: var(--gold);
+    box-shadow: 0 0 0 2px var(--gold-dim);
   }
   .select-norse:disabled {
     opacity: 0.5;
   }
 
-  /* ── Labels ── */
+  /* ── Labels — Scribe's marginalia ── */
   .label-norse {
     display: block;
-    font-family: var(--font-inconsolata), monospace;
-    font-size: 0.625rem;
-    font-weight: 400;
-    letter-spacing: 0.5em;
+    font-family: var(--font-space-grotesk), sans-serif;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--text-dim);
     margin-bottom: 0.375rem;
@@ -231,26 +258,27 @@
     margin-bottom: 0;
   }
 
-  /* ── Headings ── */
+  /* ── Headings — Illuminated capitals ── */
   .heading-norse {
-    font-family: var(--font-cinzel), serif;
-    font-weight: 400;
-    letter-spacing: 0.25em;
-    text-transform: uppercase;
-    color: var(--gold-bright);
+    font-family: var(--font-eb-garamond), serif;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--text);
   }
 
-  /* ── Badges ── */
+  /* ── Badges — Manuscript annotations ── */
   .badge-success {
     display: inline-flex;
     align-items: center;
     gap: 0.375rem;
     padding: 0.125rem 0.5rem;
     background: var(--success-dim);
-    border: 1px solid rgba(34, 197, 94, 0.3);
+    border: 1px solid rgba(45, 107, 63, 0.3);
     color: var(--success);
+    font-family: var(--font-space-grotesk), sans-serif;
     font-size: 0.6875rem;
-    letter-spacing: 0.15em;
+    font-weight: 500;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
@@ -260,10 +288,12 @@
     gap: 0.375rem;
     padding: 0.125rem 0.5rem;
     background: var(--error-dim);
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    border: 1px solid rgba(139, 32, 32, 0.3);
     color: var(--error);
+    font-family: var(--font-space-grotesk), sans-serif;
     font-size: 0.6875rem;
-    letter-spacing: 0.15em;
+    font-weight: 500;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
@@ -273,10 +303,12 @@
     gap: 0.375rem;
     padding: 0.125rem 0.5rem;
     background: var(--warning-dim);
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    border: 1px solid rgba(184, 134, 11, 0.3);
     color: var(--warning);
+    font-family: var(--font-space-grotesk), sans-serif;
     font-size: 0.6875rem;
-    letter-spacing: 0.15em;
+    font-weight: 500;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
@@ -286,10 +318,12 @@
     gap: 0.375rem;
     padding: 0.125rem 0.5rem;
     background: var(--warning-dim);
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    border: 1px solid rgba(184, 134, 11, 0.3);
     color: var(--warning);
+    font-family: var(--font-space-grotesk), sans-serif;
     font-size: 0.6875rem;
-    letter-spacing: 0.15em;
+    font-weight: 500;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
@@ -298,22 +332,26 @@
     align-items: center;
     gap: 0.375rem;
     padding: 0.125rem 0.5rem;
-    background: rgba(212, 196, 160, 0.08);
+    background: var(--scroll);
     border: 1px solid var(--border);
     color: var(--text-dim);
+    font-family: var(--font-space-grotesk), sans-serif;
     font-size: 0.6875rem;
-    letter-spacing: 0.15em;
+    font-weight: 500;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
-  /* ── Cards ── */
+  /* ── Cards — Vellum surfaces ── */
   .card-norse {
     background: var(--deep);
     border: 1px solid var(--border);
-    padding: 1.25rem;
-    transition: border-color 0.3s;
+    border-left: 3px solid var(--gold-dim);
+    padding: 1.5rem;
+    transition: background 0.3s, border-color 0.3s;
   }
   .card-norse:hover {
+    background: var(--scroll);
     border-color: var(--border-mid);
   }
 
@@ -321,7 +359,7 @@
     position: relative;
     background: var(--deep);
     border: 1px solid var(--border);
-    padding: 1.25rem;
+    padding: 1.5rem;
     overflow: hidden;
     transition: border-color 0.3s;
   }
@@ -332,8 +370,7 @@
     left: 0;
     right: 0;
     height: 2px;
-    background: linear-gradient(90deg, var(--gold), var(--gold-bright), var(--gold));
-    opacity: 0.6;
+    background: var(--gold);
   }
   .stat-card-norse:hover {
     border-color: var(--border-mid);
@@ -349,12 +386,12 @@
     animation: spin 0.8s linear infinite;
   }
 
-  /* ── Skeleton ── */
+  /* ── Skeleton — Parchment shimmer ── */
   .skeleton-norse {
     background: linear-gradient(
       90deg,
       var(--deep) 0%,
-      rgba(201, 147, 58, 0.06) 50%,
+      var(--scroll) 50%,
       var(--deep) 100%
     );
     background-size: 200% 100%;
@@ -392,6 +429,83 @@
       transform: translateX(350%);
     }
   }
+
+  /* ── Rune Divider — Section separators ── */
+  .rune-divider {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    color: var(--text-muted, var(--text-dim));
+    font-size: 0.75rem;
+  }
+  .rune-divider::before,
+  .rune-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── Hoverable Card — Weighted hover with lift ── */
+  .hoverable-card {
+    transition: transform 0.3s cubic-bezier(0.76, 0, 0.24, 1),
+                border-color 0.3s cubic-bezier(0.76, 0, 0.24, 1),
+                box-shadow 0.3s cubic-bezier(0.76, 0, 0.24, 1);
+  }
+  .hoverable-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-mid);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08),
+                0 0 1px rgba(139,105,20,0.15);
+  }
+
+  /* ── Status Pulse Animations ── */
+  .status-pulse-green {
+    animation: statusPulseGreen 2s ease-in-out infinite;
+  }
+  .status-pulse-amber {
+    animation: statusPulseAmber 2s ease-in-out infinite;
+  }
+  .status-pulse-red {
+    animation: statusPulseRed 2s ease-in-out infinite;
+  }
+
+  /* ── Smolder — Embers waiting to be stoked ── */
+  .smolder {
+    animation: smolder 3s ease-in-out infinite;
+  }
+
+  /* ── Page Header Realm Line ── */
+  .realm-line {
+    height: 1px;
+    margin-top: 0.5rem;
+    opacity: 0.2;
+  }
+}
+
+@keyframes statusPulseGreen {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(45, 107, 63, 0.4); }
+  50% { box-shadow: 0 0 0 5px rgba(45, 107, 63, 0); }
+}
+@keyframes statusPulseAmber {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(184, 134, 11, 0.4); }
+  50% { box-shadow: 0 0 0 5px rgba(184, 134, 11, 0); }
+}
+@keyframes statusPulseRed {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(139, 32, 32, 0.4); }
+  50% { box-shadow: 0 0 0 5px rgba(139, 32, 32, 0); }
+}
+@keyframes dispatchImminent {
+  0%, 100% { color: rgba(139, 105, 20, 0.6); }
+  50% { color: rgba(139, 105, 20, 1.0); text-shadow: 0 0 8px rgba(139, 105, 20, 0.3); }
+}
+@keyframes bifrostBar {
+  0% { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes smolder {
+  0%, 100% { opacity: 0.3; text-shadow: 0 0 0 rgba(255,183,77,0); }
+  50% { opacity: 0.5; text-shadow: 0 0 12px rgba(255,183,77,0.3); }
 }
 
 /* ─── Panel height fix ─── */
@@ -409,94 +523,135 @@
 }
 
 /* ─── Univer WYSIWYG Theme ─── */
-/* Cell canvas is LIGHT (Excel-accurate). Chrome is dark (matches Hermod). */
+/* Cell canvas is LIGHT. Chrome matches the parchment aesthetic. */
 .univer-container {
   border: 1px solid var(--border);
 }
 
-/* Chrome (toolbar, formula bar, tabs) stays dark */
+/* Chrome (toolbar, formula bar, tabs) — vellum surface */
 .univer-container .univer-toolbar {
-  background: rgba(4, 6, 15, 0.95) !important;
-  border-bottom: 1px solid rgba(201, 147, 58, 0.1) !important;
-  color: #e8dcc4 !important;
+  background: var(--deep) !important;
+  border-bottom: 1px solid var(--border) !important;
+  color: var(--text) !important;
 }
 
 .univer-container .univer-toolbar-btn {
-  color: rgba(212, 196, 160, 0.7) !important;
+  color: var(--text-dim) !important;
 }
 
 .univer-container .univer-toolbar-btn:hover {
-  background: rgba(201, 147, 58, 0.08) !important;
-  color: #e8dcc4 !important;
+  background: var(--scroll) !important;
+  color: var(--text) !important;
 }
 
 .univer-container .univer-sheet-bar {
-  background: rgba(4, 6, 15, 0.95) !important;
-  border-top: 1px solid rgba(201, 147, 58, 0.1) !important;
-  color: #e8dcc4 !important;
+  background: var(--deep) !important;
+  border-top: 1px solid var(--border) !important;
+  color: var(--text) !important;
 }
 
 .univer-container .univer-formula-bar {
-  background: #080c1a !important;
-  border-bottom: 1px solid rgba(201, 147, 58, 0.1) !important;
-  color: #e8dcc4 !important;
+  background: var(--deep) !important;
+  border-bottom: 1px solid var(--border) !important;
+  color: var(--text) !important;
 }
 
-/* Row/column header area — dark to blend with chrome */
+/* Row/column header area */
 .univer-container .univer-row-header,
 .univer-container .univer-column-header {
-  background: #0a0e1a !important;
-  color: rgba(212, 196, 160, 0.55) !important;
+  background: var(--scroll) !important;
+  color: var(--text-dim) !important;
 }
 
-/* Context menu — dark */
+/* Context menu */
 .univer-context-menu {
-  background: #080c1a !important;
-  border: 1px solid rgba(201, 147, 58, 0.15) !important;
-  color: #e8dcc4 !important;
+  background: var(--deep) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
 }
 
 .univer-context-menu-item:hover {
-  background: rgba(201, 147, 58, 0.08) !important;
+  background: var(--scroll) !important;
 }
 
-/* Scrollbar — dark */
+/* Scrollbar — parchment tones */
 .univer-container ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 .univer-container ::-webkit-scrollbar-track {
-  background: #04060f;
+  background: var(--void);
 }
 .univer-container ::-webkit-scrollbar-thumb {
-  background: rgba(201, 147, 58, 0.3);
+  background: var(--border);
 }
 .univer-container ::-webkit-scrollbar-thumb:hover {
-  background: #c9933a;
+  background: var(--border-mid);
 }
 
-/* Remove all border-radius inside Univer */
-.univer-container *,
-.univer-container *::before,
-.univer-container *::after {
-  border-radius: 0 !important;
-}
-
-/* Dropdown / popup menus — dark */
+/* Dropdown / popup menus */
 .univer-popup,
 .univer-dropdown {
-  background: #080c1a !important;
-  border: 1px solid rgba(201, 147, 58, 0.15) !important;
-  color: #e8dcc4 !important;
-  border-radius: 0 !important;
+  background: var(--deep) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
 }
 
-/* Dialog — dark */
+/* Dialog */
 .univer-dialog {
-  background: #080c1a !important;
-  border: 1px solid rgba(201, 147, 58, 0.2) !important;
-  color: #e8dcc4 !important;
-  border-radius: 0 !important;
+  background: var(--deep) !important;
+  border: 1px solid var(--border-mid) !important;
+  color: var(--text) !important;
+}
+
+/* ─── Iron Sidebar Theme ─── */
+/* The sidebar is the dark iron book-spine — needs its own token overrides */
+.sidebar-iron {
+  --void: #1A1815;
+  --deep: #2D2A24;
+  --scroll: #4A4035;
+  --text: #EDE4CC;
+  --text-dim: #A09882;
+  --text-muted: #7A7060;
+  --border: rgba(139, 105, 20, 0.15);
+  --border-mid: rgba(139, 105, 20, 0.3);
+  --gold-dim: rgba(139, 105, 20, 0.12);
+  background: var(--iron);
+  color: var(--text);
+}
+
+/* ─── Landing Page ─── */
+.landing-page {
+  background-color: #faf8f5;
+  color: #1a1610;
+  overflow-x: hidden;
+}
+.landing-page * { border-radius: 0px !important; }
+.landing-page .font-headline { font-family: "Cinzel", serif; }
+.landing-page .font-body, .landing-page .font-sans { font-family: "Source Sans 3", sans-serif; }
+.landing-page .font-mono, .landing-page .font-label { font-family: "Inconsolata", monospace; }
+.landing-page .font-serif { font-family: "Cinzel", serif; }
+
+.landing-page .fade-up {
+  animation: landingFadeUp 1.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.landing-page .slide-top-bar {
+  animation: landingSlideBar 1s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes landingFadeUp {
+  from { opacity: 0; transform: translateY(40px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes landingSlideBar {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+.landing-page .realm-card-hover {
+  transition: transform 0.3s ease, background-color 0.3s ease;
+}
+.landing-page .realm-card-hover:hover {
+  transform: translateY(-8px);
+  background-color: #ffffff;
 }
 
 /* ─── Landing Page Animations ─── */
@@ -521,6 +676,15 @@
 @keyframes pulse {
   0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--gold); }
   50% { opacity: 0.3; box-shadow: none; }
+}
+@keyframes bifrostFlow {
+  0% { opacity: 0; transform: scaleX(0); transform-origin: left; }
+  50% { opacity: 1; transform: scaleX(1); transform-origin: left; }
+  51% { transform-origin: right; }
+  100% { opacity: 0; transform: scaleX(0); transform-origin: right; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bifrost-flow { animation: none !important; opacity: 0.6; }
 }
 @keyframes grain {
   0%, 100% { transform: translate(0, 0); }

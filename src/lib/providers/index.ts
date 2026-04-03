@@ -4,6 +4,10 @@ import { MssqlProvider } from "./mssql.provider";
 import { MysqlProvider } from "./mysql.provider";
 import { BigQueryProvider } from "./bigquery.provider";
 import { NetSuiteProvider } from "./netsuite.provider";
+import { RestApiProvider } from "./rest-api.provider";
+import { CsvProvider } from "./csv.provider";
+import { ExcelProvider } from "./excel.provider";
+import { GoogleSheetsProvider } from "./google-sheets.provider";
 
 const providers: Record<string, ConnectionProvider> = {
   POSTGRES: new PostgresProvider(),
@@ -11,6 +15,10 @@ const providers: Record<string, ConnectionProvider> = {
   MYSQL: new MysqlProvider(),
   BIGQUERY: new BigQueryProvider(),
   NETSUITE: new NetSuiteProvider(),
+  REST_API: new RestApiProvider(),
+  CSV_FILE: new CsvProvider(),
+  EXCEL_FILE: new ExcelProvider(),
+  GOOGLE_SHEETS: new GoogleSheetsProvider(),
 };
 
 export function getProvider(type: string): ConnectionProvider {

@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { ScheduleList } from "@/components/schedule/schedule-list";
+import { RealmBanner } from "@/components/realm-banner";
 
 export default async function SchedulesPage() {
   const session = await requireAuth();
@@ -31,12 +32,13 @@ export default async function SchedulesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="heading-norse text-xl">Schedules</h1>
-        <p className="text-text-dim text-xs tracking-wide mt-1">
-          View and manage report delivery schedules.
-        </p>
-      </div>
+      <RealmBanner
+        realm="asgard"
+        rune="ᛏ"
+        title="Schedules"
+        subtitle="The Norns weave the threads of time"
+        accentColor="#d4af37"
+      />
 
       <ScheduleList schedules={serialized} />
     </div>

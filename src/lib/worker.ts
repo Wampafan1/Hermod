@@ -66,6 +66,15 @@ async function main() {
   // Register Bifrost route handler
   await boss.work("run-route", { teamSize: 2, teamConcurrency: 1 }, handleRouteJob as any);
 
+  // Blueprint version pruning — runs asynchronously after new versions are created
+  await boss.work("prune-blueprint-versions", async (job: { data: { blueprintId: string } }) => {
+    const { enforceRetentionPolicy } = await import("@/lib/mjolnir/blueprint-versioning");
+    const pruned = await enforceRetentionPolicy(job.data.blueprintId);
+    if (pruned > 0) {
+      console.log(`[Worker] Pruned ${pruned} old blueprint version(s) for ${job.data.blueprintId}`);
+    }
+  });
+
   console.log("[Worker] Job handlers registered");
 
   // Scheduler tick loop

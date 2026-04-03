@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useToast } from "@/components/toast";
+import { useFocusTrap } from "@/lib/hooks/use-focus-trap";
+import { PasswordInput } from "@/components/password-input";
 
 type AuthType = "NONE" | "PLAIN" | "OAUTH2";
 
@@ -22,6 +24,8 @@ interface EmailConnectionFormProps {
 
 export function EmailConnectionForm({ onSaved, onClose, initial }: EmailConnectionFormProps) {
   const toast = useToast();
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef, true, onClose);
   const isEditing = !!initial;
 
   const [name, setName] = useState(initial?.name ?? "");
@@ -131,14 +135,21 @@ export function EmailConnectionForm({ onSaved, onClose, initial }: EmailConnecti
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
-      <div className="bg-deep border border-border-mid w-full max-w-lg mx-4">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="email-form-title"
+        className="bg-deep border border-border-mid w-full max-w-lg mx-4"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <h2 className="heading-norse text-sm">
+          <h2 id="email-form-title" className="heading-norse text-sm">
             {isEditing ? "Edit Email Connection" : "Add Email Connection"}
           </h2>
           <button
             onClick={onClose}
+            aria-label="Close"
             className="text-text-dim hover:text-text text-xl leading-none"
           >
             &times;
@@ -224,11 +235,9 @@ export function EmailConnectionForm({ onSaved, onClose, initial }: EmailConnecti
                 <label className="label-norse">
                   Password{isEditing ? " (blank = keep)" : ""}
                 </label>
-                <input
-                  type="password"
+                <PasswordInput
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="input-norse"
                   placeholder="••••••••"
                 />
               </div>

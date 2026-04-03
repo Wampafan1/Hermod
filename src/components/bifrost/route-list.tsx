@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import Image from "next/image";
+import { REALM_ILLUSTRATIONS } from "@/lib/constants";
 
 interface RouteListItem {
   id: string;
@@ -22,10 +24,19 @@ interface RouteListItem {
 }
 
 const STATUS_DOT: Record<string, string> = {
-  completed: "bg-emerald-500",
-  partial: "bg-amber-500",
-  failed: "bg-red-500",
-  running: "bg-gold animate-pulse",
+  completed: "bg-success",
+  partial: "bg-warning status-pulse-amber",
+  failed: "bg-error status-pulse-red",
+  running: "bg-warning animate-pip-pulse",
+};
+
+const REALM_TYPE_COLOR: Record<string, string> = {
+  POSTGRES: "#d4af37",
+  MSSQL: "#d4af37",
+  MYSQL: "#d4af37",
+  BIGQUERY: "#d4af37",
+  NETSUITE: "#ce93d8",
+  SFTP: "#66bb6a",
 };
 
 export function RouteList() {
@@ -116,33 +127,78 @@ export function RouteList() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="heading-norse text-lg">
-            ᛒ Bifrost Routes
-          </h1>
-          <p className="text-text-dim text-xs tracking-wider mt-1">
-            Data pathways through the realms
-          </p>
+      {/* Header Banner */}
+      <div className="relative overflow-hidden animate-fade-up -mx-6 -mt-6 mb-6" style={{ height: "180px" }}>
+        <Image
+          src={REALM_ILLUSTRATIONS.bifrost}
+          alt="Bifrost realm"
+          fill
+          sizes="100vw"
+          style={{ objectFit: "cover", objectPosition: "center" }}
+          priority={false}
+        />
+        <div
+          className="absolute inset-0"
+          style={{
+            background: `linear-gradient(90deg,
+              rgba(244,236,216,0.95) 0%,
+              rgba(244,236,216,0.85) 35%,
+              rgba(244,236,216,0.5) 65%,
+              rgba(244,236,216,0.2) 100%)`,
+          }}
+        />
+        <div className="relative h-full flex items-center justify-between px-6">
+          <div>
+            <div className="flex items-center gap-3">
+              <span
+                className="text-2xl font-cinzel select-none"
+                style={{
+                  background: "linear-gradient(135deg, #ff6b6b, #ffa726, #ffee58, #66bb6a, #42a5f5, #7e57c2)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                }}
+              >
+                ᛒ
+              </span>
+              <h1 className="heading-norse text-xl">Bifrost</h1>
+            </div>
+            <div
+              className="realm-line mt-1.5 mb-1 w-32"
+              style={{
+                background: "linear-gradient(90deg, #ff6b6b, #ffa726, #ffee58, #66bb6a, #42a5f5, #7e57c2)",
+              }}
+            />
+            <p className="text-text-muted text-xs tracking-wide font-space-grotesk italic">
+              The rainbow bridge between all realms
+            </p>
+          </div>
+          <Link
+            href="/bifrost/new"
+            className="btn-primary px-4 py-2 text-xs tracking-[0.15em] uppercase"
+          >
+            Forge New Route
+          </Link>
         </div>
-        <Link
-          href="/bifrost/new"
-          className="btn-primary px-4 py-2 text-xs tracking-[0.15em] uppercase"
-        >
-          Forge New Route
-        </Link>
       </div>
 
       {/* Table */}
       {routes.length === 0 ? (
         <div className="border border-border bg-deep p-12 text-center">
-          <p className="text-text-dim text-sm tracking-wider">No routes forged yet.</p>
+          <span
+            className="text-4xl font-cinzel block mb-3 animate-rune-float"
+            style={{
+              background: "linear-gradient(135deg, rgba(255,107,107,0.3), rgba(255,167,38,0.3), rgba(255,238,88,0.3), rgba(102,187,106,0.3), rgba(66,165,245,0.3), rgba(126,87,194,0.3))",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+            }}
+          >ᛒ</span>
+          <p className="text-text-dim text-sm tracking-wide">The Bifrost awaits its first crossing.</p>
+          <p className="text-text-muted text-xs tracking-wide mt-1">Create a route to begin.</p>
           <Link
             href="/bifrost/new"
-            className="text-gold text-xs tracking-wider hover:text-gold-bright mt-2 inline-block"
+            className="btn-ghost mt-4 inline-block"
           >
-            Create your first route
+            Forge New Route
           </Link>
         </div>
       ) : (
@@ -197,11 +253,23 @@ export function RouteList() {
                         {route.name}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-text-dim tracking-wider">
-                      {route.source.name}
+                    <td className="px-4 py-3 tracking-wider">
+                      <span className="text-text-dim">{route.source.name}</span>
+                      <span
+                        className="ml-1.5 text-[0.55rem] font-space-grotesk uppercase tracking-widest"
+                        style={{ color: REALM_TYPE_COLOR[route.source.type] ?? "var(--text-muted)" }}
+                      >
+                        {route.source.type}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-text-dim tracking-wider">
-                      {route.dest.name}
+                    <td className="px-4 py-3 tracking-wider">
+                      <span className="text-text-dim">{route.dest.name}</span>
+                      <span
+                        className="ml-1.5 text-[0.55rem] font-space-grotesk uppercase tracking-widest"
+                        style={{ color: REALM_TYPE_COLOR[route.dest.type] ?? "var(--text-muted)" }}
+                      >
+                        {route.dest.type}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-text-dim tracking-wider">
                       {lastLog ? (

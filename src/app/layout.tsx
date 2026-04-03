@@ -1,18 +1,39 @@
 import type { Metadata } from "next";
-import { Cinzel, Inconsolata } from "next/font/google";
+import {
+  EB_Garamond,
+  Source_Serif_4,
+  Space_Grotesk,
+  Inconsolata,
+} from "next/font/google";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 
-const cinzel = Cinzel({
+const ebGaramond = EB_Garamond({
   subsets: ["latin"],
-  weight: ["400", "700", "900"],
-  variable: "--font-cinzel",
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-eb-garamond",
+  display: "swap",
+});
+
+const sourceSerif = Source_Serif_4({
+  subsets: ["latin"],
+  weight: ["300", "400", "600", "700"],
+  variable: "--font-source-serif",
+  display: "swap",
+});
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-space-grotesk",
+  display: "swap",
 });
 
 const inconsolata = Inconsolata({
   subsets: ["latin"],
   weight: ["300", "400", "600"],
   variable: "--font-inconsolata",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -27,9 +48,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
+      <head>
+        <link
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+          rel="stylesheet"
+        />
+      </head>
       <body
-        className={`${cinzel.variable} ${inconsolata.variable} font-inconsolata bg-void text-text`}
+        className={`${ebGaramond.variable} ${sourceSerif.variable} ${spaceGrotesk.variable} ${inconsolata.variable} font-source-serif bg-void text-text antialiased`}
       >
         <Providers>{children}</Providers>
       </body>

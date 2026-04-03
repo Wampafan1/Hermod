@@ -92,6 +92,23 @@ export async function detectCursorStrategy(input: DetectionInput): Promise<Curso
       throw new Error("Missing required fields in AI response");
     }
 
+    // Validate AI-returned cursorColumn exists in the actual source schema
+    if (parsed.cursorColumn) {
+      const columnNames = input.columns.map((c) => c.name.toLowerCase());
+      if (!columnNames.includes(parsed.cursorColumn.toLowerCase())) {
+        const badCol = parsed.cursorColumn;
+        console.warn(
+          `[CursorDetection] AI returned non-existent column "${badCol}", falling back`
+        );
+        parsed.warnings.push(`AI suggested column "${badCol}" which does not exist in the source schema.`);
+        parsed.strategy = "full_refresh";
+        parsed.cursorColumn = null;
+        parsed.cursorColumnType = null;
+        parsed.confidence = "low";
+        parsed.reasoning += " (Original column not found in schema — reset to full refresh.)";
+      }
+    }
+
     return parsed;
   } catch (err) {
     console.error("[CursorDetection] Failed:", err instanceof Error ? err.message : err);

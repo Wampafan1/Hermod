@@ -42,6 +42,14 @@ export async function setWatermark(record: WatermarkRecord): Promise<void> {
   });
 }
 
+// ─── Delete ──────────────────────────────────────────
+
+export async function deleteWatermark(routeId: string, tableName: string): Promise<void> {
+  await prisma.pipelineWatermark.deleteMany({
+    where: { routeId, tableName },
+  });
+}
+
 // ─── Query Helpers ───────────────────────────────────
 
 /**

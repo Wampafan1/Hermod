@@ -250,6 +250,7 @@ export class BifrostEngine {
     const destConn = await destProvider.connect(destConnLike);
 
     let routeLog: { id: string } | null = null;
+    let forgeExecutionId: string | null = null;
 
     try {
       // 1. Schema validation — also tells us if the target table exists
@@ -301,6 +302,31 @@ export class BifrostEngine {
             `Blueprint contains stateful steps not supported in streaming mode: ${validation.statefulSteps.join(", ")}`
           );
         }
+
+        // Track execution in the versioned blueprint system (if it exists)
+        try {
+          const forgeBlueprint = await prisma.forgeBlueprint.findUnique({
+            where: { routeId: route.id },
+          });
+          if (forgeBlueprint) {
+            const currentVer = await prisma.forgeBlueprintVersion.findFirst({
+              where: { blueprintId: forgeBlueprint.id },
+              orderBy: { version: "desc" },
+            });
+            if (currentVer) {
+              const { recordExecution } = await import("@/lib/mjolnir/blueprint-versioning");
+              const exec = await recordExecution({
+                blueprintId: forgeBlueprint.id,
+                versionId: currentVer.id,
+                versionNumber: currentVer.version,
+                routeRunId: routeLog.id,
+              });
+              forgeExecutionId = exec.id;
+            }
+          }
+        } catch {
+          // Non-critical — don't fail the route if versioning tracking fails
+        }
       }
 
       // 5. Extract → Transform → Load loop
@@ -314,6 +340,8 @@ export class BifrostEngine {
       let totalExtracted = 0;
       let totalLoaded = 0;
       let errorCount = 0;
+      let firstBatchForHash: Record<string, unknown>[] | null = null;
+      let lastBatchForHash: Record<string, unknown>[] | null = null;
       let loadBatchIndex = 0;
 
       // Batch buffer — accumulate small source chunks before flushing to
@@ -668,6 +696,14 @@ export class BifrostEngine {
 
         batchBuffer.push(...transformed);
 
+        // Capture samples for audit hashing
+        if (!firstBatchForHash && transformed.length > 0) {
+          firstBatchForHash = transformed.slice(0, 100);
+        }
+        if (transformed.length > 0) {
+          lastBatchForHash = transformed.slice(0, 100);
+        }
+
         // Track pending watermark max for this batch (promoted only after successful load)
         if (cursorConfig?.cursorColumn && cursorConfig.strategy !== "full_refresh") {
           const chunkMax = extractNewWatermark(
@@ -805,6 +841,20 @@ export class BifrostEngine {
         },
       });
 
+      // Complete forge execution tracking
+      if (forgeExecutionId) {
+        try {
+          const { completeExecution, computeDataHash } = await import("@/lib/mjolnir/blueprint-versioning");
+          await completeExecution(forgeExecutionId, {
+            status: status === "failed" ? "FAILED" : "SUCCESS",
+            outputRowCount: totalLoaded,
+            inputRowCount: totalExtracted,
+            inputHash: firstBatchForHash ? computeDataHash(firstBatchForHash) : undefined,
+            outputHash: lastBatchForHash ? computeDataHash(lastBatchForHash) : undefined,
+          });
+        } catch { /* non-critical */ }
+      }
+
       console.log(
         `[Bifrost] ${route.name}: ${status} — ${totalLoaded}/${totalExtracted} rows in ${duration}ms`
       );
@@ -814,6 +864,18 @@ export class BifrostEngine {
       // Job-level failure (auth, network, etc.)
       const duration = Date.now() - startTime;
       const errorMsg = err instanceof Error ? err.message : String(err);
+
+      // Complete forge execution tracking on failure
+      if (forgeExecutionId) {
+        try {
+          const { completeExecution } = await import("@/lib/mjolnir/blueprint-versioning");
+          await completeExecution(forgeExecutionId, {
+            status: "FAILED",
+            errorMessage: errorMsg,
+            inputRowCount: totalExtracted,
+          });
+        } catch { /* non-critical */ }
+      }
 
       if (routeLog) {
         // Update the existing "running" log instead of creating an orphan

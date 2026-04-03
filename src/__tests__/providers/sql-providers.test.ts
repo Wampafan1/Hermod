@@ -1,6 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ─── Mock Variables (hoisted) ───────────────────────────
+
+// Postgres: Pool returns PoolClient with release()
+const mockPgPoolClient = vi.hoisted(() => ({
+  query: vi.fn(),
+  release: vi.fn(),
+}));
+const mockPgPool = vi.hoisted(() => ({
+  connect: vi.fn().mockResolvedValue(mockPgPoolClient),
+  end: vi.fn(),
+}));
+// Direct client for testConnection (bypasses pool)
 const mockPgClient = vi.hoisted(() => ({
   connect: vi.fn(),
   query: vi.fn(),
@@ -10,8 +21,19 @@ const mockPgClient = vi.hoisted(() => ({
 const mockMssqlPool = vi.hoisted(() => ({
   request: vi.fn().mockReturnValue({ query: vi.fn() }),
   close: vi.fn(),
+  connected: true,
 }));
 
+// MySQL: Pool returns pooled connection with release()
+const mockMysqlPoolConn = vi.hoisted(() => ({
+  execute: vi.fn(),
+  release: vi.fn(),
+}));
+const mockMysqlPool = vi.hoisted(() => ({
+  getConnection: vi.fn().mockResolvedValue(mockMysqlPoolConn),
+  end: vi.fn(),
+}));
+// Direct connection for testConnection
 const mockMysqlConnection = vi.hoisted(() => ({
   execute: vi.fn(),
   end: vi.fn(),
@@ -21,6 +43,7 @@ const mockMysqlConnection = vi.hoisted(() => ({
 
 vi.mock("pg", () => ({
   default: {
+    Pool: vi.fn(function () { return mockPgPool; }),
     Client: vi.fn(function (this: typeof mockPgClient) {
       Object.assign(this, mockPgClient);
     }),
@@ -34,8 +57,33 @@ vi.mock("mssql", () => ({
 }));
 
 vi.mock("mysql2/promise", () => ({
+  createPool: vi.fn().mockReturnValue(mockMysqlPool),
   createConnection: vi.fn().mockResolvedValue(mockMysqlConnection),
 }));
+
+// Reset pool-manager between tests to avoid stale pool cache
+vi.mock("@/lib/providers/pool-manager", async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    // Override PoolManager to always call factory (no caching in tests)
+    PoolManager: class TestPoolManager {
+      private destroyer: (pool: unknown) => Promise<void>;
+      constructor(destroyer: (pool: unknown) => Promise<void>) {
+        this.destroyer = destroyer;
+      }
+      static buildKey(parts: Record<string, unknown>) {
+        return JSON.stringify(parts);
+      }
+      async getOrCreate(_key: string, factory: () => Promise<unknown>) {
+        return factory();
+      }
+      async evict() {}
+      async closeAll() {}
+      get size() { return 0; }
+    },
+  };
+});
 
 // ─── Imports ────────────────────────────────────────────
 
@@ -73,6 +121,7 @@ describe("PostgresProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     provider = new PostgresProvider();
+    mockPgPool.connect.mockResolvedValue(mockPgPoolClient);
     mockPgClient.connect.mockResolvedValue(undefined);
     mockPgClient.end.mockResolvedValue(undefined);
   });
@@ -94,19 +143,18 @@ describe("PostgresProvider", () => {
       const conn = await provider.connect(pgConnection);
       expect(conn).toBeDefined();
       expect(typeof conn.close).toBe("function");
-      expect(mockPgClient.connect).toHaveBeenCalledOnce();
     });
 
-    it("close() calls client.end()", async () => {
+    it("close() releases connection back to pool", async () => {
       const conn = await provider.connect(pgConnection);
       await conn.close();
-      expect(mockPgClient.end).toHaveBeenCalledOnce();
+      expect(mockPgPoolClient.release).toHaveBeenCalledOnce();
     });
   });
 
   describe("query()", () => {
     it("returns columns and rows", async () => {
-      mockPgClient.query.mockResolvedValue({
+      mockPgPoolClient.query.mockResolvedValue({
         fields: [{ name: "id" }, { name: "name" }],
         rows: [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }],
       });
@@ -120,7 +168,7 @@ describe("PostgresProvider", () => {
     });
 
     it("returns empty columns and rows for no data", async () => {
-      mockPgClient.query.mockResolvedValue({
+      mockPgPoolClient.query.mockResolvedValue({
         fields: [],
         rows: [],
       });
@@ -161,7 +209,7 @@ describe("PostgresProvider", () => {
   describe("extract()", () => {
     it("yields rows from query", async () => {
       const rows = [{ id: 1 }, { id: 2 }];
-      mockPgClient.query.mockResolvedValue({
+      mockPgPoolClient.query.mockResolvedValue({
         fields: [{ name: "id" }],
         rows,
       });
@@ -175,7 +223,7 @@ describe("PostgresProvider", () => {
     });
 
     it("yields empty array for no results", async () => {
-      mockPgClient.query.mockResolvedValue({
+      mockPgPoolClient.query.mockResolvedValue({
         fields: [{ name: "id" }],
         rows: [],
       });
@@ -220,10 +268,11 @@ describe("MssqlProvider", () => {
       expect(typeof conn.close).toBe("function");
     });
 
-    it("close() calls pool.close()", async () => {
+    it("close() does not destroy the shared pool", async () => {
       const conn = await provider.connect(mssqlConnection);
       await conn.close();
-      expect(mockMssqlPool.close).toHaveBeenCalledOnce();
+      // Pool is managed by PoolManager — close() should NOT tear it down
+      expect(mockMssqlPool.close).not.toHaveBeenCalled();
     });
   });
 
@@ -277,9 +326,10 @@ describe("MssqlProvider", () => {
       expect(result).toBe(false);
     });
 
-    it("always closes the pool on success", async () => {
+    it("always closes the test pool on success", async () => {
       mockRequest.query.mockResolvedValue({ recordset: [{ "": 1 }] });
       await provider.testConnection(mssqlConnection);
+      // testConnection uses a direct pool (not the shared one), so it closes it
       expect(mockMssqlPool.close).toHaveBeenCalledOnce();
     });
   });
@@ -307,6 +357,7 @@ describe("MysqlProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     provider = new MysqlProvider();
+    mockMysqlPool.getConnection.mockResolvedValue(mockMysqlPoolConn);
     mockMysqlConnection.end.mockResolvedValue(undefined);
   });
 
@@ -329,16 +380,16 @@ describe("MysqlProvider", () => {
       expect(typeof conn.close).toBe("function");
     });
 
-    it("close() calls connection.end()", async () => {
+    it("close() releases connection back to pool", async () => {
       const conn = await provider.connect(mysqlConnection);
       await conn.close();
-      expect(mockMysqlConnection.end).toHaveBeenCalledOnce();
+      expect(mockMysqlPoolConn.release).toHaveBeenCalledOnce();
     });
   });
 
   describe("query()", () => {
     it("returns columns and rows", async () => {
-      mockMysqlConnection.execute.mockResolvedValue([
+      mockMysqlPoolConn.execute.mockResolvedValue([
         [{ id: 1, name: "Alice" }],
         [{ name: "id" }, { name: "name" }],
       ]);
@@ -349,7 +400,7 @@ describe("MysqlProvider", () => {
     });
 
     it("returns empty for no data", async () => {
-      mockMysqlConnection.execute.mockResolvedValue([[], []]);
+      mockMysqlPoolConn.execute.mockResolvedValue([[], []]);
       const conn = await provider.connect(mysqlConnection);
       const result = await provider.query!(conn, "SELECT 1 WHERE false");
       expect(result.columns).toEqual([]);
@@ -383,7 +434,7 @@ describe("MysqlProvider", () => {
   describe("extract()", () => {
     it("yields rows from query", async () => {
       const rows = [{ id: 1 }, { id: 2 }];
-      mockMysqlConnection.execute.mockResolvedValue([
+      mockMysqlPoolConn.execute.mockResolvedValue([
         rows,
         [{ name: "id" }],
       ]);

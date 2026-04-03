@@ -6,6 +6,7 @@ import { DaySelector } from "./day-selector";
 import { RecipientInput } from "./recipient-input";
 import { SchedulePreview } from "./schedule-preview";
 import { useToast } from "@/components/toast";
+import { COMMON_TIMEZONES, OTHER_TIMEZONES } from "@/lib/timezones";
 
 type Frequency = "DAILY" | "WEEKLY" | "BIWEEKLY" | "MONTHLY" | "QUARTERLY";
 
@@ -39,15 +40,6 @@ interface ScheduleFormProps {
   };
 }
 
-const COMMON_TIMEZONES = [
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "America/Phoenix",
-  "America/Anchorage",
-  "Pacific/Honolulu",
-];
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -113,10 +105,6 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
     if (amPm === "PM") h += 12;
     setTimeHour(h);
   }
-
-  const allTimezones = Intl.supportedValuesOf
-    ? Intl.supportedValuesOf("timeZone")
-    : COMMON_TIMEZONES;
 
   async function handleSave() {
     if (!emailConnectionId) {
@@ -324,13 +312,11 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
             ))}
           </optgroup>
           <optgroup label="All Timezones">
-            {allTimezones
-              .filter((tz) => !COMMON_TIMEZONES.includes(tz))
-              .map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz}
-                </option>
-              ))}
+            {OTHER_TIMEZONES.map((tz) => (
+              <option key={tz} value={tz}>
+                {tz}
+              </option>
+            ))}
           </optgroup>
         </select>
       </div>

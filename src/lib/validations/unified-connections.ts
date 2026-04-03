@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ConnectionType } from "@/lib/providers/types";
+import { restApiConfigSchema, restApiCredentialsBaseSchema, restApiCredentialsSchema } from "./alfheim";
 
 // ─── Config schemas (non-sensitive, stored in config JSON) ───────
 
@@ -57,6 +58,7 @@ export const connectionConfigSchemas: Record<ConnectionType, z.ZodTypeAny> = {
   BIGQUERY: bigqueryConfig,
   NETSUITE: netsuiteConfig,
   SFTP: sftpConfig,
+  REST_API: restApiConfigSchema,
 };
 
 export const connectionCredentialsSchemas: Record<ConnectionType, z.ZodTypeAny> = {
@@ -66,6 +68,7 @@ export const connectionCredentialsSchemas: Record<ConnectionType, z.ZodTypeAny> 
   BIGQUERY: bigqueryCredentials,
   NETSUITE: netsuiteCredentials,
   SFTP: passwordCredentials,
+  REST_API: restApiCredentialsSchema,
 };
 
 // ─── Discriminated union for create ─────────────────────────────
@@ -81,6 +84,7 @@ export const createConnectionSchema = z.discriminatedUnion("type", [
   z.object({ ...baseFields, type: z.literal("BIGQUERY"),  config: bigqueryConfig,  credentials: bigqueryCredentials }),
   z.object({ ...baseFields, type: z.literal("NETSUITE"),  config: netsuiteConfig,  credentials: netsuiteCredentials }),
   z.object({ ...baseFields, type: z.literal("SFTP"),      config: sftpConfig,      credentials: passwordCredentials }),
+  z.object({ ...baseFields, type: z.literal("REST_API"),  config: restApiConfigSchema, credentials: restApiCredentialsBaseSchema }),
 ]);
 
 // TODO: updateConnectionSchema uses loose validation — type-aware config/credentials

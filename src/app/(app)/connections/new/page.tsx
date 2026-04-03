@@ -6,7 +6,7 @@ import { SourcePicker } from "@/components/connections/source-picker";
 import { SftpWizard } from "@/components/connections/sftp-wizard";
 import type { SourceType } from "@/components/connections/source-picker";
 
-const SQL_TYPES = new Set<SourceType>(["POSTGRES", "MSSQL", "MYSQL", "BIGQUERY"]);
+const SQL_TYPES = new Set<SourceType>(["POSTGRES", "MSSQL", "MYSQL", "BIGQUERY", "NETSUITE"]);
 const EMAIL_TYPES = new Set<SourceType>(["EMAIL_SMTP"]);
 
 const SOURCE_NAMES: Record<SourceType, string> = {
@@ -14,6 +14,7 @@ const SOURCE_NAMES: Record<SourceType, string> = {
   MSSQL: "SQL Server",
   MYSQL: "MySQL",
   BIGQUERY: "BigQuery",
+  NETSUITE: "NetSuite",
   ADP: "ADP",
   QUICKBOOKS: "QuickBooks",
   SAP: "SAP",
@@ -51,7 +52,7 @@ export default function NewConnectionPage() {
           </p>
         </div>
         <SftpWizard
-          sourceType={selected.type as Exclude<SourceType, "POSTGRES" | "MSSQL" | "MYSQL" | "BIGQUERY" | "EMAIL_SMTP">}
+          sourceType={selected.type as Exclude<SourceType, "POSTGRES" | "MSSQL" | "MYSQL" | "BIGQUERY" | "NETSUITE" | "EMAIL_SMTP">}
           sourceName={selected.name}
           onBack={() => setSelected(null)}
         />

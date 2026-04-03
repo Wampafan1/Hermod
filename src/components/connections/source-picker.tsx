@@ -1,10 +1,17 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 export type SourceType =
   | "POSTGRES"
   | "MSSQL"
   | "MYSQL"
   | "BIGQUERY"
+  | "NETSUITE"
+  | "REST_API"
+  | "CSV_FILE"
+  | "EXCEL_FILE"
+  | "GOOGLE_SHEETS"
   | "ADP"
   | "QUICKBOOKS"
   | "SAP"
@@ -17,7 +24,7 @@ interface SourceOption {
   name: string;
   rune: string;
   description: string;
-  category: "sql" | "sftp" | "email";
+  category: "sql" | "cloud" | "sftp" | "email" | "file";
 }
 
 const SOURCES: SourceOption[] = [
@@ -25,6 +32,11 @@ const SOURCES: SourceOption[] = [
   { type: "MSSQL", name: "SQL Server", rune: "ᛊ", description: "Microsoft SQL Server", category: "sql" },
   { type: "MYSQL", name: "MySQL", rune: "ᛗ", description: "Popular open-source database", category: "sql" },
   { type: "BIGQUERY", name: "BigQuery", rune: "ᚷ", description: "Google Cloud data warehouse", category: "sql" },
+  { type: "NETSUITE", name: "NetSuite", rune: "ᚾ", description: "Oracle ERP via SuiteQL REST API", category: "cloud" },
+  { type: "REST_API", name: "API Connectors", rune: "✦", description: "Browse catalog of pre-built API connectors", category: "cloud" },
+  { type: "CSV_FILE", name: "CSV File", rune: "ᛃ", description: "Upload CSV, TSV, or text files", category: "file" },
+  { type: "EXCEL_FILE", name: "Excel File", rune: "ᚹ", description: "Upload .xlsx workbooks", category: "file" },
+  { type: "GOOGLE_SHEETS", name: "Google Sheets", rune: "ᚨ", description: "Connect via Google OAuth", category: "file" },
   { type: "ADP", name: "ADP", rune: "ᚨ", description: "Payroll and HR data via SFTP", category: "sftp" },
   { type: "QUICKBOOKS", name: "QuickBooks", rune: "ᚠ", description: "Accounting data via SFTP", category: "sftp" },
   { type: "SAP", name: "SAP", rune: "ᛉ", description: "ERP data via SFTP", category: "sftp" },
@@ -38,9 +50,33 @@ interface SourcePickerProps {
 }
 
 export function SourcePicker({ onSelect }: SourcePickerProps) {
+  const router = useRouter();
   const sqlSources = SOURCES.filter((s) => s.category === "sql");
+  const cloudSources = SOURCES.filter((s) => s.category === "cloud");
   const sftpSources = SOURCES.filter((s) => s.category === "sftp");
   const emailSources = SOURCES.filter((s) => s.category === "email");
+
+  const fileSources = SOURCES.filter((s) => s.category === "file");
+
+  function handleSelect(source: SourceOption) {
+    if (source.type === "REST_API") {
+      router.push("/connections/api");
+      return;
+    }
+    if (source.type === "CSV_FILE") {
+      router.push("/connections/csv/new");
+      return;
+    }
+    if (source.type === "EXCEL_FILE") {
+      router.push("/connections/excel/new");
+      return;
+    }
+    if (source.type === "GOOGLE_SHEETS") {
+      router.push("/connections/sheets/new");
+      return;
+    }
+    onSelect(source);
+  }
 
   return (
     <div className="space-y-8">
@@ -48,7 +84,43 @@ export function SourcePicker({ onSelect }: SourcePickerProps) {
         <h2 className="heading-norse text-sm mb-4">Database Connections</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border">
           {sqlSources.map((source) => (
-            <SourceCard key={source.type} source={source} onClick={() => onSelect(source)} />
+            <SourceCard key={source.type} source={source} onClick={() => handleSelect(source)} />
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <div className="flex-1 h-px bg-border" />
+        <span className="text-gold/30 text-sm font-cinzel">ᚾ</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
+
+      <div>
+        <h2 className="heading-norse text-sm mb-4">Cloud & API</h2>
+        <p className="text-text-dim text-xs tracking-wide mb-4">
+          Connect to cloud platforms and SaaS APIs
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border">
+          {cloudSources.map((source) => (
+            <SourceCard key={source.type} source={source} onClick={() => handleSelect(source)} />
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <div className="flex-1 h-px bg-border" />
+        <span className="text-gold/30 text-sm font-cinzel">ᚹ</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
+
+      <div>
+        <h2 className="heading-norse text-sm mb-4">File & Spreadsheet Sources</h2>
+        <p className="text-text-dim text-xs tracking-wide mb-4">
+          Upload files or connect to cloud spreadsheets
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-px bg-border">
+          {fileSources.map((source) => (
+            <SourceCard key={source.type} source={source} onClick={() => handleSelect(source)} />
           ))}
         </div>
       </div>
@@ -66,7 +138,7 @@ export function SourcePicker({ onSelect }: SourcePickerProps) {
         </p>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-px bg-border">
           {sftpSources.map((source) => (
-            <SourceCard key={source.type} source={source} onClick={() => onSelect(source)} />
+            <SourceCard key={source.type} source={source} onClick={() => handleSelect(source)} />
           ))}
         </div>
       </div>
@@ -84,7 +156,7 @@ export function SourcePicker({ onSelect }: SourcePickerProps) {
         </p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border">
           {emailSources.map((source) => (
-            <SourceCard key={source.type} source={source} onClick={() => onSelect(source)} />
+            <SourceCard key={source.type} source={source} onClick={() => handleSelect(source)} />
           ))}
         </div>
       </div>

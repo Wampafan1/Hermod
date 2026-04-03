@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireAuth } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { ConnectionList } from "@/components/connections/connection-list";
+import { RealmBanner } from "@/components/realm-banner";
 
 export default async function ConnectionsPage() {
   const session = await requireAuth();
@@ -45,17 +46,19 @@ export default async function ConnectionsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="heading-norse text-xl">Connections</h1>
-          <p className="text-text-dim text-xs tracking-wide mt-1">
-            Manage your database and file connections.
-          </p>
-        </div>
-        <Link href="/connections/new" className="btn-primary">
-          <span>Add Connection</span>
-        </Link>
-      </div>
+      <RealmBanner
+        realm="midgard"
+        rune="ᚨ"
+        title="Connections"
+        subtitle="Bridges to the outer realms"
+        accentColor="#ce93d8"
+        objectPosition="center 35%"
+        action={
+          <Link href="/connections/new" className="btn-primary">
+            <span>Add Connection</span>
+          </Link>
+        }
+      />
 
       <ConnectionList
         connections={serializedConnections}

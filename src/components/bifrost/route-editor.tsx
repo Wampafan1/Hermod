@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { canBeSource, canBeDestination } from "@/lib/providers/capabilities";
 import type { ConnectionType } from "@/lib/providers/types";
+import { DaySelector } from "@/components/schedule/day-selector";
+import { COMMON_TIMEZONES, OTHER_TIMEZONES } from "@/lib/timezones";
 
 interface DataSourceOption {
   id: string;
@@ -20,7 +23,8 @@ interface BlueprintOption {
 
 interface NetSuiteRecordType {
   name: string;
-  href: string;
+  label: string;
+  category: string;
 }
 
 interface NetSuiteField {
@@ -28,6 +32,8 @@ interface NetSuiteField {
   type: string;
   label?: string;
   mandatory?: boolean;
+  isCustom?: boolean;
+  isReference?: boolean;
 }
 
 interface RouteEditorProps {
@@ -42,8 +48,15 @@ const WRITE_DISPOSITIONS = [
   { value: "WRITE_EMPTY", label: "Empty Only", description: "Only write if table is empty" },
 ];
 
+const SUB_DAILY = ["EVERY_15_MIN", "EVERY_30_MIN", "HOURLY", "EVERY_4_HOURS", "EVERY_12_HOURS"];
+
 const FREQUENCIES = [
   { value: "", label: "No schedule" },
+  { value: "EVERY_15_MIN", label: "Every 15 minutes" },
+  { value: "EVERY_30_MIN", label: "Every 30 minutes" },
+  { value: "HOURLY", label: "Hourly" },
+  { value: "EVERY_4_HOURS", label: "Every 4 hours" },
+  { value: "EVERY_12_HOURS", label: "Every 12 hours" },
   { value: "DAILY", label: "Daily" },
   { value: "WEEKLY", label: "Weekly" },
   { value: "BIWEEKLY", label: "Biweekly" },
@@ -51,7 +64,6 @@ const FREQUENCIES = [
   { value: "QUARTERLY", label: "Quarterly" },
 ];
 
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export function RouteEditor({ routeId }: RouteEditorProps) {
   const router = useRouter();
@@ -67,6 +79,7 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
   // NetSuite source config
   const [nsRecordType, setNsRecordType] = useState("");
   const [nsFields, setNsFields] = useState<string[]>([]);
+  const [nsReferenceFields, setNsReferenceFields] = useState<string[]>([]);
   const [nsFilter, setNsFilter] = useState("");
   const [nsRecordTypes, setNsRecordTypes] = useState<NetSuiteRecordType[]>([]);
   const [nsFieldList, setNsFieldList] = useState<NetSuiteField[]>([]);
@@ -87,6 +100,15 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
   const [timeMinute, setTimeMinute] = useState(0);
   const [timezone, setTimezone] = useState("America/Chicago");
 
+  // Preserve cursorConfig across edits (loaded from DB, passed through on save)
+  const [cursorConfig, setCursorConfig] = useState<Record<string, unknown> | null>(null);
+
+  // Schema evolution: track original fields + query for change detection
+  const originalFieldsRef = useRef<string[] | null>(null);
+  const originalQueryRef = useRef<string | null>(null);
+  const [showReloadConfirm, setShowReloadConfirm] = useState(false);
+  const pendingPayloadRef = useRef<Record<string, unknown> | null>(null);
+
   // Reference data
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
   const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
@@ -100,12 +122,25 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
   // Derived: generated SuiteQL preview
   const generatedSuiteQL = useMemo(() => {
     if (!isNetSuiteSource || !nsRecordType) return "";
-    const fields = nsFields.length > 0 ? nsFields.join(", ") : "*";
-    let sql = `SELECT ${fields} FROM ${nsRecordType}`;
+    // Reference fields for BUILTIN.DF() wrapping. Primary source: nsReferenceFields
+    // (persisted in sourceConfig, survives page reloads). Fallback: derive from
+    // nsFieldList (populated by async catalog fetch). This handles legacy routes
+    // that don't have referenceFields saved yet.
+    const refFromState = nsReferenceFields.length > 0
+      ? nsReferenceFields
+      : nsFieldList.filter((f) => f.isReference).map((f) => f.name);
+    const refFields = new Set(refFromState.map((f) => f.toLowerCase()));
+    const fieldExprs = nsFields.length > 0
+      ? nsFields.map((f) => {
+          const col = f.toLowerCase();
+          return refFields.has(col) ? `BUILTIN.DF(${col}) as ${col}` : col;
+        }).join(", ")
+      : "*";
+    let sql = `SELECT ${fieldExprs} FROM ${nsRecordType}`;
     if (nsFilter.trim()) sql += ` WHERE ${nsFilter.trim()}`;
     sql += " ORDER BY id ASC";
     return sql;
-  }, [isNetSuiteSource, nsRecordType, nsFields, nsFilter]);
+  }, [isNetSuiteSource, nsRecordType, nsFields, nsFilter, nsReferenceFields, nsFieldList]);
 
   // Fetch NetSuite record types when a NetSuite source is selected
   useEffect(() => {
@@ -137,6 +172,10 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
       .then((data) => {
         if (Array.isArray(data)) {
           setNsFieldList(data);
+          // Persist reference field names for BUILTIN.DF() wrapping
+          setNsReferenceFields(
+            data.filter((f: NetSuiteField) => f.isReference).map((f: NetSuiteField) => f.name)
+          );
           // Auto-check mandatory fields
           const mandatory = data
             .filter((f: NetSuiteField) => f.mandatory)
@@ -180,10 +219,15 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
         setSourceId(route.sourceId);
         const sc = route.sourceConfig as any;
         setQuery(sc?.query ?? "");
+        originalQueryRef.current = sc?.query ?? "";
         setIncrementalKey(sc?.incrementalKey ?? "");
         // Restore NetSuite structured config if present
         if (sc?.recordType) setNsRecordType(sc.recordType);
-        if (sc?.fields) setNsFields(sc.fields);
+        if (sc?.fields) {
+          setNsFields(sc.fields);
+          originalFieldsRef.current = [...sc.fields];
+        }
+        if (sc?.referenceFields) setNsReferenceFields(sc.referenceFields);
         if (sc?.filter) setNsFilter(sc.filter);
         setDestId(route.destId);
         const dc = route.destConfig as any;
@@ -199,6 +243,7 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
         setTimeHour(route.timeHour);
         setTimeMinute(route.timeMinute);
         setTimezone(route.timezone);
+        setCursorConfig(route.cursorConfig ?? null);
         setLoading(false);
       })
       .catch(() => {
@@ -207,44 +252,65 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
       });
   }, [routeId, toast]);
 
-  async function handleSave() {
+  function buildPayload(needsFullReload = false): Record<string, unknown> {
+    // Build source config — for NetSuite, include structured fields + generated SuiteQL
+    const sourceConfig: Record<string, unknown> = isNetSuiteSource
+      ? {
+          query: generatedSuiteQL,
+          recordType: nsRecordType,
+          fields: nsFields.map((f) => f.toLowerCase()),
+          referenceFields: nsReferenceFields.length > 0
+            ? nsReferenceFields
+            : nsFieldList.filter((f) => f.isReference).map((f) => f.name),
+          ...(nsFilter.trim() && { filter: nsFilter.trim() }),
+          ...(incrementalKey && { incrementalKey }),
+        }
+      : {
+          query,
+          ...(incrementalKey && { incrementalKey }),
+        };
+
+    return {
+      name,
+      sourceId,
+      sourceConfig,
+      destId,
+      destConfig: {
+        dataset: destDataset,
+        table: destTable,
+        writeDisposition,
+        autoCreateTable,
+      },
+      transformEnabled,
+      blueprintId: transformEnabled ? blueprintId : null,
+      frequency: frequency || null,
+      daysOfWeek,
+      dayOfMonth,
+      timeHour,
+      timeMinute,
+      timezone,
+      // Preserve existing cursorConfig — editing a route must not destroy
+      // incremental sync configuration set during creation or via API.
+      ...(cursorConfig !== null && { cursorConfig }),
+      ...(needsFullReload && { needsFullReload: true }),
+    };
+  }
+
+  /** Detect whether NS fields or query changed compared to original saved state. */
+  function detectFieldChanges(): { changed: boolean; added: number; removed: number; queryChanged: boolean } {
+    if (!originalFieldsRef.current) return { changed: false, added: 0, removed: 0, queryChanged: false };
+    const originalSet = new Set(originalFieldsRef.current);
+    const currentSet = new Set(nsFields);
+    const added = nsFields.filter((f) => !originalSet.has(f)).length;
+    const removed = originalFieldsRef.current.filter((f) => !currentSet.has(f)).length;
+    const currentQuery = isNetSuiteSource ? generatedSuiteQL : query;
+    const queryChanged = originalQueryRef.current !== null && currentQuery !== originalQueryRef.current;
+    return { changed: added > 0 || removed > 0 || queryChanged, added, removed, queryChanged };
+  }
+
+  async function submitPayload(payload: Record<string, unknown>) {
     setSaving(true);
     try {
-      // Build source config — for NetSuite, include structured fields + generated SuiteQL
-      const sourceConfig: Record<string, unknown> = isNetSuiteSource
-        ? {
-            query: generatedSuiteQL,
-            recordType: nsRecordType,
-            fields: nsFields,
-            ...(nsFilter.trim() && { filter: nsFilter.trim() }),
-            ...(incrementalKey && { incrementalKey }),
-          }
-        : {
-            query,
-            ...(incrementalKey && { incrementalKey }),
-          };
-
-      const payload = {
-        name,
-        sourceId,
-        sourceConfig,
-        destId,
-        destConfig: {
-          dataset: destDataset,
-          table: destTable,
-          writeDisposition,
-          autoCreateTable,
-        },
-        transformEnabled,
-        blueprintId: transformEnabled ? blueprintId : null,
-        frequency: frequency || null,
-        daysOfWeek,
-        dayOfMonth,
-        timeHour,
-        timeMinute,
-        timezone,
-      };
-
       const url = isEdit ? `/api/bifrost/routes/${routeId}` : "/api/bifrost/routes";
       const method = isEdit ? "PUT" : "POST";
 
@@ -269,11 +335,28 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
     }
   }
 
-  function toggleDay(day: number) {
-    setDaysOfWeek((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort()
-    );
+  async function handleSave() {
+    // When editing an existing route with NetSuite source, check for field changes
+    console.log("[SchemaEvolution] handleSave debug:", {
+      isEdit,
+      isNetSuiteSource,
+      selectedSourceType: selectedSource?.type,
+      originalFields: originalFieldsRef.current,
+      currentFields: nsFields,
+      detection: detectFieldChanges(),
+    });
+    if (isEdit && isNetSuiteSource) {
+      const { changed } = detectFieldChanges();
+      if (changed) {
+        pendingPayloadRef.current = buildPayload(true);
+        setShowReloadConfirm(true);
+        return;
+      }
+    }
+
+    await submitPayload(buildPayload());
   }
+
 
   if (loading) {
     return (
@@ -601,7 +684,8 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
               <button
                 key={wd.value}
                 onClick={() => setWriteDisposition(wd.value)}
-                className={`flex-1 px-3 py-2 text-[0.65rem] tracking-wider uppercase border transition-colors ${
+                aria-pressed={writeDisposition === wd.value}
+                className={`flex-1 px-3 py-2 text-[0.65rem] tracking-wider uppercase border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold ${
                   writeDisposition === wd.value
                     ? "border-gold bg-gold/10 text-gold-bright"
                     : "border-border text-text-dim hover:border-gold/30"
@@ -679,23 +763,15 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
 
         {frequency && (
           <>
+            {SUB_DAILY.includes(frequency) && (
+              <p className="text-text-dim text-[0.6rem] tracking-wider">
+                Runs on a fixed interval — no time-of-day configuration needed.
+              </p>
+            )}
+
             {(frequency === "WEEKLY" || frequency === "BIWEEKLY") && (
               <Label text="Days of Week">
-                <div className="flex gap-1">
-                  {DAYS.map((day, i) => (
-                    <button
-                      key={i}
-                      onClick={() => toggleDay(i)}
-                      className={`px-2 py-1 text-[0.6rem] tracking-wider border ${
-                        daysOfWeek.includes(i)
-                          ? "border-gold bg-gold/10 text-gold-bright"
-                          : "border-border text-text-dim hover:border-gold/30"
-                      }`}
-                    >
-                      {day}
-                    </button>
-                  ))}
-                </div>
+                <DaySelector selected={daysOfWeek} onChange={setDaysOfWeek} />
               </Label>
             )}
 
@@ -715,6 +791,7 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
               </Label>
             )}
 
+            {!SUB_DAILY.includes(frequency) && (
             <div className="grid grid-cols-3 gap-4">
               <Label text="Hour (0-23)">
                 <input
@@ -737,14 +814,29 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
                 />
               </Label>
               <Label text="Timezone">
-                <input
-                  type="text"
+                <select
                   value={timezone}
                   onChange={(e) => setTimezone(e.target.value)}
-                  className="input-norse"
-                />
+                  className="select-norse"
+                >
+                  <optgroup label="Common">
+                    {COMMON_TIMEZONES.map((tz) => (
+                      <option key={tz} value={tz}>
+                        {tz.replace(/_/g, " ")}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="All Timezones">
+                    {OTHER_TIMEZONES.map((tz) => (
+                      <option key={tz} value={tz}>
+                        {tz}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
               </Label>
             </div>
+            )}
           </>
         )}
       </Section>
@@ -765,6 +857,37 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
           {saving ? "Saving..." : isEdit ? "Update Route" : "Forge Route"}
         </button>
       </div>
+
+      {/* Schema evolution confirmation dialog */}
+      <ConfirmDialog
+        open={showReloadConfirm}
+        title="Schema Change Detected"
+        message={(() => {
+          const { added, removed, queryChanged } = detectFieldChanges();
+          const parts: string[] = [];
+          if (added > 0) parts.push(`added ${added} field(s)`);
+          if (removed > 0) parts.push(`removed ${removed} field(s)`);
+          if (queryChanged && parts.length === 0) parts.push("changed the query structure");
+          const delta = parts.join(" and ");
+          return (
+            `You've ${delta}. This requires a full reload of the destination table. ` +
+            `The existing data will be dropped and reloaded on the next run. Continue?`
+          );
+        })()}
+        confirmLabel="Continue"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          setShowReloadConfirm(false);
+          if (pendingPayloadRef.current) {
+            submitPayload(pendingPayloadRef.current);
+            pendingPayloadRef.current = null;
+          }
+        }}
+        onCancel={() => {
+          setShowReloadConfirm(false);
+          pendingPayloadRef.current = null;
+        }}
+      />
     </div>
   );
 }

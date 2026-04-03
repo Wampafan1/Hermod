@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Image from "next/image";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { REALM_ILLUSTRATIONS } from "@/lib/constants";
 
 interface RunLog {
   id: string;
@@ -117,11 +119,34 @@ export function HistoryList({ initialRuns, initialCursor, reports }: HistoryList
 
   return (
     <>
-      <div className="flex items-center justify-between">
+      <div className="relative overflow-hidden animate-fade-up -mx-6 -mt-6 mb-6" style={{ height: "180px" }}>
+        <Image
+          src={REALM_ILLUSTRATIONS.asgard}
+          alt="Asgard realm"
+          fill
+          sizes="100vw"
+          style={{ objectFit: "cover", objectPosition: "center" }}
+          priority={false}
+        />
+        <div
+          className="absolute inset-0"
+          style={{
+            background: `linear-gradient(90deg,
+              rgba(244,236,216,0.95) 0%,
+              rgba(244,236,216,0.85) 35%,
+              rgba(244,236,216,0.5) 65%,
+              rgba(244,236,216,0.2) 100%)`,
+          }}
+        />
+        <div className="relative h-full flex items-center justify-between px-6">
         <div>
-          <h1 className="heading-norse text-xl">Run History</h1>
-          <p className="text-text-dim text-xs tracking-wide mt-1">
-            Track all report execution history.
+          <div className="flex items-center gap-3">
+            <span className="text-2xl font-cinzel select-none" style={{ color: "#d4af37" }}>ᚺ</span>
+            <h1 className="heading-norse text-xl">History</h1>
+          </div>
+          <div className="realm-line mt-1.5 mb-1 w-32" style={{ background: "#d4af37" }} />
+          <p className="text-text-muted text-xs tracking-wide font-space-grotesk italic">
+            The sagas of completed journeys
           </p>
         </div>
         <div className="flex gap-2">
@@ -146,12 +171,14 @@ export function HistoryList({ initialRuns, initialCursor, reports }: HistoryList
             <option value="RUNNING">Running</option>
           </select>
         </div>
+        </div>
       </div>
 
       {runs.length === 0 ? (
         <div className="text-center py-16 bg-deep border border-border">
-          <span className="text-gold/20 text-3xl font-cinzel block mb-3">&#5765;</span>
-          <p className="text-text-dim text-xs tracking-wide">No run history found.</p>
+          <span className="text-4xl font-cinzel block mb-3 animate-rune-float" style={{ color: "rgba(212,175,55,0.3)" }}>ᚺ</span>
+          <p className="text-text-dim text-sm tracking-wide">No sagas have been written yet.</p>
+          <p className="text-text-muted text-xs tracking-wide mt-1">Run a report or route to begin recording history.</p>
         </div>
       ) : (
         <div className="bg-deep border border-border overflow-hidden">

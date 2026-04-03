@@ -43,17 +43,17 @@ export function Topbar() {
   const label = getLabel(pathname);
 
   return (
-    <header className="h-14 flex items-center justify-between px-6 border-b border-border bg-void/80 backdrop-blur-sm shrink-0">
-      <div className="flex items-center gap-2 text-text-dim text-xs tracking-[0.2em] uppercase">
-        <span className="text-gold/40">ᚺ</span>
+    <header className="h-14 flex items-center justify-between px-6 border-b border-border bg-void shrink-0">
+      <div className="flex items-center gap-2 text-text-dim text-sm tracking-[0.08em] uppercase font-space-grotesk">
+        <span className="text-gold/60">ᚺ</span>
         {label && (
           <>
-            <span className="text-gold/20">/</span>
+            <span className="text-border-mid">/</span>
             <span>{label}</span>
           </>
         )}
       </div>
-      <div className="text-text-dim text-xs tracking-[0.15em] font-inconsolata">
+      <div className="text-text-dim text-xs tracking-[0.08em] font-space-grotesk">
         {time}
       </div>
     </header>

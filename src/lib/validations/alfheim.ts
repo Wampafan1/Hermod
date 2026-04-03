@@ -58,11 +58,14 @@ export const restApiCredentialsBaseSchema = z.object({
   bearerToken: z.string().optional(),
   username: z.string().optional(),
   password: z.string().optional(),
-});
+  // Body-auth tokens (e.g. SkuVault TenantToken / UserToken)
+  tenantToken: z.string().optional(),
+  userToken: z.string().optional(),
+}).passthrough();  // Allow additional token fields for CUSTOM auth
 
 /** Full schema with credential-presence refinement — use for standalone validation */
 export const restApiCredentialsSchema = restApiCredentialsBaseSchema.refine(
-  data => data.apiKey || data.bearerToken || (data.username && data.password),
+  data => data.apiKey || data.bearerToken || (data.username && data.password) || (data.tenantToken && data.userToken),
   "At least one credential type required"
 );
 

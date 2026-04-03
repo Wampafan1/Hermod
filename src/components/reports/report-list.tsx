@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 interface Report {
   id: string;
@@ -24,9 +26,12 @@ const STATUS_BADGES: Record<string, string> = {
 export function ReportList({ reports }: { reports: Report[] }) {
   const router = useRouter();
   const toast = useToast();
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
-  async function handleDelete(id: string) {
-    if (!confirm("Delete this report and its schedule?")) return;
+  async function executeDelete() {
+    if (!deleteTarget) return;
+    const id = deleteTarget;
+    setDeleteTarget(null);
     try {
       const res = await fetch(`/api/reports/${id}`, { method: "DELETE" });
       if (!res.ok) {
@@ -44,10 +49,11 @@ export function ReportList({ reports }: { reports: Report[] }) {
   if (reports.length === 0) {
     return (
       <div className="text-center py-16 bg-deep border border-border">
-        <span className="text-gold/20 text-3xl font-cinzel block mb-3">ᚱ</span>
-        <p className="text-text-dim text-xs tracking-wide">No reports yet.</p>
-        <a href="/reports/new" className="btn-subtle mt-3 inline-block">
-          Create your first report
+        <span className="text-4xl font-cinzel block mb-3 animate-rune-float" style={{ color: "rgba(212,175,55,0.3)" }}>ᚠ</span>
+        <p className="text-text-dim text-sm tracking-wide">No reports have been forged.</p>
+        <p className="text-text-muted text-xs tracking-wide mt-1">Create your first report to query the realms.</p>
+        <a href="/reports/new" className="btn-ghost mt-4 inline-block">
+          New Report
         </a>
       </div>
     );
@@ -59,7 +65,7 @@ export function ReportList({ reports }: { reports: Report[] }) {
         <Link
           key={report.id}
           href={`/reports/${report.id}`}
-          className="block bg-deep border border-border p-5 hover:bg-gold/[0.02] transition-colors cursor-pointer no-underline"
+          className="block bg-deep border border-border p-5 hover:bg-gold/[0.02] cursor-pointer no-underline hoverable-card"
         >
           <div className="flex items-center justify-between">
             <div className="space-y-1.5">
@@ -88,7 +94,7 @@ export function ReportList({ reports }: { reports: Report[] }) {
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                handleDelete(report.id);
+                setDeleteTarget(report.id);
               }}
               className="btn-subtle text-error hover:text-error"
             >
@@ -97,6 +103,14 @@ export function ReportList({ reports }: { reports: Report[] }) {
           </div>
         </Link>
       ))}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Report"
+        message="This report and its schedule will be permanently removed. This cannot be undone."
+        onConfirm={executeDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

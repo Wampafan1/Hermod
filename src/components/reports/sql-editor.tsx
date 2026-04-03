@@ -38,7 +38,7 @@ export function SqlEditor({ value, onChange, onRun }: SqlEditorProps) {
           "editor.lineHighlightBackground": "#0a0f22",
           "editor.selectionBackground": "rgba(201,147,58,0.15)",
           "editor.inactiveSelectionBackground": "rgba(201,147,58,0.08)",
-          "editorLineNumber.foreground": "rgba(212,196,160,0.35)",
+          "editorLineNumber.foreground": "rgba(212,196,160,0.5)",
           "editorLineNumber.activeForeground": "#c9933a",
           "editorGutter.background": "#080c1a",
           "editorWidget.background": "#080c1a",

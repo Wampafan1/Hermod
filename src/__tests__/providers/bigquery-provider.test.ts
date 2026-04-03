@@ -29,7 +29,7 @@ vi.mock("@google-cloud/bigquery", () => ({
 }));
 
 // ─── Imports ───────────────────────────────────────────
-import { BigQueryProvider } from "@/lib/providers/bigquery.provider";
+import { BigQueryProvider, clearSchemaCache, floatSafeJsonLine } from "@/lib/providers/bigquery.provider";
 import type { ConnectionLike } from "@/lib/providers/types";
 import type { ConnectionProvider } from "@/lib/providers/provider";
 
@@ -72,6 +72,7 @@ describe("BigQueryProvider", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearSchemaCache();
     provider = new BigQueryProvider();
   });
 
@@ -105,12 +106,13 @@ describe("BigQueryProvider", () => {
       await expect(conn.close()).resolves.toBeUndefined();
     });
 
-    it("passes credentials to BigQuery constructor", async () => {
+    it("passes credentials and location to BigQuery constructor", async () => {
       const { BigQuery } = await import("@google-cloud/bigquery");
       await provider.connect(bqConnection);
       expect(BigQuery).toHaveBeenCalledWith({
         projectId: "my-project",
         credentials: bqConnection.credentials.serviceAccountKey,
+        location: "US",
       });
     });
   });
@@ -138,6 +140,19 @@ describe("BigQueryProvider", () => {
           maximumBytesBilled: "1000000",
         })
       );
+    });
+
+    it("closes connection after successful test", async () => {
+      mockQuery.mockResolvedValue([[{ f0_: 1 }]]);
+      // testConnection opens and closes — calling connect twice should work
+      await provider.testConnection(bqConnection);
+      // No assertion needed — just verifying no throw
+    });
+
+    it("closes connection after failed test", async () => {
+      mockQuery.mockRejectedValue(new Error("Bad credentials"));
+      const result = await provider.testConnection(bqConnection);
+      expect(result).toBe(false);
     });
   });
 
@@ -171,6 +186,24 @@ describe("BigQueryProvider", () => {
       await provider.query!(conn, "SELECT 1");
       expect(mockQuery).toHaveBeenCalledWith(
         expect.objectContaining({ useLegacySql: false })
+      );
+    });
+
+    it("sets maximumBytesBilled to cap scan cost", async () => {
+      mockQuery.mockResolvedValue([[]]);
+      const conn = await provider.connect(bqConnection);
+      await provider.query!(conn, "SELECT 1");
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ maximumBytesBilled: "50000000000" })
+      );
+    });
+
+    it("sets jobTimeoutMs for query timeout", async () => {
+      mockQuery.mockResolvedValue([[]]);
+      const conn = await provider.connect(bqConnection);
+      await provider.query!(conn, "SELECT 1");
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ jobTimeoutMs: "120000" })
       );
     });
   });
@@ -368,6 +401,32 @@ describe("BigQueryProvider", () => {
         { message: "Invalid value for field id", location: "id" },
       ]);
     });
+
+    it("rejects with timeout if load job never completes", async () => {
+      vi.useFakeTimers();
+      // Mock a writestream that never emits "job" — simulates a hanging load
+      const { PassThrough } = require("stream");
+      const hangingStream = new PassThrough();
+      mockCreateWriteStream.mockReturnValue(hangingStream);
+
+      const conn = await provider.connect(bqConnection);
+      const loadPromise = provider.load!(conn, [{ id: 1 }], {
+        dataset: "ds",
+        table: "tbl",
+        writeDisposition: "WRITE_APPEND",
+        autoCreateTable: false,
+      });
+
+      // Attach rejection handler BEFORE advancing timers to avoid unhandled rejection
+      const assertion = expect(loadPromise).rejects.toThrow(/timed out/i);
+
+      // Advance past the 5-minute timeout
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 100);
+
+      await assertion;
+
+      vi.useRealTimers();
+    });
   });
 
   // ─── getSchema() ─────────────────────────────────────
@@ -414,6 +473,51 @@ describe("BigQueryProvider", () => {
       await expect(provider.getSchema!(conn, "ds", "tbl")).rejects.toThrow("Permission denied");
     });
 
+    it("returns cached schema on second call", async () => {
+      mockTableGetMetadata.mockResolvedValue([{
+        schema: {
+          fields: [
+            { name: "id", type: "INTEGER", mode: "REQUIRED" },
+          ],
+        },
+      }]);
+
+      const conn = await provider.connect(bqConnection);
+      const schema1 = await provider.getSchema!(conn, "ds", "tbl");
+      const schema2 = await provider.getSchema!(conn, "ds", "tbl");
+
+      expect(schema1).toEqual(schema2);
+      // Should only call the API once — second call hits cache
+      expect(mockTableGetMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it("invalidates cache after createTable", async () => {
+      // First: table doesn't exist → null cached
+      mockTableGetMetadata.mockRejectedValueOnce(new Error("Not found: Table"));
+      mockDatasetGet.mockResolvedValue([{}]);
+      mockCreateTableFn.mockResolvedValue([{}]);
+
+      const conn = await provider.connect(bqConnection);
+      const schema1 = await provider.getSchema!(conn, "ds", "new_tbl");
+      expect(schema1).toBeNull();
+
+      // Create the table (should invalidate cache)
+      await provider.createTable!(conn, "ds", "new_tbl", {
+        fields: [{ name: "id", type: "INTEGER", mode: "REQUIRED" }],
+      });
+
+      // Now mock the table as existing
+      mockTableGetMetadata.mockResolvedValueOnce([{
+        schema: {
+          fields: [{ name: "id", type: "INTEGER", mode: "REQUIRED" }],
+        },
+      }]);
+
+      const schema2 = await provider.getSchema!(conn, "ds", "new_tbl");
+      expect(schema2).not.toBeNull();
+      expect(schema2!.fields[0].name).toBe("id");
+    });
+
     it("returns null when schema has no fields", async () => {
       mockTableGetMetadata.mockResolvedValue([{ schema: {} }]);
 
@@ -452,6 +556,97 @@ describe("BigQueryProvider", () => {
     });
   });
 
+  // ─── dryRun() ───────────────────────────────────────
+  describe("dryRun()", () => {
+    it("returns totalBytesProcessed and cacheHit from dry run", async () => {
+      mockQuery.mockResolvedValue([
+        [], // rows (empty for dry run)
+        null,
+        {
+          statistics: {
+            totalBytesProcessed: "5000000000",
+            query: { cacheHit: false },
+          },
+        },
+      ]);
+
+      const conn = await provider.connect(bqConnection);
+      const result = await provider.dryRun(conn, "SELECT * FROM big_table");
+
+      expect(result.totalBytesProcessed).toBe(5000000000);
+      expect(result.cacheHit).toBe(false);
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ dryRun: true, useLegacySql: false })
+      );
+    });
+
+    it("returns 0 bytes when statistics missing", async () => {
+      mockQuery.mockResolvedValue([[], null, {}]);
+
+      const conn = await provider.connect(bqConnection);
+      const result = await provider.dryRun(conn, "SELECT 1");
+
+      expect(result.totalBytesProcessed).toBe(0);
+      expect(result.cacheHit).toBe(false);
+    });
+  });
+
+  // ─── extract() with params ─────────────────────────
+  describe("extract() with params", () => {
+    it("passes params to createQueryJob for parameterized queries", async () => {
+      const mockJob = {
+        getQueryResults: vi.fn().mockResolvedValueOnce([[{ id: 1 }], null, {}]),
+      };
+      mockCreateQueryJob.mockResolvedValue([mockJob]);
+
+      const conn = await provider.connect(bqConnection);
+      const chunks: Record<string, unknown>[][] = [];
+      for await (const chunk of provider.extract!(conn, {
+        query: "SELECT * FROM t WHERE dt > @last_run",
+        params: { last_run: "2024-01-01T00:00:00.000Z" },
+      })) {
+        chunks.push(chunk);
+      }
+
+      expect(mockCreateQueryJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          params: { last_run: "2024-01-01T00:00:00.000Z" },
+        })
+      );
+    });
+
+    it("omits params from createQueryJob when not provided", async () => {
+      const mockJob = {
+        getQueryResults: vi.fn().mockResolvedValueOnce([[{ id: 1 }], null, {}]),
+      };
+      mockCreateQueryJob.mockResolvedValue([mockJob]);
+
+      const conn = await provider.connect(bqConnection);
+      for await (const _ of provider.extract!(conn, { query: "SELECT 1" })) {
+        // consume
+      }
+
+      const callArgs = mockCreateQueryJob.mock.calls[0][0];
+      expect(callArgs).not.toHaveProperty("params");
+    });
+
+    it("sets maximumBytesBilled on extract query jobs", async () => {
+      const mockJob = {
+        getQueryResults: vi.fn().mockResolvedValueOnce([[{ id: 1 }], null, {}]),
+      };
+      mockCreateQueryJob.mockResolvedValue([mockJob]);
+
+      const conn = await provider.connect(bqConnection);
+      for await (const _ of provider.extract!(conn, { query: "SELECT 1" })) {
+        // consume
+      }
+
+      expect(mockCreateQueryJob).toHaveBeenCalledWith(
+        expect.objectContaining({ maximumBytesBilled: "50000000000" })
+      );
+    });
+  });
+
   // ─── createTable() ───────────────────────────────────
   describe("createTable()", () => {
     it("creates table with schema in existing dataset", async () => {
@@ -482,6 +677,60 @@ describe("BigQueryProvider", () => {
       expect(mockCreateTableFn).toHaveBeenCalledWith("new_table", {
         schema: { fields: schema.fields },
       });
+    });
+  });
+
+  // ─── floatSafeJsonLine ──────────────────────────────────
+
+  describe("floatSafeJsonLine", () => {
+    it("converts integer values to floats", () => {
+      const result = floatSafeJsonLine({ a: 5, b: 10 });
+      expect(result).toBe('{"a":5.0,"b":10.0}');
+    });
+
+    it("preserves existing float values", () => {
+      const result = floatSafeJsonLine({ a: 5.5, b: 3.14 });
+      expect(result).toBe('{"a":5.5,"b":3.14}');
+    });
+
+    it("handles mixed integer and float in same row", () => {
+      const result = floatSafeJsonLine({ qty: 5, price: 9.99 });
+      expect(result).toBe('{"qty":5.0,"price":9.99}');
+    });
+
+    it("does not modify string values containing numbers", () => {
+      const result = floatSafeJsonLine({ name: "Route 66", id: 5 });
+      expect(result).toBe('{"name":"Route 66","id":5.0}');
+    });
+
+    it("handles negative integers", () => {
+      const result = floatSafeJsonLine({ balance: -100 });
+      expect(result).toBe('{"balance":-100.0}');
+    });
+
+    it("handles zero", () => {
+      const result = floatSafeJsonLine({ count: 0 });
+      expect(result).toBe('{"count":0.0}');
+    });
+
+    it("preserves null, boolean, and string values", () => {
+      const result = floatSafeJsonLine({ a: null, b: true, c: false, d: "hello" });
+      expect(result).toBe('{"a":null,"b":true,"c":false,"d":"hello"}');
+    });
+
+    it("handles arrays with integers", () => {
+      const result = floatSafeJsonLine({ tags: [1, 2, 3] });
+      expect(result).toBe('{"tags":[1.0,2.0,3.0]}');
+    });
+
+    it("handles nested objects", () => {
+      const result = floatSafeJsonLine({ meta: { count: 5 } });
+      expect(result).toBe('{"meta":{"count":5.0}}');
+    });
+
+    it("does not modify string-typed number values", () => {
+      const result = floatSafeJsonLine({ code: "12345" });
+      expect(result).toBe('{"code":"12345"}');
     });
   });
 });

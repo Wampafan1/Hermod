@@ -150,7 +150,7 @@ export function ColumnConfigPanel({
               onDragOver={(e) => e.preventDefault()}
             >
               {/* Drag handle */}
-              <span className="text-text-dim/50 text-center cursor-grab text-[0.625rem] select-none">
+              <span className="text-text-dim/70 text-center cursor-grab text-[0.625rem] select-none">
                 ⠿
               </span>
 
@@ -228,7 +228,7 @@ export function ColumnConfigPanel({
               {/* Delete (only for formula columns or user-added) */}
               <button
                 onClick={() => removeEntry(index)}
-                className="text-center text-text-dim/40 hover:text-error text-[0.625rem] transition-colors"
+                className="text-center text-text-dim/60 hover:text-error text-[0.625rem] transition-colors"
                 title="Remove column"
               >
                 x

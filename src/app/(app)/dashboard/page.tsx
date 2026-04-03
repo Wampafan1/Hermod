@@ -1,183 +1,90 @@
 import { requireAuth } from "@/lib/session";
-import { prisma } from "@/lib/db";
-import Link from "next/link";
+import { getDashboardData } from "@/lib/dashboard/queries";
+import { HealthSummary } from "@/components/dashboard/health-summary";
+import { RouteHealthGrid } from "@/components/dashboard/route-health-grid";
+import { UpcomingRuns } from "@/components/dashboard/upcoming-runs";
+import { ExecutionTimeline } from "@/components/dashboard/execution-timeline";
+import { HelheimStrip } from "@/components/dashboard/helheim-strip";
+import { RealmBanner } from "@/components/realm-banner";
+import { DAILY_GREETINGS } from "@/lib/realm-config";
 
 export default async function DashboardPage() {
   const session = await requireAuth();
+  const data = await getDashboardData(session.user.id);
 
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-  const [reportCount, connectionCount, recentRuns, upcomingSchedules, runCount30d] =
-    await Promise.all([
-      prisma.report.count({ where: { userId: session.user.id } }),
-      prisma.connection.count({ where: { userId: session.user.id } }),
-      prisma.runLog.findMany({
-        where: { report: { userId: session.user.id } },
-        orderBy: { startedAt: "desc" },
-        take: 10,
-        include: { report: { select: { name: true } } },
-      }),
-      prisma.schedule.findMany({
-        where: {
-          enabled: true,
-          report: { userId: session.user.id },
-          nextRunAt: {
-            lte: new Date(Date.now() + 24 * 60 * 60 * 1000),
-            gte: new Date(),
-          },
-        },
-        orderBy: { nextRunAt: "asc" },
-        take: 5,
-        include: { report: { select: { name: true } } },
-      }),
-      prisma.runLog.count({
-        where: {
-          report: { userId: session.user.id },
-          startedAt: { gte: thirtyDaysAgo },
-        },
-      }),
-    ]);
+  const now = new Date();
+  const dayInfo = DAILY_GREETINGS[now.getDay()];
+  const dateStr = now.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+  const firstName = session.user.name?.split(" ")[0] ?? "";
 
   return (
-    <div className="space-y-8">
-      <div className="animate-fade-up">
-        <h1 className="heading-norse text-xl">Dashboard</h1>
-        <p className="text-text-dim text-xs tracking-wide mt-1">
-          Welcome back, {session.user.name?.split(" ")[0]}
+    <div className="space-y-6">
+      <RealmBanner
+        realm="asgard"
+        rune="ᚱ"
+        title="Dashboard"
+        subtitle={`${dayInfo.greeting}, ${firstName} — ${dateStr}`}
+        accentColor="#d4af37"
+      />
+
+      {/* Flavor text */}
+      <p className="text-text-muted text-[11px] font-source-serif italic tracking-wide -mt-4 animate-fade-up" style={{ animationDelay: "0.03s" }}>
+        {dayInfo.flavor}
+      </p>
+
+      {/* [A] Health Summary Strip */}
+      <div className="animate-fade-up" style={{ animationDelay: "0.05s" }}>
+        <HealthSummary stats={data.stats} />
+      </div>
+
+      {/* Bifrost accent line */}
+      <div
+        className="h-[2px] animate-fade-up"
+        style={{
+          background: "linear-gradient(90deg, #ff6b6b, #ffa726, #ffee58, #66bb6a, #42a5f5, #7e57c2, #ff6b6b)",
+          backgroundSize: "200% 100%",
+          animation: "bifrostBar 4s linear infinite",
+          animationDelay: "0.08s",
+        }}
+      />
+
+      {/* [B] Route Health Grid + [C] Upcoming Runs */}
+      <div className="animate-fade-up" style={{ animationDelay: "0.1s" }}>
+        <div className="flex items-center gap-4 mb-3">
+          <h2 className="label-norse !mb-0 text-gold">The War Table</h2>
+          <div className="flex-1 h-px bg-border" />
+          <span className="text-gold-dim text-xs font-cinzel select-none">ᛒ</span>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+        <p className="text-text-muted text-[10px] font-space-grotesk tracking-wider italic mb-3">
+          Dispatches across the Nine Realms
         </p>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-px animate-fade-up" style={{ animationDelay: "0.05s" }}>
-        <Link href="/reports">
-          <StatCard label="Reports" value={reportCount} rune="ᚱ" />
-        </Link>
-        <Link href="/connections">
-          <StatCard label="Connections" value={connectionCount} rune="ᚷ" />
-        </Link>
-        <Link href="/history">
-          <StatCard label="Runs (30d)" value={runCount30d} rune="ᚺ" />
-        </Link>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="flex gap-3 animate-fade-up" style={{ animationDelay: "0.1s" }}>
-        <Link href="/reports/new" className="btn-primary">
-          <span>New Report</span>
-        </Link>
-        <Link href="/connections" className="btn-ghost">
-          Add Connection
-        </Link>
-      </div>
-
-      {/* Upcoming Runs */}
-      {upcomingSchedules.length > 0 && (
-        <div className="animate-fade-up" style={{ animationDelay: "0.15s" }}>
-          <h2 className="heading-norse text-sm mb-3">Upcoming (24h)</h2>
-          <div className="space-y-px">
-            {upcomingSchedules.map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center justify-between px-4 py-3 bg-deep border border-border text-sm"
-              >
-                <span className="text-text">{s.report.name}</span>
-                <span className="text-text-dim text-xs">
-                  {s.nextRunAt
-                    ? relativeTimeServer(s.nextRunAt)
-                    : "—"}
-                </span>
-              </div>
-            ))}
-          </div>
+        <div
+          className="grid gap-6"
+          style={{ gridTemplateColumns: "2fr 1fr" }}
+        >
+          <RouteHealthGrid routes={data.routes} />
+          <UpcomingRuns runs={data.upcomingRuns} />
         </div>
-      )}
+      </div>
 
-      {/* Recent Runs */}
+      {/* [D] Execution Timeline */}
+      <div className="animate-fade-up" style={{ animationDelay: "0.15s" }}>
+        <ExecutionTimeline
+          initialRuns={data.recentRuns}
+          initialTotal={data.totalRunCount}
+        />
+      </div>
+
+      {/* [E] Helheim Summary Strip */}
       <div className="animate-fade-up" style={{ animationDelay: "0.2s" }}>
-        <h2 className="heading-norse text-sm mb-3">Recent Runs</h2>
-        {recentRuns.length === 0 ? (
-          <div className="text-center py-16 bg-deep border border-border">
-            <span className="text-gold/20 text-3xl font-cinzel block mb-3">ᚱ</span>
-            <p className="text-text-dim text-xs tracking-wide">
-              No report runs yet. Create your first report to get started.
-            </p>
-          </div>
-        ) : (
-          <div className="bg-deep border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="label-norse text-left px-4 py-3">Report</th>
-                  <th className="label-norse text-left px-4 py-3">Status</th>
-                  <th className="label-norse text-left px-4 py-3">Rows</th>
-                  <th className="label-norse text-left px-4 py-3">Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentRuns.map((run) => (
-                  <tr key={run.id} className="border-b border-border hover:bg-gold/[0.02]">
-                    <td className="px-4 py-3 text-text">{run.report.name}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={run.status} />
-                    </td>
-                    <td className="px-4 py-3 text-text-dim">
-                      {run.rowCount ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-text-dim">
-                      {relativeTimeServer(run.startedAt)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <h2 className="label-norse text-gold mb-2">Helheim — Dead Letter Queue</h2>
+        <HelheimStrip helheim={data.helheim} />
       </div>
     </div>
   );
-}
-
-function StatCard({ label, value, rune }: { label: string; value: number; rune: string }) {
-  return (
-    <div className="stat-card-norse">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="label-norse">{label}</p>
-          <p className="text-3xl font-cinzel text-gold-bright mt-1">{value}</p>
-        </div>
-        <span className="text-gold/10 text-2xl font-cinzel">{rune}</span>
-      </div>
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const classMap: Record<string, string> = {
-    SUCCESS: "badge-success",
-    FAILED: "badge-error",
-    RUNNING: "badge-running",
-  };
-  return (
-    <span className={classMap[status] ?? "badge-neutral"}>
-      {status}
-    </span>
-  );
-}
-
-function relativeTimeServer(date: Date | string): string {
-  const now = Date.now();
-  const then = new Date(date).getTime();
-  const diffMs = Math.abs(now - then);
-  const isFuture = then > now;
-  const diffMin = Math.floor(diffMs / 60000);
-
-  if (diffMin < 1) return isFuture ? "in a moment" : "just now";
-  if (diffMin < 60)
-    return isFuture ? `in ${diffMin} min` : `${diffMin} min ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24)
-    return isFuture
-      ? `in ${diffHr} hr${diffHr > 1 ? "s" : ""}`
-      : `${diffHr} hr${diffHr > 1 ? "s" : ""} ago`;
-  return new Date(date).toLocaleDateString();
 }

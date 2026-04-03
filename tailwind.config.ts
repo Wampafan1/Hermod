@@ -5,48 +5,107 @@ const config: Config = {
   theme: {
     borderRadius: {
       none: "0",
-      DEFAULT: "0",
+      DEFAULT: "4px",
       full: "9999px",
     },
     extend: {
       colors: {
-        void: "#04060f",
-        deep: "#080c1a",
+        /* Parchment surfaces */
+        void: "#F4ECD8",
+        deep: "#EDE4CC",
+        scroll: "#E5D9B8",
+
+        /* Iron (dark sidebar / code) */
+        iron: {
+          DEFAULT: "#2D2A24",
+          light: "#4A4035",
+        },
+        carbon: "#1A1815",
+
+        /* Gold accents */
         gold: {
-          DEFAULT: "#c9933a",
-          bright: "#f0b84a",
-          dim: "rgba(201,147,58,0.3)",
+          DEFAULT: "#8B6914",
+          bright: "#A67C1A",
+          leaf: "#C4962A",
+          dim: "rgba(139,105,20,0.15)",
         },
-        ember: "#e85d20",
-        frost: "#7eb8d4",
+
+        /* Text */
         text: {
-          DEFAULT: "#d4c4a0",
-          dim: "rgba(212,196,160,0.55)",
+          DEFAULT: "#2D2A24",
+          dim: "#6B6358",
+          muted: "#968B7B",
         },
-        surface: {
-          DEFAULT: "rgba(4,6,15,0.9)",
-          raised: "rgba(8,12,26,0.95)",
-        },
+
+        /* Borders */
         border: {
-          DEFAULT: "rgba(201,147,58,0.1)",
-          mid: "rgba(201,147,58,0.3)",
+          DEFAULT: "#D4C49E",
+          mid: "#C4B48A",
         },
+        burnt: "#D4C49E",
+
+        /* Status */
+        ember: "#B8450E",
+        frost: "#2D5F7E",
         success: {
-          DEFAULT: "#22c55e",
-          dim: "rgba(34,197,94,0.15)",
+          DEFAULT: "#2D6B3F",
+          dim: "rgba(45,107,63,0.12)",
         },
         error: {
-          DEFAULT: "#ef4444",
-          dim: "rgba(239,68,68,0.15)",
+          DEFAULT: "#8B2020",
+          dim: "rgba(139,32,32,0.1)",
         },
         warning: {
-          DEFAULT: "#f59e0b",
-          dim: "rgba(245,158,11,0.15)",
+          DEFAULT: "#B8860B",
+          dim: "rgba(184,134,11,0.1)",
         },
+
+        /* Surface aliases */
+        surface: {
+          DEFAULT: "#EDE4CC",
+          raised: "#E5D9B8",
+        },
+
+        /* Landing page surfaces */
+        "lp-surface": {
+          DEFAULT: "#fbf9f6",
+          dim: "#dbdad7",
+          container: "#efeeeb",
+          "container-low": "#f5f3f0",
+          "container-high": "#eae8e5",
+          "container-highest": "#e4e2df",
+          "container-lowest": "#ffffff",
+        },
+        "on-surface": "#1b1c1a",
+        "on-surface-variant": "#4e4638",
+        "lp-primary": "#76570a",
+        "primary-container": "#926f24",
+        "on-primary": "#ffffff",
+        "outline": "#807666",
+        "outline-variant": "#d1c5b3",
+        "surface-variant": "#e4e2df",
+
+        /* Realm accent colors */
+        "realm-asgard": "#b8922f",
+        "realm-vanaheim": "#4a9fc4",
+        "realm-midgard": "#4a9e4e",
+        "realm-alfheim": "#9a6ab5",
+        "realm-jotunheim": "#8a7060",
+        "realm-nidavellir": "#c48a2e",
+        "realm-muspelheim": "#c44d1a",
+        "realm-niflheim": "#4a9a90",
+        "realm-helheim": "#5a6a72",
       },
       fontFamily: {
-        cinzel: ["var(--font-cinzel)", "serif"],
+        cinzel: ["var(--font-eb-garamond)", "serif"],
+        "eb-garamond": ["var(--font-eb-garamond)", "serif"],
+        "source-serif": ["var(--font-source-serif)", "Georgia", "serif"],
+        "space-grotesk": ["var(--font-space-grotesk)", "sans-serif"],
         inconsolata: ["var(--font-inconsolata)", "monospace"],
+        /* Landing page fonts */
+        headline: ["Cinzel", "serif"],
+        "body-landing": ["Source Sans 3", "sans-serif"],
+        label: ["Inconsolata", "monospace"],
       },
       keyframes: {
         "slide-in": {

@@ -257,6 +257,104 @@ enum BlueprintStatus {
   ARCHIVED
 }
 
+// ─── Blueprint Version Control ──────────────────────────
+
+model ForgeBlueprint {
+  id              String                    @id @default(cuid())
+  routeId         String                    @unique
+  route           BifrostRoute              @relation("forgeBlueprint", fields: [routeId], references: [id], onDelete: Cascade)
+  name            String
+  description     String?
+  currentVersion  Int                       @default(1)
+  status          ForgeBlueprintStatus      @default(ACTIVE)
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  createdBy       String?
+
+  versions        ForgeBlueprintVersion[]
+  executions      ForgeBlueprintExecution[]
+}
+
+model ForgeBlueprintVersion {
+  id              String                    @id @default(cuid())
+  blueprintId     String
+  blueprint       ForgeBlueprint            @relation(fields: [blueprintId], references: [id], onDelete: Cascade)
+  version         Int
+
+  steps           Json                      // ForgeStep[] with stepId
+  stepsHash       String                    // SHA-256 of normalized steps
+
+  source          VersionSource             @default(FORGE)
+  beforeFileHash  String?
+  afterFileHash   String?
+  aiModelUsed     String?
+  aiConfidence    Float?
+
+  changeReason    String?
+  changeSummary   Json?
+
+  isLocked        Boolean                   @default(false)
+  lockedAt        DateTime?
+  lockedBy        String?
+
+  createdAt       DateTime                  @default(now())
+  createdBy       String?
+
+  executions      ForgeBlueprintExecution[]
+
+  @@unique([blueprintId, version])
+  @@index([blueprintId])
+}
+
+model ForgeBlueprintExecution {
+  id              String                    @id @default(cuid())
+  blueprintId     String
+  blueprint       ForgeBlueprint            @relation(fields: [blueprintId], references: [id])
+  versionId       String?
+  version         ForgeBlueprintVersion?    @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  versionNumber   Int
+
+  jobId           String?
+  routeRunId      String?
+  status          ExecutionStatus           @default(RUNNING)
+
+  inputRowCount   Int?
+  outputRowCount  Int?
+  inputHash       String?
+  outputHash      String?
+
+  startedAt       DateTime                  @default(now())
+  completedAt     DateTime?
+  durationMs      Int?
+
+  errorMessage    String?
+  errorStep       Int?
+
+  @@index([blueprintId])
+  @@index([versionId])
+  @@index([startedAt])
+}
+
+enum ForgeBlueprintStatus {
+  ACTIVE
+  ARCHIVED
+  DRAFT
+}
+
+enum VersionSource {
+  FORGE
+  MANUAL_EDIT
+  ROLLBACK
+  IMPORT
+}
+
+enum ExecutionStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
 // ─── Unified Connections ──────────────────────────────
 
 enum ConnectionType {
@@ -267,6 +365,9 @@ enum ConnectionType {
   NETSUITE
   SFTP
   REST_API
+  CSV_FILE
+  EXCEL_FILE
+  GOOGLE_SHEETS
 }
 
 enum ConnectionStatus {
@@ -335,6 +436,7 @@ model BifrostRoute {
   routeLogs        RouteLog[]
   helheimEntries   HelheimEntry[]
   watermarks       PipelineWatermark[]
+  forgeBlueprint   ForgeBlueprint? @relation("forgeBlueprint")
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 

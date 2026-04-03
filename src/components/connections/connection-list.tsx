@@ -8,6 +8,8 @@ import { ConnectionCard } from "@/components/connections/connection-card";
 import type { UnifiedConnection } from "@/components/connections/connection-card";
 import { EmailConnectionCard } from "@/components/connections/email-connection-card";
 import { EmailConnectionForm } from "@/components/connections/email-connection-form";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { RuneDivider } from "@/components/rune-divider";
 import { useToast } from "@/components/toast";
 
 type AuthType = "NONE" | "PLAIN" | "OAUTH2";
@@ -47,6 +49,9 @@ export function ConnectionList({
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [editingEmail, setEditingEmail] = useState<EmailConnection | null>(null);
 
+  // Confirm dialog state
+  const [confirmTarget, setConfirmTarget] = useState<{ id: string; type: "connection" | "email" } | null>(null);
+
   // Handle ?add=TYPE query param from /connections/new SQL redirect
   useEffect(() => {
     const addType = searchParams.get("add");
@@ -72,16 +77,23 @@ export function ConnectionList({
     setShowForm(true);
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm("Delete this connection?")) return;
+  function handleDelete(id: string) {
+    setConfirmTarget({ id, type: "connection" });
+  }
+
+  async function executeDelete() {
+    if (!confirmTarget) return;
+    const { id, type } = confirmTarget;
+    setConfirmTarget(null);
     try {
-      const res = await fetch(`/api/connections/${id}`, { method: "DELETE" });
+      const url = type === "email" ? `/api/email-connections/${id}` : `/api/connections/${id}`;
+      const res = await fetch(url, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error || "Delete failed");
         return;
       }
-      toast.success("Connection deleted");
+      toast.success(type === "email" ? "Email connection deleted" : "Connection deleted");
       router.refresh();
     } catch {
       toast.error("Network error");
@@ -93,20 +105,8 @@ export function ConnectionList({
     setShowEmailForm(true);
   }
 
-  async function handleDeleteEmail(id: string) {
-    if (!confirm("Delete this email connection?")) return;
-    try {
-      const res = await fetch(`/api/email-connections/${id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error || "Delete failed");
-        return;
-      }
-      toast.success("Email connection deleted");
-      router.refresh();
-    } catch {
-      toast.error("Network error");
-    }
+  function handleDeleteEmail(id: string) {
+    setConfirmTarget({ id, type: "email" });
   }
 
   function handleFormClose() {
@@ -142,10 +142,11 @@ export function ConnectionList({
     <>
       {!hasAny ? (
         <div className="text-center py-16 bg-deep border border-border">
-          <span className="text-gold/20 text-3xl font-cinzel block mb-3">ᚷ</span>
-          <p className="text-text-dim text-xs tracking-wide">No connections yet.</p>
-          <Link href="/connections/new" className="btn-subtle mt-3 inline-block">
-            Add your first connection
+          <span className="text-4xl font-cinzel block mb-3 animate-rune-float" style={{ color: "rgba(206,147,216,0.3)" }}>ᚨ</span>
+          <p className="text-text-dim text-sm tracking-wide">No bridges built yet.</p>
+          <p className="text-text-muted text-xs tracking-wide mt-1">Connect to your first realm.</p>
+          <Link href="/connections/new" className="btn-ghost mt-4 inline-block">
+            Add Connection
           </Link>
         </div>
       ) : (
@@ -153,7 +154,7 @@ export function ConnectionList({
           {/* Database Connections (SQL) */}
           {sqlConnections.length > 0 && (
             <div>
-              <h2 className="heading-norse text-sm mb-3">Database Connections</h2>
+              <h2 className="heading-norse text-sm mb-3" style={{ color: "#d4af37" }}>Database Connections</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-px">
                 {sqlConnections.map((conn) => (
                   <ConnectionCard
@@ -171,13 +172,9 @@ export function ConnectionList({
           {cloudConnections.length > 0 && (
             <div>
               {sqlConnections.length > 0 && (
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="flex-1 h-px bg-border" />
-                  <span className="text-gold/30 text-sm font-cinzel">ᚾ</span>
-                  <div className="flex-1 h-px bg-border" />
-                </div>
+                <RuneDivider rune="ᚾ" color="#ce93d8" className="mb-4" />
               )}
-              <h2 className="heading-norse text-sm mb-3">Cloud & API</h2>
+              <h2 className="heading-norse text-sm mb-3" style={{ color: "#ce93d8" }}>Cloud & API</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-px">
                 {cloudConnections.map((conn) => (
                   <ConnectionCard
@@ -195,13 +192,9 @@ export function ConnectionList({
           {sftpConnections.length > 0 && (
             <div>
               {(sqlConnections.length > 0 || cloudConnections.length > 0) && (
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="flex-1 h-px bg-border" />
-                  <span className="text-gold/30 text-sm font-cinzel">ᚺ</span>
-                  <div className="flex-1 h-px bg-border" />
-                </div>
+                <RuneDivider rune="ᚺ" color="#66bb6a" className="mb-4" />
               )}
-              <h2 className="heading-norse text-sm mb-3">File Integrations</h2>
+              <h2 className="heading-norse text-sm mb-3" style={{ color: "#66bb6a" }}>File Integrations</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-px">
                 {sftpConnections.map((conn) => (
                   <ConnectionCard
@@ -219,13 +212,9 @@ export function ConnectionList({
           {initialEmail.length > 0 && (
             <div>
               {initialConnections.length > 0 && (
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="flex-1 h-px bg-border" />
-                  <span className="text-gold/30 text-sm font-cinzel">ᛖ</span>
-                  <div className="flex-1 h-px bg-border" />
-                </div>
+                <RuneDivider rune="ᛖ" color="#66bb6a" className="mb-4" />
               )}
-              <h2 className="heading-norse text-sm mb-3">Email Delivery</h2>
+              <h2 className="heading-norse text-sm mb-3" style={{ color: "#66bb6a" }}>Email Delivery</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-px">
                 {initialEmail.map((conn) => (
                   <EmailConnectionCard
@@ -256,6 +245,16 @@ export function ConnectionList({
           initial={editingEmail ?? undefined}
         />
       )}
+
+      <ConfirmDialog
+        open={!!confirmTarget}
+        title={confirmTarget?.type === "email" ? "Delete Email Connection" : "Delete Connection"}
+        message={confirmTarget?.type === "email"
+          ? "This email connection will be permanently removed. This cannot be undone."
+          : "This connection will be permanently removed. Any reports using it will lose their data source."}
+        onConfirm={executeDelete}
+        onCancel={() => setConfirmTarget(null)}
+      />
     </>
   );
 }

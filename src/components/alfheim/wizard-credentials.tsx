@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
+import { PasswordInput } from "@/components/password-input";
 
 interface AuthField {
   key: string;
@@ -246,14 +247,24 @@ export function WizardCredentials({ connector, onComplete }: WizardCredentialsPr
                 {field.label}
                 {field.required && <span className="text-gold ml-1">*</span>}
               </label>
-              <input
-                id={`cred-${field.key}`}
-                type={field.type}
-                className="input-norse w-full"
-                placeholder={field.placeholder ?? ""}
-                value={credentialValues[field.key] ?? ""}
-                onChange={(e) => handleCredentialChange(field.key, e.target.value)}
-              />
+              {field.type === "password" ? (
+                <PasswordInput
+                  id={`cred-${field.key}`}
+                  className="input-norse w-full"
+                  placeholder={field.placeholder ?? ""}
+                  value={credentialValues[field.key] ?? ""}
+                  onChange={(e) => handleCredentialChange(field.key, e.target.value)}
+                />
+              ) : (
+                <input
+                  id={`cred-${field.key}`}
+                  type={field.type}
+                  className="input-norse w-full"
+                  placeholder={field.placeholder ?? ""}
+                  value={credentialValues[field.key] ?? ""}
+                  onChange={(e) => handleCredentialChange(field.key, e.target.value)}
+                />
+              )}
             </div>
           ))}
         </fieldset>

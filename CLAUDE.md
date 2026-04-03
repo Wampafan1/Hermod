@@ -42,6 +42,13 @@ npm run db:migrate   # Run Prisma migrations
 - `src/app/api/` mirrors REST resources: `connections/`, `reports/`, `schedules/`, `query/`, `history/`
 - `src/lib/` for shared utilities — never import from `components/` or `app/`
 
+## Database Safety Rules
+
+- **NEVER run `prisma db push` on schema changes that rename or remove models/columns.** `db push` is destructive — it drops and recreates tables, destroying all data. Only use it for purely additive changes (new models, new columns, new enum values).
+- **For destructive schema changes** (renames, type changes, column removal, model restructuring): always use `prisma migrate dev` with a hand-written SQL migration that preserves data (e.g., `ALTER TABLE ... RENAME TO`, `INSERT INTO ... SELECT FROM`).
+- **Before any schema change**, warn the user about data impact and confirm before proceeding. If in doubt, back up the affected tables first.
+- **Prisma on Windows**: `prisma generate` fails with EPERM when the DLL is locked (dev server or TS server). Workaround: `mv node_modules/.prisma node_modules/.prisma_old` then regenerate.
+
 ## Code Quality Rules
 
 - All API routes filter by `userId` — users never see other users' data
@@ -67,7 +74,7 @@ All UI must match the established Hermod aesthetic exactly. Key rules:
 --ember: #e85d20       /* warnings / alerts */
 --frost: #7eb8d4       /* secondary accent / info */
 --text: #d4c4a0        /* primary text */
---text-dim: rgba(212,196,160,0.4) /* secondary text, labels */
+--text-dim: rgba(212,196,160,0.7)  /* secondary text, labels */
 
 ### Aesthetic Rules
 - Dark background always — never light mode

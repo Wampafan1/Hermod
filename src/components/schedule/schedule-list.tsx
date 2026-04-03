@@ -96,9 +96,9 @@ export function ScheduleList({ schedules }: { schedules: Schedule[] }) {
   if (schedules.length === 0) {
     return (
       <div className="text-center py-16 bg-deep border border-border">
-        <span className="text-gold/20 text-3xl font-cinzel block mb-3">ᛏ</span>
-        <p className="text-text-dim text-xs tracking-wide">No scheduled reports yet.</p>
-        <p className="text-text-dim text-xs tracking-wide mt-1">
+        <span className="text-4xl font-cinzel block mb-3 animate-rune-float" style={{ color: "rgba(212,175,55,0.3)" }}>ᛏ</span>
+        <p className="text-text-dim text-sm tracking-wide">The Norns have woven no threads yet.</p>
+        <p className="text-text-muted text-xs tracking-wide mt-1">
           Create a report and add a schedule to get started.
         </p>
       </div>

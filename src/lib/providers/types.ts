@@ -4,7 +4,11 @@ export type ConnectionType =
   | "MYSQL"
   | "BIGQUERY"
   | "NETSUITE"
-  | "SFTP";
+  | "SFTP"
+  | "REST_API"
+  | "CSV_FILE"
+  | "EXCEL_FILE"
+  | "GOOGLE_SHEETS";
 
 export type ConnectionStatus = "ACTIVE" | "ERROR" | "DISABLED";
 

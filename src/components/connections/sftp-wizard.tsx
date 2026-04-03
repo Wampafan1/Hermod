@@ -6,7 +6,7 @@ import { CredentialCard } from "./credential-card";
 import { useToast } from "@/components/toast";
 import type { SourceType } from "./source-picker";
 
-type SftpSourceType = Exclude<SourceType, "POSTGRES" | "MSSQL" | "MYSQL" | "BIGQUERY" | "EMAIL_SMTP">;
+type SftpSourceType = Exclude<SourceType, "POSTGRES" | "MSSQL" | "MYSQL" | "BIGQUERY" | "NETSUITE" | "EMAIL_SMTP">;
 
 interface SftpWizardProps {
   sourceType: SftpSourceType;

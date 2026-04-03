@@ -9,7 +9,7 @@
 import type { ConnectionProvider } from "./provider";
 import type { ConnectionLike, ProviderConnection } from "./types";
 import type { SourceConfig } from "@/lib/bifrost/types";
-import type { PaginationConfig, RateLimitConfig, SchemaMapping } from "@/lib/alfheim/types";
+import type { AuthConfig, PaginationConfig, RateLimitConfig, SchemaMapping } from "@/lib/alfheim/types";
 import { flattenRecord } from "@/lib/alfheim/schema-mapper";
 
 // ─── Constants ───────────────────────────────────────────────
@@ -163,6 +163,28 @@ async function fetchWithRetry(
   throw lastError ?? new Error("Request failed after retries");
 }
 
+// ─── POST Body Helpers ──────────────────────────────────────
+
+/**
+ * Build authentication body params for POST-based APIs (e.g. SkuVault).
+ * Maps credential fields → request body keys using bodyTokenMap.
+ */
+function buildAuthBody(
+  authConfig: Record<string, unknown> | undefined,
+  credentials: Record<string, unknown>,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  const tokenMap = authConfig?.bodyTokenMap as Record<string, string> | undefined;
+  if (!tokenMap) return body;
+
+  for (const [bodyKey, credField] of Object.entries(tokenMap)) {
+    if (credentials[credField] != null) {
+      body[bodyKey] = credentials[credField];
+    }
+  }
+  return body;
+}
+
 // ─── Provider ────────────────────────────────────────────────
 
 export class RestApiProvider implements ConnectionProvider {
@@ -186,7 +208,28 @@ export class RestApiProvider implements ConnectionProvider {
     if (!baseUrl) throw new Error("No baseUrl in config");
 
     const authConfig = config.authConfig as Record<string, unknown> | undefined;
+    const isBodyAuth = !!authConfig?.bodyAuth;
     const headers = buildAuthHeaders(authType, authConfig, creds);
+
+    const pagination = config.pagination as PaginationConfig | undefined;
+    const isPost = pagination?.requestMethod === "POST" || isBodyAuth;
+
+    if (isPost) {
+      // POST-based API: send a lightweight request with auth tokens in body
+      headers["Content-Type"] = "application/json";
+      const body = { ...buildAuthBody(authConfig, creds), PageSize: 1, PageNumber: 0 };
+      const testUrl = `${baseUrl.replace(/\/$/, "")}/products/getProducts`;
+      const response = await fetch(testUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`Authentication failed (${response.status})`);
+      }
+      return response.ok;
+    }
 
     const response = await fetch(baseUrl, {
       method: "GET",
@@ -229,10 +272,22 @@ export class RestApiProvider implements ConnectionProvider {
       ? `${baseUrl.replace(/\/$/, "")}/${endpoint.replace(/^\//, "")}`
       : baseUrl;
 
-    console.log(`[REST extract] ${fullUrl} | authType=${authType} | credKeys=${Object.keys(credentials).join(",")}`);
+    const isBodyAuth = !!(authConfig as AuthConfig | undefined)?.bodyAuth;
+    const isPost = pagination.requestMethod === "POST" || isBodyAuth;
+
+    console.log(`[REST extract] ${fullUrl} | authType=${authType} | method=${isPost ? "POST" : "GET"} | credKeys=${Object.keys(credentials).join(",")}`);
+
+    if (isPost) {
+      headers["Content-Type"] = "application/json";
+    }
+
+    // Base auth body for POST-based APIs
+    const authBody = isBodyAuth
+      ? buildAuthBody(authConfig as Record<string, unknown>, credentials)
+      : {};
 
     const requestInit: RequestInit = {
-      method: "GET",
+      method: isPost ? "POST" : "GET",
       headers,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     };
@@ -280,7 +335,10 @@ export class RestApiProvider implements ConnectionProvider {
 
     if (pagination.type === "none" || !pagination.type) {
       // Single request
-      const response = await fetchWithRetry(fullUrl, requestInit);
+      const init = isPost
+        ? { ...requestInit, body: JSON.stringify({ ...authBody }), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }
+        : requestInit;
+      const response = await fetchWithRetry(fullUrl, init);
       const body = await response.json();
       const records = extractResponseData(body, responseRoot);
       processRecords(records, schema, buffer);
@@ -292,17 +350,34 @@ export class RestApiProvider implements ConnectionProvider {
       const pageParam = pagination.pageParam || "page";
       const limitParam = pagination.limitParam || "limit";
       const limit = pagination.defaultLimit || 100;
-      let page = 1;
+      let page = pagination.startPage ?? 1;
 
       while (true) {
-        const url = new URL(fullUrl);
-        url.searchParams.set(pageParam, String(page));
-        url.searchParams.set(limitParam, String(limit));
+        let response: Response;
 
-        const response = await fetchWithRetry(url.toString(), {
-          ...requestInit,
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
+        if (isPost) {
+          // POST-based pagination: params in JSON body
+          const postBody = {
+            ...authBody,
+            [pageParam]: page,
+            [limitParam]: limit,
+          };
+          response = await fetchWithRetry(fullUrl, {
+            ...requestInit,
+            body: JSON.stringify(postBody),
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          });
+        } else {
+          // GET-based pagination: params in URL
+          const url = new URL(fullUrl);
+          url.searchParams.set(pageParam, String(page));
+          url.searchParams.set(limitParam, String(limit));
+          response = await fetchWithRetry(url.toString(), {
+            ...requestInit,
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          });
+        }
+
         const body = await response.json();
         const records = extractResponseData(body, responseRoot);
 
@@ -328,14 +403,25 @@ export class RestApiProvider implements ConnectionProvider {
       let offset = 0;
 
       while (true) {
-        const url = new URL(fullUrl);
-        url.searchParams.set("offset", String(offset));
-        url.searchParams.set(limitParam, String(limit));
+        let response: Response;
 
-        const response = await fetchWithRetry(url.toString(), {
-          ...requestInit,
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
+        if (isPost) {
+          const postBody = { ...authBody, offset, [limitParam]: limit };
+          response = await fetchWithRetry(fullUrl, {
+            ...requestInit,
+            body: JSON.stringify(postBody),
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          });
+        } else {
+          const url = new URL(fullUrl);
+          url.searchParams.set("offset", String(offset));
+          url.searchParams.set(limitParam, String(limit));
+          response = await fetchWithRetry(url.toString(), {
+            ...requestInit,
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          });
+        }
+
         const body = await response.json();
         const records = extractResponseData(body, responseRoot);
 
@@ -360,15 +446,25 @@ export class RestApiProvider implements ConnectionProvider {
       let cursor: string | null = null;
 
       while (true) {
-        const url = new URL(fullUrl);
-        if (cursor) {
-          url.searchParams.set(pageParam, cursor);
+        let response: Response;
+
+        if (isPost) {
+          const postBody: Record<string, unknown> = { ...authBody };
+          if (cursor) postBody[pageParam] = cursor;
+          response = await fetchWithRetry(fullUrl, {
+            ...requestInit,
+            body: JSON.stringify(postBody),
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          });
+        } else {
+          const url = new URL(fullUrl);
+          if (cursor) url.searchParams.set(pageParam, cursor);
+          response = await fetchWithRetry(url.toString(), {
+            ...requestInit,
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          });
         }
 
-        const response = await fetchWithRetry(url.toString(), {
-          ...requestInit,
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
         const body = await response.json();
         const records = extractResponseData(body, responseRoot);
 

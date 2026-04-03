@@ -3,6 +3,8 @@
 import { useState, useRef } from "react";
 import { useToast } from "@/components/toast";
 import { TYPE_LABELS, type UnifiedConnection } from "@/components/connections/connection-card";
+import { useFocusTrap } from "@/lib/hooks/use-focus-trap";
+import { PasswordInput } from "@/components/password-input";
 
 type ConnectionType = "POSTGRES" | "MSSQL" | "MYSQL" | "BIGQUERY" | "NETSUITE" | "SFTP";
 
@@ -30,6 +32,8 @@ function extractFromConfig(config: Record<string, unknown> | undefined, key: str
 export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProps) {
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef, true, onClose);
   const isEditing = !!initial;
   const initialConfig = initial?.config as Record<string, unknown> | undefined;
 
@@ -187,6 +191,32 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
   }
 
   async function handleSave() {
+    if (!name.trim()) { toast.error("Name is required"); return; }
+    if (isSql) {
+      if (!host.trim()) { toast.error("Host is required"); return; }
+      if (!database.trim()) { toast.error("Database is required"); return; }
+      if (!username.trim()) { toast.error("Username is required"); return; }
+      if (!isEditing && !password) { toast.error("Password is required"); return; }
+    }
+    if (isNetSuite) {
+      if (!nsAccountId.trim()) { toast.error("Account ID is required"); return; }
+      if (!isEditing) {
+        if (!nsConsumerKey.trim()) { toast.error("Consumer Key is required"); return; }
+        if (!nsConsumerSecret.trim()) { toast.error("Consumer Secret is required"); return; }
+        if (!nsTokenId.trim()) { toast.error("Token ID is required"); return; }
+        if (!nsTokenSecret.trim()) { toast.error("Token Secret is required"); return; }
+      }
+    }
+    if (isBigQuery) {
+      if (!bqProjectId.trim()) { toast.error("Project ID is required"); return; }
+      if (!isEditing && !bqCredentials) { toast.error("Service account JSON is required"); return; }
+    }
+    if (isSftp) {
+      if (!host.trim()) { toast.error("Host is required"); return; }
+      if (!username.trim()) { toast.error("Username is required"); return; }
+      if (!isEditing && !password) { toast.error("Password is required"); return; }
+    }
+
     setSaving(true);
     try {
       const url = isEditing
@@ -229,14 +259,21 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
-      <div className="bg-deep border border-border-mid w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="conn-form-title"
+        className="bg-deep border border-border-mid w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <h2 className="heading-norse text-sm">
+          <h2 id="conn-form-title" className="heading-norse text-sm">
             {isEditing ? "Edit Connection" : "Add Connection"}
           </h2>
           <button
             onClick={onClose}
+            aria-label="Close"
             className="text-text-dim hover:text-text text-xl leading-none"
           >
             &times;
@@ -247,7 +284,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
         <div className="p-5 space-y-4">
           {/* Name */}
           <div>
-            <label className="label-norse">Name</label>
+            <label className="label-norse">Name<span className="text-ember ml-1">*</span></label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -277,7 +314,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
           {isNetSuite && (
             <>
               <div>
-                <label className="label-norse">Account ID</label>
+                <label className="label-norse">Account ID<span className="text-ember ml-1">*</span></label>
                 <input
                   value={nsAccountId}
                   onChange={(e) => setNsAccountId(e.target.value)}
@@ -289,7 +326,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
                 </p>
               </div>
               <div>
-                <label className="label-norse">Consumer Key</label>
+                <label className="label-norse">Consumer Key<span className="text-ember ml-1">*</span></label>
                 <input
                   value={nsConsumerKey}
                   onChange={(e) => setNsConsumerKey(e.target.value)}
@@ -298,17 +335,15 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
                 />
               </div>
               <div>
-                <label className="label-norse">Consumer Secret</label>
-                <input
-                  type="password"
+                <label className="label-norse">Consumer Secret<span className="text-ember ml-1">*</span></label>
+                <PasswordInput
                   value={nsConsumerSecret}
                   onChange={(e) => setNsConsumerSecret(e.target.value)}
-                  className="input-norse"
                   placeholder="••••••••"
                 />
               </div>
               <div>
-                <label className="label-norse">Token ID</label>
+                <label className="label-norse">Token ID<span className="text-ember ml-1">*</span></label>
                 <input
                   value={nsTokenId}
                   onChange={(e) => setNsTokenId(e.target.value)}
@@ -317,12 +352,10 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
                 />
               </div>
               <div>
-                <label className="label-norse">Token Secret</label>
-                <input
-                  type="password"
+                <label className="label-norse">Token Secret<span className="text-ember ml-1">*</span></label>
+                <PasswordInput
                   value={nsTokenSecret}
                   onChange={(e) => setNsTokenSecret(e.target.value)}
-                  className="input-norse"
                   placeholder="••••••••"
                 />
               </div>
@@ -334,7 +367,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
             <>
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="label-norse">Host</label>
+                  <label className="label-norse">Host<span className="text-ember ml-1">*</span></label>
                   <input
                     value={host}
                     onChange={(e) => setHost(e.target.value)}
@@ -353,7 +386,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
                 </div>
               </div>
               <div>
-                <label className="label-norse">Database</label>
+                <label className="label-norse">Database<span className="text-ember ml-1">*</span></label>
                 <input
                   value={database}
                   onChange={(e) => setDatabase(e.target.value)}
@@ -363,7 +396,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label-norse">Username</label>
+                  <label className="label-norse">Username<span className="text-ember ml-1">*</span></label>
                   <input
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
@@ -373,13 +406,11 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
                 </div>
                 <div>
                   <label className="label-norse">
-                    Password{isEditing ? " (blank = keep)" : ""}
+                    Password{isEditing ? " (blank = keep)" : ""}{!isEditing && <span className="text-ember ml-1">*</span>}
                   </label>
-                  <input
-                    type="password"
+                  <PasswordInput
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="input-norse"
                     placeholder="••••••••"
                   />
                 </div>
@@ -391,7 +422,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
           {isBigQuery && (
             <>
               <div>
-                <label className="label-norse">Project ID</label>
+                <label className="label-norse">Project ID<span className="text-ember ml-1">*</span></label>
                 <input
                   value={bqProjectId}
                   onChange={(e) => setBqProjectId(e.target.value)}
@@ -434,7 +465,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
             <>
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="label-norse">Host</label>
+                  <label className="label-norse">Host<span className="text-ember ml-1">*</span></label>
                   <input
                     value={host}
                     onChange={(e) => setHost(e.target.value)}
@@ -454,7 +485,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label-norse">Username</label>
+                  <label className="label-norse">Username<span className="text-ember ml-1">*</span></label>
                   <input
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
@@ -464,13 +495,11 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
                 </div>
                 <div>
                   <label className="label-norse">
-                    Password{isEditing ? " (blank = keep)" : ""}
+                    Password{isEditing ? " (blank = keep)" : ""}{!isEditing && <span className="text-ember ml-1">*</span>}
                   </label>
-                  <input
-                    type="password"
+                  <PasswordInput
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="input-norse"
                     placeholder="••••••••"
                   />
                 </div>

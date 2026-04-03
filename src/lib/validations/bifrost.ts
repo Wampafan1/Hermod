@@ -11,6 +11,8 @@ const sourceConfigSchema = z.object({
   recordType: z.string().optional(),
   fields: z.array(z.string()).optional(),
   filter: z.string().optional(),
+  // REST API (Alfheim) — references catalog object for extraction config
+  objectSlug: z.string().optional(),
 });
 
 // ─── Dest Config ─────────────────────────────────────
@@ -105,6 +107,7 @@ export const updateRouteSchema = z.object({
   timeMinute: z.number().int().min(0).max(59).optional(),
   timezone: z.string().optional(),
   cursorConfig: cursorConfigSchema,
+  needsFullReload: z.boolean().optional(),
 });
 
 // ─── Schema Fetch ────────────────────────────────────

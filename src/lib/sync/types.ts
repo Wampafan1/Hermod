@@ -1,14 +1,13 @@
 /**
  * Incremental sync types — cursor strategies and watermark tracking.
+ * Types derived from Zod schemas in validations/bifrost.ts (single source of truth).
  */
 
-export type CursorStrategy =
-  | "timestamp_cursor"
-  | "integer_id_cursor"
-  | "rowversion_cursor"
-  | "full_refresh";
+import type { z } from "zod";
+import type { cursorStrategySchema, cursorConfidenceSchema } from "@/lib/validations/bifrost";
 
-export type CursorConfidence = "high" | "medium" | "low";
+export type CursorStrategy = z.infer<typeof cursorStrategySchema>;
+export type CursorConfidence = z.infer<typeof cursorConfidenceSchema>;
 
 export interface ColumnSchema {
   name: string;

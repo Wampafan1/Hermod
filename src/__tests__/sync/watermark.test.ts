@@ -76,17 +76,35 @@ describe("watermark service", () => {
         "timestamp_cursor",
         "2026-01-15T08:30:00.000Z"
       );
-      expect(clause).toBe("lastmodifieddate > '2026-01-15T08:30:00.000Z'");
+      expect(clause).toBe("\"lastmodifieddate\" > '2026-01-15T08:30:00.000Z'");
     });
 
     it("builds integer ID comparison", () => {
       const clause = buildIncrementalClause("log_id", "integer_id_cursor", "98765");
-      expect(clause).toBe("log_id > 98765");
+      expect(clause).toBe("\"log_id\" > 98765");
     });
 
     it("builds rowversion comparison", () => {
       const clause = buildIncrementalClause("RowVer", "rowversion_cursor", "00000000000007D1");
-      expect(clause).toBe("RowVer > 0x00000000000007D1");
+      expect(clause).toBe("\"RowVer\" > 0x00000000000007D1");
+    });
+
+    it("rejects invalid column names", () => {
+      expect(() =>
+        buildIncrementalClause("col; DROP TABLE--", "timestamp_cursor", "2026-01-01T00:00:00.000Z")
+      ).toThrow("Invalid cursor column name");
+    });
+
+    it("rejects invalid timestamp watermark", () => {
+      expect(() =>
+        buildIncrementalClause("updated_at", "timestamp_cursor", "not-a-date")
+      ).toThrow("Invalid timestamp watermark");
+    });
+
+    it("rejects invalid integer watermark", () => {
+      expect(() =>
+        buildIncrementalClause("log_id", "integer_id_cursor", "12; DROP TABLE")
+      ).toThrow("Invalid integer watermark");
     });
   });
 
@@ -134,6 +152,58 @@ describe("watermark service", () => {
       ];
       const result = extractNewWatermark(rows, "updated_at", "timestamp_cursor");
       expect(result).toBe("2026-01-15T12:00:00.000Z");
+    });
+
+    it("returns null instead of NaN for non-numeric integer values", () => {
+      const rows = [{ id: "abc" }, { id: "def" }];
+      const result = extractNewWatermark(rows, "id", "integer_id_cursor");
+      expect(result).toBeNull();
+    });
+
+    it("filters NaN values and returns max of valid integers", () => {
+      const rows = [{ id: 100 }, { id: "not_a_number" }, { id: 250 }];
+      const result = extractNewWatermark(rows, "id", "integer_id_cursor");
+      expect(result).toBe("250");
+    });
+
+    it("handles Buffer values for rowversion (SQL Server)", () => {
+      const rows = [
+        { RowVer: Buffer.from("00000000000007D0", "hex") },
+        { RowVer: Buffer.from("00000000000007D1", "hex") },
+        { RowVer: Buffer.from("00000000000007CF", "hex") },
+      ];
+      const result = extractNewWatermark(rows, "RowVer", "rowversion_cursor");
+      expect(result).toBe("00000000000007d1");
+    });
+
+    it("returns null for invalid rowversion values", () => {
+      const rows = [{ RowVer: "not-hex-zzz" }];
+      const result = extractNewWatermark(rows, "RowVer", "rowversion_cursor");
+      expect(result).toBeNull();
+    });
+
+    it("returns null for invalid timestamp values", () => {
+      const rows = [{ ts: "not-a-date" }];
+      const result = extractNewWatermark(rows, "ts", "timestamp_cursor");
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("buildIncrementalClause (strict ISO validation)", () => {
+    it("rejects non-ISO date formats", () => {
+      expect(() =>
+        buildIncrementalClause("updated_at", "timestamp_cursor", "Tue Jan 01 2024")
+      ).toThrow("Invalid timestamp watermark");
+    });
+
+    it("accepts ISO date-only format", () => {
+      const clause = buildIncrementalClause("updated_at", "timestamp_cursor", "2026-01-15");
+      expect(clause).toBe("\"updated_at\" > '2026-01-15'");
+    });
+
+    it("accepts full ISO datetime with timezone", () => {
+      const clause = buildIncrementalClause("updated_at", "timestamp_cursor", "2026-01-15T08:30:00.000Z");
+      expect(clause).toBe("\"updated_at\" > '2026-01-15T08:30:00.000Z'");
     });
   });
 });

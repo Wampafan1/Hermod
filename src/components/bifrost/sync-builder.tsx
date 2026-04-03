@@ -40,6 +40,8 @@ interface NetSuiteField {
   type: string;
   label?: string;
   mandatory?: boolean;
+  isCustom?: boolean;
+  isReference?: boolean;
 }
 
 // ─── Constants ──────────────────────────────────────────
@@ -52,8 +54,15 @@ const WRITE_DISPOSITIONS = [
   { value: "WRITE_EMPTY", label: "Empty Only", desc: "Write if table is empty" },
 ];
 
+const SUB_DAILY = ["EVERY_15_MIN", "EVERY_30_MIN", "HOURLY", "EVERY_4_HOURS", "EVERY_12_HOURS"];
+
 const FREQUENCIES = [
   { value: "", label: "No schedule" },
+  { value: "EVERY_15_MIN", label: "Every 15 minutes" },
+  { value: "EVERY_30_MIN", label: "Every 30 minutes" },
+  { value: "HOURLY", label: "Hourly" },
+  { value: "EVERY_4_HOURS", label: "Every 4 hours" },
+  { value: "EVERY_12_HOURS", label: "Every 12 hours" },
   { value: "DAILY", label: "Daily" },
   { value: "WEEKLY", label: "Weekly" },
   { value: "BIWEEKLY", label: "Biweekly" },
@@ -594,44 +603,68 @@ export function SyncBuilder() {
                           </MiniBtn>
                         </div>
                         <div className="border border-border max-h-52 overflow-y-auto bg-void/50">
-                          {nsFieldList.map((field) => {
-                            const checked = nsFieldsSet.has(field.name);
-                            const req = !!field.mandatory;
-                            return (
-                              <label
-                                key={field.name}
-                                className={`flex items-center gap-2 px-2 py-1 border-b border-border/20 cursor-pointer text-xs transition-colors ${
-                                  checked
-                                    ? "bg-[#ce93d8]/[0.06]"
-                                    : "hover:bg-gold/[0.03]"
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  disabled={req}
-                                  onChange={() => {
-                                    if (req) return;
-                                    setNsFields((prev) =>
-                                      checked
-                                        ? prev.filter((f) => f !== field.name)
-                                        : [...prev, field.name]
-                                    );
-                                  }}
-                                  className="accent-[#ce93d8]"
-                                />
-                                <span className="text-text tracking-wider flex-1 truncate">
-                                  {field.name}
-                                </span>
-                                <TypeBadge type={field.type} />
-                                {req && (
-                                  <span className="text-[0.5rem] text-ember tracking-widest">
-                                    REQ
+                          {(() => {
+                            const standardFields = nsFieldList.filter((f) => !f.isCustom);
+                            const customFields = nsFieldList.filter((f) => f.isCustom);
+                            const renderField = (field: NetSuiteField) => {
+                              const checked = nsFieldsSet.has(field.name);
+                              const req = !!field.mandatory;
+                              return (
+                                <label
+                                  key={field.name}
+                                  className={`flex items-center gap-2 px-2 py-1 border-b border-border/20 cursor-pointer text-xs transition-colors ${
+                                    checked
+                                      ? "bg-[#ce93d8]/[0.06]"
+                                      : "hover:bg-gold/[0.03]"
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    disabled={req}
+                                    onChange={() => {
+                                      if (req) return;
+                                      setNsFields((prev) =>
+                                        checked
+                                          ? prev.filter((f) => f !== field.name)
+                                          : [...prev, field.name]
+                                      );
+                                    }}
+                                    className="accent-[#ce93d8]"
+                                  />
+                                  <span className="text-text tracking-wider flex-1 truncate" title={field.label !== field.name ? field.label : undefined}>
+                                    {field.name}
                                   </span>
+                                  <TypeBadge type={field.type} />
+                                  {req && (
+                                    <span className="text-[0.5rem] text-ember tracking-widest">
+                                      REQ
+                                    </span>
+                                  )}
+                                </label>
+                              );
+                            };
+                            return (
+                              <>
+                                {standardFields.length > 0 && (
+                                  <>
+                                    <div className="px-2 py-1 text-[0.5rem] text-text-dim tracking-[0.35em] uppercase bg-deep/80 border-b border-border/30 sticky top-0">
+                                      Standard Fields ({standardFields.length})
+                                    </div>
+                                    {standardFields.map(renderField)}
+                                  </>
                                 )}
-                              </label>
+                                {customFields.length > 0 && (
+                                  <>
+                                    <div className="px-2 py-1 text-[0.5rem] text-frost tracking-[0.35em] uppercase bg-deep/80 border-b border-border/30 sticky top-0">
+                                      Custom Fields ({customFields.length})
+                                    </div>
+                                    {customFields.map(renderField)}
+                                  </>
+                                )}
+                              </>
                             );
-                          })}
+                          })()}
                         </div>
                         <p className="text-text-dim text-[0.55rem] tracking-wider mt-1">
                           {nsFields.length} selected
@@ -894,6 +927,12 @@ export function SyncBuilder() {
 
           {frequency && (
             <>
+              {SUB_DAILY.includes(frequency) && (
+                <p className="text-text-dim text-[0.55rem] tracking-wider">
+                  Runs on a fixed interval — no time-of-day configuration needed.
+                </p>
+              )}
+
               {(frequency === "WEEKLY" || frequency === "BIWEEKLY") && (
                 <div>
                   <label className="label-norse">Days of Week</label>
@@ -938,6 +977,7 @@ export function SyncBuilder() {
                 </div>
               )}
 
+              {!SUB_DAILY.includes(frequency) && (
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="label-norse">Hour</label>
@@ -973,6 +1013,7 @@ export function SyncBuilder() {
                   />
                 </div>
               </div>
+              )}
             </>
           )}
         </div>

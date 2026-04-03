@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireAuth } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { ReportList } from "@/components/reports/report-list";
+import { RealmBanner } from "@/components/realm-banner";
 
 export default async function ReportsPage() {
   const session = await requireAuth();
@@ -33,17 +34,18 @@ export default async function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="heading-norse text-xl">Reports</h1>
-          <p className="text-text-dim text-xs tracking-wide mt-1">
-            Create and manage your SQL reports.
-          </p>
-        </div>
-        <Link href="/reports/new" className="btn-primary">
-          <span>New Report</span>
-        </Link>
-      </div>
+      <RealmBanner
+        realm="asgard"
+        rune="ᚠ"
+        title="Reports"
+        subtitle="Query the databases of Asgard"
+        accentColor="#d4af37"
+        action={
+          <Link href="/reports/new" className="btn-primary">
+            <span>New Report</span>
+          </Link>
+        }
+      />
 
       <ReportList reports={mapped} />
     </div>

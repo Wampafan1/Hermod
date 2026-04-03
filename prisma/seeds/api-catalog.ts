@@ -3,7 +3,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 type JsonInput = Prisma.InputJsonValue;
 
 // ---------------------------------------------------------------------------
-// Alfheim API Catalog – 10 connectors, idempotent via upsert on slug
+// Alfheim API Catalog – 15 connectors, idempotent via upsert on slug
 // ---------------------------------------------------------------------------
 
 interface ColumnDef {
@@ -52,6 +52,10 @@ interface AuthConfig {
   tokenPrefix?: string;
   urlPlaceholders?: string[];
   variants?: VariantDef[];
+  /** Inject credentials into POST body instead of headers (e.g. SkuVault). */
+  bodyAuth?: boolean;
+  /** Maps request body key → credential field name. */
+  bodyTokenMap?: Record<string, string>;
 }
 
 interface PaginationConfig {
@@ -62,6 +66,10 @@ interface PaginationConfig {
   cursorPath?: string;
   hasMorePath?: string;
   nextParam?: string;
+  /** Use POST with JSON body instead of GET with query params (e.g. SkuVault). */
+  requestMethod?: "GET" | "POST";
+  /** Starting page index for page_number pagination (default 1). Set to 0 for 0-based APIs. */
+  startPage?: number;
 }
 
 interface ObjectDef {
@@ -2219,6 +2227,251 @@ const serviceNow: ConnectorDef = {
 };
 
 // ───────────────────────────────────────────────────────────────────────────
+// 15. SkuVault
+// ───────────────────────────────────────────────────────────────────────────
+const skuVault: ConnectorDef = {
+  slug: "skuvault",
+  name: "SkuVault",
+  description: "Cloud-based inventory and warehouse management — products, sales, kits, and locations",
+  category: "Inventory",
+  subcategory: "Warehouse Management",
+  docsUrl: "https://dev.skuvault.com/",
+  popularity: 65,
+  authType: "CUSTOM",
+  baseUrl: "https://app.skuvault.com/api",
+  authConfig: {
+    fields: [
+      { key: "tenantToken", label: "Tenant Token", type: "password" as const, placeholder: "Your SkuVault Tenant Token", required: true },
+      { key: "userToken", label: "User Token", type: "password" as const, placeholder: "Your SkuVault User Token", required: true },
+    ],
+    bodyAuth: true,
+    bodyTokenMap: {
+      TenantToken: "tenantToken",
+      UserToken: "userToken",
+    },
+  },
+  pagination: {
+    type: "page_number",
+    pageParam: "PageNumber",
+    limitParam: "PageSize",
+    defaultLimit: 10000,
+    requestMethod: "POST",
+    startPage: 0,
+  },
+  rateLimiting: { requestsPerWindow: 10, windowSeconds: 10 },
+  objects: [
+    // ── Products ─────────────────────────────────────────────────────────
+    {
+      slug: "products",
+      name: "Products",
+      description: "Product catalog with SKUs, pricing, quantities, and supplier info",
+      endpoint: "/products/getProducts",
+      method: "POST",
+      responseRoot: "Products",
+      incrementalKey: "ModifiedDateUtc",
+      schema: {
+        columns: [
+          { jsonPath: "Id", columnName: "id", dataType: "STRING", nullable: false },
+          { jsonPath: "Sku", columnName: "sku", dataType: "STRING", nullable: false },
+          { jsonPath: "PrimarySku", columnName: "primary_sku", dataType: "STRING", nullable: true },
+          { jsonPath: "Code", columnName: "code", dataType: "STRING", nullable: true },
+          { jsonPath: "PartNumber", columnName: "part_number", dataType: "STRING", nullable: true },
+          { jsonPath: "Description", columnName: "description", dataType: "STRING", nullable: true },
+          { jsonPath: "ShortDescription", columnName: "short_description", dataType: "STRING", nullable: true },
+          { jsonPath: "LongDescription", columnName: "long_description", dataType: "STRING", nullable: true },
+          { jsonPath: "Cost", columnName: "cost", dataType: "FLOAT", nullable: true },
+          { jsonPath: "RetailPrice", columnName: "retail_price", dataType: "FLOAT", nullable: true },
+          { jsonPath: "SalePrice", columnName: "sale_price", dataType: "FLOAT", nullable: true },
+          { jsonPath: "WeightValue", columnName: "weight_value", dataType: "STRING", nullable: true },
+          { jsonPath: "WeightUnit", columnName: "weight_unit", dataType: "STRING", nullable: true },
+          { jsonPath: "ReorderPoint", columnName: "reorder_point", dataType: "INTEGER", nullable: true },
+          { jsonPath: "Brand", columnName: "brand", dataType: "STRING", nullable: true },
+          { jsonPath: "Supplier", columnName: "supplier", dataType: "STRING", nullable: true },
+          { jsonPath: "Classification", columnName: "classification", dataType: "STRING", nullable: true },
+          { jsonPath: "QuantityOnHand", columnName: "quantity_on_hand", dataType: "INTEGER", nullable: true },
+          { jsonPath: "QuantityOnHold", columnName: "quantity_on_hold", dataType: "INTEGER", nullable: true },
+          { jsonPath: "QuantityPicked", columnName: "quantity_picked", dataType: "INTEGER", nullable: true },
+          { jsonPath: "QuantityPending", columnName: "quantity_pending", dataType: "INTEGER", nullable: true },
+          { jsonPath: "QuantityAvailable", columnName: "quantity_available", dataType: "INTEGER", nullable: true },
+          { jsonPath: "QuantityIncoming", columnName: "quantity_incoming", dataType: "INTEGER", nullable: true },
+          { jsonPath: "QuantityInbound", columnName: "quantity_inbound", dataType: "INTEGER", nullable: true },
+          { jsonPath: "QuantityTransfer", columnName: "quantity_transfer", dataType: "INTEGER", nullable: true },
+          { jsonPath: "QuantityInStock", columnName: "quantity_in_stock", dataType: "INTEGER", nullable: true },
+          { jsonPath: "QuantityTotalFBA", columnName: "quantity_total_fba", dataType: "INTEGER", nullable: true },
+          { jsonPath: "VariationParentSku", columnName: "variation_parent_sku", dataType: "STRING", nullable: true },
+          { jsonPath: "IsAlternateSKU", columnName: "is_alternate_sku", dataType: "BOOLEAN", nullable: true },
+          { jsonPath: "MOQ", columnName: "moq", dataType: "INTEGER", nullable: true },
+          { jsonPath: "IncrementalQuantity", columnName: "incremental_quantity", dataType: "INTEGER", nullable: true },
+          { jsonPath: "DisableQuantitySync", columnName: "disable_quantity_sync", dataType: "BOOLEAN", nullable: true },
+          { jsonPath: "IsSerialized", columnName: "is_serialized", dataType: "BOOLEAN", nullable: true },
+          { jsonPath: "Client", columnName: "client", dataType: "STRING", nullable: true },
+          { jsonPath: "CanBeUsedForLots", columnName: "can_be_used_for_lots", dataType: "BOOLEAN", nullable: true },
+          { jsonPath: "Statuses", columnName: "statuses", dataType: "JSON", nullable: true },
+          { jsonPath: "Pictures", columnName: "pictures", dataType: "JSON", nullable: true },
+          { jsonPath: "Attributes", columnName: "attributes", dataType: "JSON", nullable: true },
+          { jsonPath: "CreatedDateUtc", columnName: "created_date_utc", dataType: "TIMESTAMP", nullable: true },
+          { jsonPath: "ModifiedDateUtc", columnName: "modified_date_utc", dataType: "TIMESTAMP", nullable: true },
+        ],
+        childTables: [
+          {
+            jsonPath: "SupplierInfo",
+            tableName: "products_supplier_info",
+            foreignKey: "product_sku",
+            columns: [
+              { jsonPath: "SupplierName", columnName: "supplier_name", dataType: "STRING", nullable: true },
+              { jsonPath: "SupplierPartNumber", columnName: "supplier_part_number", dataType: "STRING", nullable: true },
+              { jsonPath: "Cost", columnName: "cost", dataType: "FLOAT", nullable: true },
+              { jsonPath: "LeadTime", columnName: "lead_time", dataType: "INTEGER", nullable: true },
+              { jsonPath: "IsActive", columnName: "is_active", dataType: "BOOLEAN", nullable: true },
+              { jsonPath: "IsPrimary", columnName: "is_primary", dataType: "BOOLEAN", nullable: true },
+            ],
+          },
+        ],
+      },
+    },
+    // ── Sales ────────────────────────────────────────────────────────────
+    {
+      slug: "sales",
+      name: "Sales",
+      description: "Sales orders from all channels with line items, shipping, and contact info",
+      endpoint: "/sales/getSales",
+      method: "POST",
+      responseRoot: "Sales",
+      incrementalKey: "SaleDate",
+      defaultParams: {
+        FromDate: "2020-01-01T00:00:00Z",
+        ToDate: "2099-12-31T23:59:59Z",
+      },
+      schema: {
+        columns: [
+          { jsonPath: "Id", columnName: "id", dataType: "STRING", nullable: false },
+          { jsonPath: "SellerSaleId", columnName: "seller_sale_id", dataType: "STRING", nullable: true },
+          { jsonPath: "MarketplaceId", columnName: "marketplace_id", dataType: "STRING", nullable: true },
+          { jsonPath: "ChannelId", columnName: "channel_id", dataType: "STRING", nullable: true },
+          { jsonPath: "Status", columnName: "status", dataType: "STRING", nullable: true },
+          { jsonPath: "SaleDate", columnName: "sale_date", dataType: "TIMESTAMP", nullable: true },
+          { jsonPath: "Marketplace", columnName: "marketplace", dataType: "STRING", nullable: true },
+          { jsonPath: "ShippingCost.a", columnName: "shipping_cost", dataType: "FLOAT", nullable: true },
+          { jsonPath: "ShippingCost.s", columnName: "shipping_cost_currency", dataType: "STRING", nullable: true },
+          { jsonPath: "ShippingCharge.a", columnName: "shipping_charge", dataType: "FLOAT", nullable: true },
+          { jsonPath: "ShippingCharge.s", columnName: "shipping_charge_currency", dataType: "STRING", nullable: true },
+          { jsonPath: "ShippingInfo.City", columnName: "shipping_city", dataType: "STRING", nullable: true },
+          { jsonPath: "ShippingInfo.Region", columnName: "shipping_region", dataType: "STRING", nullable: true },
+          { jsonPath: "ShippingInfo.Country", columnName: "shipping_country", dataType: "STRING", nullable: true },
+          { jsonPath: "ShippingInfo.PostalCode", columnName: "shipping_postal_code", dataType: "STRING", nullable: true },
+          { jsonPath: "ShippingInfo.Address1", columnName: "shipping_address1", dataType: "STRING", nullable: true },
+          { jsonPath: "ShippingInfo.Address2", columnName: "shipping_address2", dataType: "STRING", nullable: true },
+          { jsonPath: "ContactInfo.FirstName", columnName: "contact_first_name", dataType: "STRING", nullable: true },
+          { jsonPath: "ContactInfo.LastName", columnName: "contact_last_name", dataType: "STRING", nullable: true },
+          { jsonPath: "ContactInfo.Company", columnName: "contact_company", dataType: "STRING", nullable: true },
+          { jsonPath: "ContactInfo.Phone", columnName: "contact_phone", dataType: "STRING", nullable: true },
+          { jsonPath: "ContactInfo.Email", columnName: "contact_email", dataType: "STRING", nullable: true },
+          { jsonPath: "ShippingCarrier", columnName: "shipping_carrier", dataType: "STRING", nullable: true },
+          { jsonPath: "ShippingClass", columnName: "shipping_class", dataType: "STRING", nullable: true },
+          { jsonPath: "Notes", columnName: "notes", dataType: "STRING", nullable: true },
+          { jsonPath: "PrintedStatus", columnName: "printed_status", dataType: "BOOLEAN", nullable: true },
+          { jsonPath: "Charges", columnName: "charges", dataType: "JSON", nullable: true },
+          { jsonPath: "Promotions", columnName: "promotions", dataType: "JSON", nullable: true },
+        ],
+        childTables: [
+          {
+            jsonPath: "SaleItems",
+            tableName: "sales_line_items",
+            foreignKey: "sale_id",
+            columns: [
+              { jsonPath: "Sku", columnName: "sku", dataType: "STRING", nullable: true },
+              { jsonPath: "Quantity", columnName: "quantity", dataType: "INTEGER", nullable: true },
+              { jsonPath: "UnitPrice.a", columnName: "unit_price", dataType: "FLOAT", nullable: true },
+              { jsonPath: "UnitPrice.s", columnName: "unit_price_currency", dataType: "STRING", nullable: true },
+              { jsonPath: "Taxes", columnName: "taxes", dataType: "FLOAT", nullable: true },
+              { jsonPath: "Promotions", columnName: "promotions", dataType: "JSON", nullable: true },
+            ],
+          },
+          {
+            jsonPath: "FulfilledItems",
+            tableName: "sales_fulfilled_items",
+            foreignKey: "sale_id",
+            columns: [
+              { jsonPath: "Sku", columnName: "sku", dataType: "STRING", nullable: true },
+              { jsonPath: "Quantity", columnName: "quantity", dataType: "INTEGER", nullable: true },
+            ],
+          },
+        ],
+      },
+    },
+    // ── Kits ─────────────────────────────────────────────────────────────
+    {
+      slug: "kits",
+      name: "Kits",
+      description: "Product kits (bundles) with component items and quantities",
+      endpoint: "/products/getKits",
+      method: "POST",
+      responseRoot: "Kits",
+      incrementalKey: "LastModifiedDateTimeUtc",
+      schema: {
+        columns: [
+          { jsonPath: "SKU", columnName: "sku", dataType: "STRING", nullable: false },
+          { jsonPath: "Code", columnName: "code", dataType: "STRING", nullable: true },
+          { jsonPath: "Cost", columnName: "cost", dataType: "FLOAT", nullable: true },
+          { jsonPath: "Description", columnName: "description", dataType: "STRING", nullable: true },
+          { jsonPath: "LastModifiedDateTimeUtc", columnName: "last_modified_date_utc", dataType: "TIMESTAMP", nullable: true },
+          { jsonPath: "AvailableQuantity", columnName: "available_quantity", dataType: "INTEGER", nullable: true },
+          { jsonPath: "AvailableQuantityLastModifiedDateTimeUtc", columnName: "available_qty_last_modified_utc", dataType: "STRING", nullable: true },
+          { jsonPath: "Statuses", columnName: "statuses", dataType: "JSON", nullable: true },
+        ],
+        childTables: [
+          {
+            jsonPath: "KitLines",
+            tableName: "kits_lines",
+            foreignKey: "kit_sku",
+            columns: [
+              { jsonPath: "LineName", columnName: "line_name", dataType: "STRING", nullable: true },
+              { jsonPath: "Combine", columnName: "combine", dataType: "INTEGER", nullable: true },
+              { jsonPath: "Quantity", columnName: "quantity", dataType: "INTEGER", nullable: true },
+              { jsonPath: "Items", columnName: "items", dataType: "JSON", nullable: true },
+            ],
+          },
+        ],
+      },
+    },
+    // ── Warehouses ───────────────────────────────────────────────────────
+    {
+      slug: "warehouses",
+      name: "Warehouses",
+      description: "Warehouse definitions with IDs and codes",
+      endpoint: "/warehouses/getWarehouses",
+      method: "POST",
+      responseRoot: "Warehouses",
+      schema: {
+        columns: [
+          { jsonPath: "Id", columnName: "id", dataType: "STRING", nullable: false },
+          { jsonPath: "Code", columnName: "code", dataType: "STRING", nullable: true },
+        ],
+      },
+    },
+    // ── Locations ────────────────────────────────────────────────────────
+    {
+      slug: "locations",
+      name: "Locations",
+      description: "Warehouse locations (bins/shelves) with total quantities",
+      endpoint: "/warehouses/getLocations",
+      method: "POST",
+      responseRoot: "Items",
+      schema: {
+        columns: [
+          { jsonPath: "WarehouseCode", columnName: "warehouse_code", dataType: "STRING", nullable: true },
+          { jsonPath: "WarehouseName", columnName: "warehouse_name", dataType: "STRING", nullable: true },
+          { jsonPath: "LocationCode", columnName: "location_code", dataType: "STRING", nullable: false },
+          { jsonPath: "ContainerCode", columnName: "container_code", dataType: "STRING", nullable: true },
+          { jsonPath: "ParentLocation", columnName: "parent_location", dataType: "STRING", nullable: true },
+          { jsonPath: "TotalQuantity", columnName: "total_quantity", dataType: "INTEGER", nullable: true },
+        ],
+      },
+    },
+  ],
+};
+
+// ───────────────────────────────────────────────────────────────────────────
 // All connectors
 // ───────────────────────────────────────────────────────────────────────────
 const ALL_CONNECTORS: ConnectorDef[] = [
@@ -2236,6 +2489,7 @@ const ALL_CONNECTORS: ConnectorDef[] = [
   square,
   googleSheets,
   serviceNow,
+  skuVault,
 ];
 
 // ───────────────────────────────────────────────────────────────────────────

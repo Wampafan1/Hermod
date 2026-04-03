@@ -9,6 +9,7 @@ export const PROVIDER_CAPABILITIES: Record<ConnectionType, ProviderCapabilities>
   BIGQUERY:  { canBeSource: true,  canBeDestination: true,  canQuery: true,  canStream: true,  canBulkLoad: true,  canListTables: true  },
   NETSUITE:  { canBeSource: true,  canBeDestination: false, canQuery: true,  canStream: true,  canBulkLoad: false, canListTables: true  },
   SFTP:      { canBeSource: true,  canBeDestination: true,  canQuery: false, canStream: true,  canBulkLoad: true,  canListTables: false, fileFormats: ["CSV", "TSV", "XLSX"] },
+  REST_API:  { canBeSource: true,  canBeDestination: false, canQuery: false, canStream: true,  canBulkLoad: false, canListTables: false },
 };
 
 export function getCapabilities(type: ConnectionType): ProviderCapabilities {

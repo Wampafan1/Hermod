@@ -23,7 +23,8 @@ export function DaySelector({ selected, onChange }: DaySelectorProps) {
           key={index}
           type="button"
           onClick={() => toggle(index)}
-          className={`px-3 py-1.5 text-xs tracking-widest uppercase transition-colors ${
+          aria-pressed={selected.includes(index)}
+          className={`px-3 py-1.5 text-xs tracking-widest uppercase transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold ${
             selected.includes(index)
               ? "bg-gold-dim border border-gold text-gold-bright"
               : "bg-surface-raised border border-border text-text-dim hover:text-text hover:border-border-mid"

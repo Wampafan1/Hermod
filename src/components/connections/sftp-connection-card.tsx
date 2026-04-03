@@ -63,7 +63,7 @@ export function SftpConnectionCard({
             {connection.lastFileAt && connection.lastFileName && (
               <p className="text-xs text-text-dim tracking-wide">
                 Last file: {connection.lastFileName}
-                <span className="text-text-dim/60 ml-2">
+                <span className="text-text-dim/80 ml-2">
                   {new Date(connection.lastFileAt).toLocaleDateString()}
                 </span>
               </p>
