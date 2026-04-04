@@ -9,7 +9,12 @@ export default async function ConnectionsPage() {
 
   const [connections, emailConnections, folders] = await Promise.all([
     prisma.connection.findMany({
-      where: { userId: session.user.id },
+      where: {
+        OR: [
+          { tenantId: session.user.tenantId ?? undefined },
+          { userId: session.user.id },
+        ],
+      },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,

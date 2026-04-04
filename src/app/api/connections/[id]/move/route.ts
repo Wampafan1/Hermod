@@ -14,9 +14,15 @@ export const POST = withAuth(async (req, ctx) => {
   const body = await req.json();
   const { folderId } = body as { folderId: string | null };
 
-  // Verify connection belongs to tenant
+  // Verify connection belongs to user OR tenant (handles pre-multi-tenant connections with null tenantId)
   const connection = await prisma.connection.findFirst({
-    where: { id, tenantId: ctx.tenantId },
+    where: {
+      id,
+      OR: [
+        { tenantId: ctx.tenantId },
+        { userId: ctx.userId },
+      ],
+    },
   });
   if (!connection) {
     return NextResponse.json({ error: "Connection not found" }, { status: 404 });
@@ -32,9 +38,13 @@ export const POST = withAuth(async (req, ctx) => {
     }
   }
 
+  // Update folderId, and backfill tenantId if it was null
   const updated = await prisma.connection.update({
     where: { id },
-    data: { folderId: folderId ?? null },
+    data: {
+      folderId: folderId ?? null,
+      tenantId: connection.tenantId ?? ctx.tenantId,
+    },
   });
 
   return NextResponse.json(updated);
