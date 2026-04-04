@@ -49,6 +49,47 @@ const netsuiteCredentials = z.object({
   tokenSecret: z.string().min(1),
 });
 
+// ─── File source configs (non-sensitive, stored in config JSON) ──
+
+const csvFileConfig = z.object({
+  filePath: z.string().optional(),
+  originalFilename: z.string().optional(),
+  delimiter: z.string().default(","),
+  hasHeaders: z.boolean().default(true),
+  encoding: z.string().default("utf-8"),
+  skipRows: z.number().int().default(0),
+  pkColumns: z.array(z.string()).optional(),
+  schema: z.record(z.unknown()).optional(),
+  baselineSchema: z.record(z.unknown()).optional(),
+});
+
+const excelFileConfig = z.object({
+  filePath: z.string().optional(),
+  originalFilename: z.string().optional(),
+  sheetName: z.string().optional(),
+  availableSheets: z.array(z.string()).optional(),
+  headerRow: z.number().int().default(1),
+  dataStartRow: z.number().int().default(2),
+  pkColumns: z.array(z.string()).optional(),
+  schema: z.record(z.unknown()).optional(),
+  baselineSchema: z.record(z.unknown()).optional(),
+});
+
+const googleSheetsConfig = z.object({
+  spreadsheetId: z.string().optional(),
+  spreadsheetUrl: z.string().optional(),
+  spreadsheetName: z.string().optional(),
+  sheetName: z.string().optional(),
+  availableSheets: z.array(z.string()).optional(),
+  headerRow: z.number().int().default(1),
+  dataStartRow: z.number().int().default(2),
+  pkColumns: z.array(z.string()).optional(),
+  schema: z.record(z.unknown()).optional(),
+  baselineSchema: z.record(z.unknown()).optional(),
+});
+
+const noCredentials = z.object({}).default({});
+
 // ─── Schema maps (for programmatic access per type) ─────────────
 
 export const connectionConfigSchemas: Record<ConnectionType, z.ZodTypeAny> = {
@@ -59,6 +100,9 @@ export const connectionConfigSchemas: Record<ConnectionType, z.ZodTypeAny> = {
   NETSUITE: netsuiteConfig,
   SFTP: sftpConfig,
   REST_API: restApiConfigSchema,
+  CSV_FILE: csvFileConfig,
+  EXCEL_FILE: excelFileConfig,
+  GOOGLE_SHEETS: googleSheetsConfig,
 };
 
 export const connectionCredentialsSchemas: Record<ConnectionType, z.ZodTypeAny> = {
@@ -69,6 +113,9 @@ export const connectionCredentialsSchemas: Record<ConnectionType, z.ZodTypeAny> 
   NETSUITE: netsuiteCredentials,
   SFTP: passwordCredentials,
   REST_API: restApiCredentialsSchema,
+  CSV_FILE: noCredentials,
+  EXCEL_FILE: noCredentials,
+  GOOGLE_SHEETS: noCredentials,
 };
 
 // ─── Discriminated union for create ─────────────────────────────
@@ -85,6 +132,9 @@ export const createConnectionSchema = z.discriminatedUnion("type", [
   z.object({ ...baseFields, type: z.literal("NETSUITE"),  config: netsuiteConfig,  credentials: netsuiteCredentials }),
   z.object({ ...baseFields, type: z.literal("SFTP"),      config: sftpConfig,      credentials: passwordCredentials }),
   z.object({ ...baseFields, type: z.literal("REST_API"),  config: restApiConfigSchema, credentials: restApiCredentialsBaseSchema }),
+  z.object({ ...baseFields, type: z.literal("CSV_FILE"),   config: csvFileConfig,       credentials: noCredentials }),
+  z.object({ ...baseFields, type: z.literal("EXCEL_FILE"), config: excelFileConfig,     credentials: noCredentials }),
+  z.object({ ...baseFields, type: z.literal("GOOGLE_SHEETS"), config: googleSheetsConfig, credentials: noCredentials }),
 ]);
 
 // TODO: updateConnectionSchema uses loose validation — type-aware config/credentials
