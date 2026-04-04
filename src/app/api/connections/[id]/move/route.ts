@@ -7,13 +7,14 @@ const moveSchema = z.object({
   folderId: z.string().nullable(),
 });
 
+/** Extract the connection ID from the request URL. */
+function extractId(url: string): string | null {
+  return url.split("/connections/")[1]?.split("/")[0]?.split("?")[0] ?? null;
+}
+
 /** PATCH — Move a connection to a folder (or unfiled) */
 export const PATCH = withAuth(async (req, ctx) => {
-  // Extract connection ID from URL: /api/connections/[id]/move
-  const segments = new URL(req.url).pathname.split("/");
-  const moveIdx = segments.indexOf("move");
-  const connectionId = segments[moveIdx - 1];
-
+  const connectionId = extractId(req.url);
   if (!connectionId) {
     return NextResponse.json({ error: "Connection ID required" }, { status: 400 });
   }

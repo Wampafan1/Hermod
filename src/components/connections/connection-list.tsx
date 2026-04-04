@@ -234,7 +234,13 @@ export function ConnectionList({
   if (activeFolder && filteredConnections) {
     return (
       <>
-        {/* Breadcrumb */}
+        {/* Back button + Breadcrumb */}
+        <button
+          onClick={() => router.replace("/connections", { scroll: false })}
+          className="btn-subtle text-xs mb-3"
+        >
+          &larr; Back to Connections
+        </button>
         <div className="flex items-center gap-2 mb-4">
           <button
             onClick={() => router.replace("/connections", { scroll: false })}
