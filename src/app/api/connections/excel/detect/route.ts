@@ -3,7 +3,7 @@ import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { withAuth } from "@/lib/api";
-import { detectExcelSchema } from "@/lib/alfheim/excel-detector";
+import { analyzeExcelCompat } from "@/lib/duckdb/file-analyzer";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads");
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
@@ -41,12 +41,12 @@ export const POST = withAuth(async (req, session) => {
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(filePath, buffer);
 
-  // Detect schema
+  // Detect schema via DuckDB (full dataset analysis, not sampled)
   const sheetName = formData.get("sheetName") as string | null;
   const headerRow = formData.get("headerRow");
   const dataStartRow = formData.get("dataStartRow");
 
-  const result = await detectExcelSchema(filePath, {
+  const result = await analyzeExcelCompat(buffer, {
     sheetName: sheetName || undefined,
     headerRow: headerRow ? Number(headerRow) : undefined,
     dataStartRow: dataStartRow ? Number(dataStartRow) : undefined,

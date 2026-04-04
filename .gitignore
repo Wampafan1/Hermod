@@ -4,3 +4,7 @@ node_modules/
 .env.local
 *.tsbuildinfo
 next-env.d.ts
+
+# DuckDB (belt and suspenders — should never be created in :memory: mode)
+*.duckdb
+*.duckdb.wal

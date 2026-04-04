@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir, unlink } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { withAuth } from "@/lib/api";
-import { detectCsvSchema } from "@/lib/alfheim/csv-detector";
+import { analyzeCSVCompat } from "@/lib/duckdb/file-analyzer";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads");
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
@@ -41,11 +41,11 @@ export const POST = withAuth(async (req, session) => {
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(filePath, buffer);
 
-  // Detect schema
+  // Detect schema via DuckDB (full dataset analysis, not sampled)
   const delimiter = formData.get("delimiter") as string | null;
   const hasHeaders = formData.get("hasHeaders");
 
-  const result = detectCsvSchema(filePath, {
+  const result = await analyzeCSVCompat(buffer, {
     delimiter: delimiter || undefined,
     hasHeaders: hasHeaders !== null ? hasHeaders === "true" : undefined,
   });

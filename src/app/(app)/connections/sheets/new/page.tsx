@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { SheetsUrlInput } from "@/components/file-sources/sheets-url-input";
 import { SchemaDetectReview } from "@/components/file-sources/schema-detect-review";
 import { SheetSelector } from "@/components/file-sources/sheet-selector";
 import { PKDetectionPanel } from "@/components/file-sources/pk-detection-panel";
-import { detectPrimaryKey } from "@/lib/alfheim/pk-detector";
 import type { ColumnMapping } from "@/lib/alfheim/types";
+import type { UCCResult } from "@/lib/ucc/discovery";
 
 const ACCENT = "#ce93d8"; // Alfheim purple
 
@@ -35,28 +35,84 @@ export default function SheetsNewPage() {
   const [writeMode, setWriteMode] = useState<"merge" | "append" | "truncate">("merge");
   const [pkColumns, setPkColumns] = useState<string[]>([]);
 
-  const pkDetection = useMemo(() => {
-    if (!detection) return null;
-    const result = detectPrimaryKey(
-      detection.sampleRows,
-      detection.schema.columns.map((c) => ({ name: c.jsonPath, dataType: c.dataType }))
-    );
-    setPkColumns(result.columns);
-    if (result.confidence === "low") setWriteMode("truncate");
-    return result;
-  }, [detection]);
+  // UCC discovery state
+  const [uccResult, setUccResult] = useState<UCCResult | null>(null);
+  const [uccLoading, setUccLoading] = useState(false);
+  const [uccError, setUccError] = useState<string | null>(null);
 
   function handleDetected(result: unknown) {
     const det = result as DetectionResult;
     setDetection(det);
     setColumns(det.schema.columns);
     setConnectionName(det.spreadsheetName);
+    setUccResult(null);
+    setUccError(null);
     setStep("schema");
   }
 
+  // Run UCC discovery async after detection
+  useEffect(() => {
+    if (!detection || step !== "schema") return;
+    if (detection.sampleRows.length === 0) return;
+
+    let cancelled = false;
+    setUccLoading(true);
+    setUccError(null);
+
+    (async () => {
+      try {
+        const res = await fetch("/api/ucc/discover", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: detection.sampleRows }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ error: "UCC discovery failed" }));
+          throw new Error(body.error || "UCC discovery failed");
+        }
+        const result = (await res.json()) as UCCResult;
+        if (!cancelled) {
+          setUccResult(result);
+          if (result.uccs.length > 0) {
+            setPkColumns(result.uccs[0].columns);
+          } else {
+            setWriteMode("truncate");
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setUccError(err instanceof Error ? err.message : "UCC discovery failed");
+        }
+      } finally {
+        if (!cancelled) setUccLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [detection, step]);
+
+  const handleManualValidation = useCallback(
+    async (cols: string[]): Promise<{ isUnique: boolean; duplicateGroups?: number }> => {
+      if (!detection) return { isUnique: false };
+      const res = await fetch("/api/ucc/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: detection.sampleRows }),
+      });
+      if (!res.ok) return { isUnique: false };
+      const result = (await res.json()) as UCCResult;
+      const isUnique = result.uccs.some(
+        (ucc) =>
+          ucc.columns.length === cols.length &&
+          cols.every((c) => ucc.columns.includes(c))
+      );
+      return { isUnique, duplicateGroups: isUnique ? 0 : undefined };
+    },
+    [detection]
+  );
+
   async function handleSheetChange(sheetName: string) {
     if (!detection) return;
-    // Re-detect with different sheet
     try {
       const res = await fetch("/api/connections/sheets/detect", {
         method: "POST",
@@ -70,6 +126,7 @@ export default function SheetsNewPage() {
         const newDet = (await res.json()) as DetectionResult;
         setDetection(newDet);
         setColumns(newDet.schema.columns);
+        setUccResult(null); // will re-trigger discovery via useEffect
       }
     } catch {
       toast.error("Failed to re-detect schema");
@@ -180,15 +237,28 @@ export default function SheetsNewPage() {
             accentColor={ACCENT}
           />
 
-          {/* PK Detection + Write Mode */}
-          {pkDetection && (
+          {/* PK Detection — async loading */}
+          {uccLoading && (
+            <div className="bg-deep border border-border p-5 flex items-center gap-3">
+              <div className="w-4 h-4 border-2 border-gold border-t-transparent animate-spin" />
+              <span className="text-text-dim text-xs font-inconsolata tracking-wide">
+                Analyzing primary keys across all rows...
+              </span>
+            </div>
+          )}
+          {uccError && (
+            <div className="bg-deep border border-ember/30 p-4">
+              <p className="text-ember text-xs font-inconsolata">{uccError}</p>
+            </div>
+          )}
+          {uccResult && (
             <PKDetectionPanel
-              detection={pkDetection}
+              result={uccResult}
               allColumns={columns.map((c) => c.jsonPath)}
-              sampleRows={detection.sampleRows}
               writeMode={writeMode}
               onWriteModeChange={setWriteMode}
               onPkColumnsChange={setPkColumns}
+              onManualValidationRequest={handleManualValidation}
             />
           )}
 
