@@ -153,7 +153,7 @@ export function ConnectionList({
   async function moveConnection(connectionId: string, folderId: string | null) {
     try {
       const res = await fetch(`/api/connections/${connectionId}/move`, {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folderId }),
       });

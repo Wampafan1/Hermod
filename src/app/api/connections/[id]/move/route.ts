@@ -4,8 +4,8 @@ import { withAuth } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-// PATCH /api/connections/[id]/move — Move connection to a folder (or unfiled)
-export const PATCH = withAuth(async (req, ctx) => {
+// POST /api/connections/[id]/move — Move connection to a folder (or unfiled)
+export const POST = withAuth(async (req, ctx) => {
   const id = req.url.split("/connections/")[1]?.split("/")[0];
   if (!id) {
     return NextResponse.json({ error: "Missing connection ID" }, { status: 400 });
