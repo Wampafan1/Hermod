@@ -61,6 +61,8 @@ export default function SheetsNewPage() {
 
     (async () => {
       try {
+        // Sheets data comes from Google API, not a local file — send rows directly
+        // TODO: For Google Sheets, consider fetching full data for UCC discovery
         const res = await fetch("/api/ucc/discover", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

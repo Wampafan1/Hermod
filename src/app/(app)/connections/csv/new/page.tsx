@@ -75,7 +75,11 @@ export default function CsvNewPage() {
         const res = await fetch("/api/ucc/discover", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rows: detection.sampleRows }),
+          body: JSON.stringify({
+            filePath: detection.filePath,
+            fileType: "csv",
+            delimiter: detection.delimiter,
+          }),
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: "UCC discovery failed" }));
@@ -110,11 +114,15 @@ export default function CsvNewPage() {
       const res = await fetch("/api/ucc/discover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: detection.sampleRows }),
+        body: JSON.stringify({
+          filePath: detection.filePath,
+          fileType: "csv",
+          delimiter: detection.delimiter,
+        }),
       });
       if (!res.ok) return { isUnique: false };
-      const result = (await res.json()) as UCCResult;
-      const isUnique = result.uccs.some(
+      const uccRes = (await res.json()) as UCCResult;
+      const isUnique = uccRes.uccs.some(
         (ucc) =>
           ucc.columns.length === cols.length &&
           cols.every((c) => ucc.columns.includes(c))
