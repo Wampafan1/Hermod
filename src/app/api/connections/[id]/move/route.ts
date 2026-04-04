@@ -3,6 +3,8 @@ import { z } from "zod";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 const moveSchema = z.object({
   folderId: z.string().nullable(),
 });
@@ -46,10 +48,11 @@ export const PATCH = withAuth(async (req, ctx) => {
     }
   }
 
-  await prisma.connection.update({
+  const updated = await prisma.connection.update({
     where: { id: connectionId },
     data: { folderId: parsed.data.folderId },
+    select: { id: true, name: true, type: true, folderId: true },
   });
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json(updated);
 });
