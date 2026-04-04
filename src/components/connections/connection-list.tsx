@@ -25,44 +25,77 @@ interface EmailConnection {
   fromAddress: string;
 }
 
-interface ConnectionListProps {
-  connections: UnifiedConnection[];
-  emailConnections: EmailConnection[];
+interface FolderInfo {
+  id: string;
+  name: string;
+  color: string;
+  icon: string | null;
+  sortOrder: number;
+  connectionCount: number;
 }
 
-const SQL_TYPES = new Set(["POSTGRES", "MSSQL", "MYSQL"]);
-const CLOUD_TYPES = new Set(["BIGQUERY", "NETSUITE"]);
-const ALLOWED_ADD_TYPES = new Set(["POSTGRES", "MSSQL", "MYSQL", "BIGQUERY", "NETSUITE", "SFTP"]);
+interface ConnectionWithFolder extends UnifiedConnection {
+  folderId: string | null;
+}
+
+interface ConnectionListProps {
+  connections: ConnectionWithFolder[];
+  emailConnections: EmailConnection[];
+  folders: FolderInfo[];
+}
+
+const FILE_TYPES = new Set(["CSV_FILE", "EXCEL_FILE"]);
+
+// ─── Folder Color Presets ───────────────────────────
+
+const FOLDER_COLORS = [
+  "#d4af37", // Asgard gold
+  "#7eb8d4", // Frost blue
+  "#66bb6a", // Midgard green
+  "#ce93d8", // Alfheim purple
+  "#a1887f", // Jotunheim brown
+  "#ff8a65", // Muspelheim orange
+  "#ef5350", // Helheim red
+  "#4dd0e1", // Vanaheim teal
+];
 
 export function ConnectionList({
   connections: initialConnections,
   emailConnections: initialEmail,
+  folders: initialFolders,
 }: ConnectionListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
 
+  const activeFolderId = searchParams.get("folderId");
+
   const [showForm, setShowForm] = useState(false);
   const [editingConnection, setEditingConnection] = useState<UnifiedConnection | null>(null);
-
-  // Email form state
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [editingEmail, setEditingEmail] = useState<EmailConnection | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<{ id: string; type: "connection" | "email" | "folder" } | null>(null);
 
-  // Confirm dialog state
-  const [confirmTarget, setConfirmTarget] = useState<{ id: string; type: "connection" | "email" } | null>(null);
+  // Folder creation modal
+  const [showFolderModal, setShowFolderModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderColor, setNewFolderColor] = useState(FOLDER_COLORS[0]);
+  const [creatingFolder, setCreatingFolder] = useState(false);
 
-  // Handle ?add=TYPE query param from /connections/new SQL redirect
+  // Move-to-folder dropdown
+  const [moveTarget, setMoveTarget] = useState<string | null>(null);
+
+  // Handle ?add=TYPE query param
   useEffect(() => {
     const addType = searchParams.get("add");
-    if (addType && ALLOWED_ADD_TYPES.has(addType)) {
+    const ALLOWED = new Set(["POSTGRES", "MSSQL", "MYSQL", "BIGQUERY", "NETSUITE", "SFTP"]);
+    if (addType && ALLOWED.has(addType)) {
       setEditingConnection(null);
       setShowForm(true);
       router.replace("/connections", { scroll: false });
     }
   }, [searchParams, router]);
 
-  // Handle ?addEmail=SMTP query param
   useEffect(() => {
     const addEmail = searchParams.get("addEmail");
     if (addEmail) {
@@ -71,6 +104,73 @@ export function ConnectionList({
       router.replace("/connections", { scroll: false });
     }
   }, [searchParams, router]);
+
+  // ─── Folder Actions ─────────────────────────────────
+
+  async function createFolder() {
+    if (!newFolderName.trim()) return;
+    setCreatingFolder(true);
+    try {
+      const res = await fetch("/api/connection-folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newFolderName.trim(), color: newFolderColor }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed" }));
+        toast.error(data.error || "Failed to create folder");
+        return;
+      }
+      toast.success("Folder created");
+      setShowFolderModal(false);
+      setNewFolderName("");
+      router.refresh();
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setCreatingFolder(false);
+    }
+  }
+
+  async function deleteFolder(id: string) {
+    try {
+      const res = await fetch(`/api/connection-folders/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed" }));
+        toast.error(data.error || "Failed to delete folder");
+        return;
+      }
+      toast.success("Folder deleted — connections moved to unfiled");
+      if (activeFolderId === id) {
+        router.replace("/connections", { scroll: false });
+      }
+      router.refresh();
+    } catch {
+      toast.error("Network error");
+    }
+  }
+
+  async function moveConnection(connectionId: string, folderId: string | null) {
+    try {
+      const res = await fetch(`/api/connections/${connectionId}/move`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed" }));
+        toast.error(data.error || "Failed to move connection");
+        return;
+      }
+      toast.success("Connection moved");
+      setMoveTarget(null);
+      router.refresh();
+    } catch {
+      toast.error("Network error");
+    }
+  }
+
+  // ─── Connection Actions ─────────────────────────────
 
   function handleEdit(conn: UnifiedConnection) {
     setEditingConnection(conn);
@@ -86,14 +186,22 @@ export function ConnectionList({
     const { id, type } = confirmTarget;
     setConfirmTarget(null);
     try {
-      const url = type === "email" ? `/api/email-connections/${id}` : `/api/connections/${id}`;
+      const url =
+        type === "email" ? `/api/email-connections/${id}` :
+        type === "folder" ? `/api/connection-folders/${id}` :
+        `/api/connections/${id}`;
       const res = await fetch(url, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error || "Delete failed");
         return;
       }
-      toast.success(type === "email" ? "Email connection deleted" : "Connection deleted");
+      if (type === "folder") {
+        toast.success("Folder deleted — connections moved to unfiled");
+        if (activeFolderId === id) router.replace("/connections", { scroll: false });
+      } else {
+        toast.success(type === "email" ? "Email connection deleted" : "Connection deleted");
+      }
       router.refresh();
     } catch {
       toast.error("Network error");
@@ -109,37 +217,102 @@ export function ConnectionList({
     setConfirmTarget({ id, type: "email" });
   }
 
-  function handleFormClose() {
-    setShowForm(false);
-    setEditingConnection(null);
+  // ─── Filtering ──────────────────────────────────────
+
+  const activeFolder = activeFolderId
+    ? initialFolders.find((f) => f.id === activeFolderId)
+    : null;
+
+  const filteredConnections = activeFolderId
+    ? initialConnections.filter((c) => c.folderId === activeFolderId)
+    : null;
+
+  const unfiledConnections = initialConnections.filter((c) => !c.folderId);
+
+  // ─── Render: Folder Drill-In View ─────────────────
+
+  if (activeFolder && filteredConnections) {
+    return (
+      <>
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-2 mb-4">
+          <button
+            onClick={() => router.replace("/connections", { scroll: false })}
+            className="text-text-dim text-xs font-inconsolata hover:text-gold transition-colors"
+          >
+            Connections
+          </button>
+          <span className="text-text-muted text-xs">/</span>
+          <span className="text-text text-xs font-cinzel">{activeFolder.name}</span>
+          <div className="flex-1" />
+          <button
+            onClick={() => setConfirmTarget({ id: activeFolder.id, type: "folder" })}
+            className="btn-subtle text-[10px] text-ember"
+          >
+            Delete Folder
+          </button>
+        </div>
+
+        {/* Folder accent bar */}
+        <div className="h-0.5 mb-4" style={{ background: activeFolder.color }} />
+
+        {filteredConnections.length === 0 ? (
+          <div className="text-center py-12 bg-deep border border-border">
+            <span className="text-3xl font-cinzel block mb-2 opacity-20" style={{ color: activeFolder.color }}>ᚨ</span>
+            <p className="text-text-dim text-xs tracking-wide">No connections in this folder yet.</p>
+            <p className="text-text-muted text-[10px] mt-1">Move connections here from the main view.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-px">
+            {filteredConnections.map((conn) => (
+              <ConnectionCardWithActions
+                key={conn.id}
+                connection={conn}
+                folders={initialFolders}
+                moveTarget={moveTarget}
+                setMoveTarget={setMoveTarget}
+                onEdit={() => handleEdit(conn)}
+                onDelete={() => handleDelete(conn.id)}
+                onMove={moveConnection}
+              />
+            ))}
+          </div>
+        )}
+
+        {showForm && (
+          <ConnectionForm
+            onSaved={() => { setShowForm(false); setEditingConnection(null); router.refresh(); }}
+            onClose={() => { setShowForm(false); setEditingConnection(null); }}
+            initial={editingConnection ?? undefined}
+          />
+        )}
+
+        <ConfirmDialog
+          open={!!confirmTarget}
+          title={confirmTarget?.type === "folder" ? "Delete Folder" : "Delete Connection"}
+          message={confirmTarget?.type === "folder"
+            ? "This folder will be deleted. All connections inside will be moved to unfiled."
+            : "This connection will be permanently removed."}
+          onConfirm={executeDelete}
+          onCancel={() => setConfirmTarget(null)}
+        />
+      </>
+    );
   }
 
-  function handleFormSaved() {
-    setShowForm(false);
-    setEditingConnection(null);
-    router.refresh();
-  }
+  // ─── Render: Top-Level View (Folders + Unfiled) ───
 
-  function handleEmailFormClose() {
-    setShowEmailForm(false);
-    setEditingEmail(null);
-  }
-
-  function handleEmailFormSaved() {
-    setShowEmailForm(false);
-    setEditingEmail(null);
-    router.refresh();
-  }
-
-  // Filter connections by category
-  const sqlConnections = initialConnections.filter((c) => SQL_TYPES.has(c.type));
-  const cloudConnections = initialConnections.filter((c) => CLOUD_TYPES.has(c.type));
-  const sftpConnections = initialConnections.filter((c) => c.type === "SFTP");
-
-  const hasAny = initialConnections.length > 0 || initialEmail.length > 0;
+  const hasAny = initialConnections.length > 0 || initialEmail.length > 0 || initialFolders.length > 0;
 
   return (
     <>
+      {/* New Folder button */}
+      <div className="flex justify-end mb-2">
+        <button onClick={() => setShowFolderModal(true)} className="btn-ghost text-xs">
+          + New Folder
+        </button>
+      </div>
+
       {!hasAny ? (
         <div className="text-center py-16 bg-deep border border-border">
           <span className="text-4xl font-cinzel block mb-3 animate-rune-float" style={{ color: "rgba(206,147,216,0.3)" }}>ᚨ</span>
@@ -151,57 +324,51 @@ export function ConnectionList({
         </div>
       ) : (
         <div className="space-y-8">
-          {/* Database Connections (SQL) */}
-          {sqlConnections.length > 0 && (
+          {/* Folder Cards */}
+          {initialFolders.length > 0 && (
             <div>
-              <h2 className="heading-norse text-sm mb-3" style={{ color: "#d4af37" }}>Database Connections</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-px">
-                {sqlConnections.map((conn) => (
-                  <ConnectionCard
-                    key={conn.id}
-                    connection={conn}
-                    onEdit={() => handleEdit(conn)}
-                    onDelete={() => handleDelete(conn.id)}
-                  />
+              <h2 className="heading-norse text-sm mb-3" style={{ color: "#d4af37" }}>Folders</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {initialFolders.map((folder) => (
+                  <button
+                    key={folder.id}
+                    onClick={() => router.replace(`/connections?folderId=${folder.id}`, { scroll: false })}
+                    className="bg-deep border border-border hover:border-gold-dim text-left p-4 transition-all group"
+                  >
+                    <div className="h-0.5 -mt-4 -mx-4 mb-3" style={{ background: folder.color }} />
+                    <div className="flex items-center gap-2 mb-1">
+                      {folder.icon && <span className="text-sm">{folder.icon}</span>}
+                      <h3 className="font-cinzel text-sm text-text group-hover:text-gold-bright transition-colors">
+                        {folder.name}
+                      </h3>
+                    </div>
+                    <p className="text-[10px] font-inconsolata text-text-muted tracking-wider">
+                      {folder.connectionCount} connection{folder.connectionCount !== 1 ? "s" : ""}
+                    </p>
+                  </button>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Cloud & API Connections */}
-          {cloudConnections.length > 0 && (
+          {/* Unfiled Connections */}
+          {unfiledConnections.length > 0 && (
             <div>
-              {sqlConnections.length > 0 && (
-                <RuneDivider rune="ᚾ" color="#ce93d8" className="mb-4" />
+              {initialFolders.length > 0 && (
+                <RuneDivider rune="ᚾ" color="#d4af37" className="mb-4" />
               )}
-              <h2 className="heading-norse text-sm mb-3" style={{ color: "#ce93d8" }}>Cloud & API</h2>
+              <h2 className="heading-norse text-sm mb-3" style={{ color: "#d4af37" }}>Unfiled</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-px">
-                {cloudConnections.map((conn) => (
-                  <ConnectionCard
+                {unfiledConnections.map((conn) => (
+                  <ConnectionCardWithActions
                     key={conn.id}
                     connection={conn}
+                    folders={initialFolders}
+                    moveTarget={moveTarget}
+                    setMoveTarget={setMoveTarget}
                     onEdit={() => handleEdit(conn)}
                     onDelete={() => handleDelete(conn.id)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* SFTP / File Connections */}
-          {sftpConnections.length > 0 && (
-            <div>
-              {(sqlConnections.length > 0 || cloudConnections.length > 0) && (
-                <RuneDivider rune="ᚺ" color="#66bb6a" className="mb-4" />
-              )}
-              <h2 className="heading-norse text-sm mb-3" style={{ color: "#66bb6a" }}>File Integrations</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-px">
-                {sftpConnections.map((conn) => (
-                  <ConnectionCard
-                    key={conn.id}
-                    connection={conn}
-                    onEdit={() => handleEdit(conn)}
-                    onDelete={() => handleDelete(conn.id)}
+                    onMove={moveConnection}
                   />
                 ))}
               </div>
@@ -211,9 +378,7 @@ export function ConnectionList({
           {/* Email Connections */}
           {initialEmail.length > 0 && (
             <div>
-              {initialConnections.length > 0 && (
-                <RuneDivider rune="ᛖ" color="#66bb6a" className="mb-4" />
-              )}
+              <RuneDivider rune="ᛖ" color="#66bb6a" className="mb-4" />
               <h2 className="heading-norse text-sm mb-3" style={{ color: "#66bb6a" }}>Email Delivery</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-px">
                 {initialEmail.map((conn) => (
@@ -230,31 +395,169 @@ export function ConnectionList({
         </div>
       )}
 
+      {/* Modals */}
       {showForm && (
         <ConnectionForm
-          onSaved={handleFormSaved}
-          onClose={handleFormClose}
+          onSaved={() => { setShowForm(false); setEditingConnection(null); router.refresh(); }}
+          onClose={() => { setShowForm(false); setEditingConnection(null); }}
           initial={editingConnection ?? undefined}
         />
       )}
-
       {showEmailForm && (
         <EmailConnectionForm
-          onSaved={handleEmailFormSaved}
-          onClose={handleEmailFormClose}
+          onSaved={() => { setShowEmailForm(false); setEditingEmail(null); router.refresh(); }}
+          onClose={() => { setShowEmailForm(false); setEditingEmail(null); }}
           initial={editingEmail ?? undefined}
         />
       )}
 
       <ConfirmDialog
         open={!!confirmTarget}
-        title={confirmTarget?.type === "email" ? "Delete Email Connection" : "Delete Connection"}
-        message={confirmTarget?.type === "email"
-          ? "This email connection will be permanently removed. This cannot be undone."
-          : "This connection will be permanently removed. Any reports using it will lose their data source."}
+        title={
+          confirmTarget?.type === "email" ? "Delete Email Connection" :
+          confirmTarget?.type === "folder" ? "Delete Folder" :
+          "Delete Connection"
+        }
+        message={
+          confirmTarget?.type === "email"
+            ? "This email connection will be permanently removed."
+            : confirmTarget?.type === "folder"
+              ? "This folder will be deleted. Connections will be moved to unfiled."
+              : "This connection will be permanently removed."
+        }
         onConfirm={executeDelete}
         onCancel={() => setConfirmTarget(null)}
       />
+
+      {/* New Folder Modal */}
+      {showFolderModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-deep border border-border p-6 w-full max-w-sm space-y-4">
+            <h3 className="font-cinzel text-sm text-gold tracking-wider uppercase">New Folder</h3>
+
+            <div>
+              <label className="label-norse">Name</label>
+              <input
+                type="text"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                className="input-norse"
+                placeholder="Client name, project, or job..."
+                autoFocus
+              />
+            </div>
+
+            <div>
+              <label className="label-norse">Color</label>
+              <div className="flex gap-2 mt-1">
+                {FOLDER_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    onClick={() => setNewFolderColor(color)}
+                    className={`w-7 h-7 border-2 transition-all ${
+                      newFolderColor === color ? "border-text scale-110" : "border-transparent"
+                    }`}
+                    style={{ background: color }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={createFolder}
+                disabled={creatingFolder || !newFolderName.trim()}
+                className="btn-primary text-xs flex-1"
+              >
+                <span>{creatingFolder ? "Creating..." : "Create Folder"}</span>
+              </button>
+              <button
+                onClick={() => { setShowFolderModal(false); setNewFolderName(""); }}
+                className="btn-ghost text-xs"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
+  );
+}
+
+// ─── Connection Card with Move Action ───────────────
+
+function ConnectionCardWithActions({
+  connection,
+  folders,
+  moveTarget,
+  setMoveTarget,
+  onEdit,
+  onDelete,
+  onMove,
+}: {
+  connection: ConnectionWithFolder;
+  folders: FolderInfo[];
+  moveTarget: string | null;
+  setMoveTarget: (id: string | null) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onMove: (connectionId: string, folderId: string | null) => void;
+}) {
+  const isFileType = FILE_TYPES.has(connection.type);
+  const showMoveMenu = moveTarget === connection.id;
+
+  return (
+    <div className="relative">
+      <ConnectionCard
+        connection={connection}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />
+      {/* Action strip */}
+      <div className="absolute top-2 right-2 flex gap-1">
+        {isFileType && (
+          <Link
+            href={`/connections/${connection.id}/files`}
+            className="btn-subtle text-[10px] text-frost"
+          >
+            Files
+          </Link>
+        )}
+        <button
+          onClick={() => setMoveTarget(showMoveMenu ? null : connection.id)}
+          className="btn-subtle text-[10px]"
+        >
+          Move
+        </button>
+      </div>
+      {/* Move dropdown */}
+      {showMoveMenu && (
+        <div className="absolute top-8 right-2 z-30 bg-deep border border-border shadow-lg min-w-[160px]">
+          {folders.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => onMove(connection.id, f.id)}
+              className={`w-full text-left px-3 py-1.5 text-xs font-inconsolata hover:bg-scroll/30 flex items-center gap-2 ${
+                connection.folderId === f.id ? "text-gold" : "text-text-dim"
+              }`}
+            >
+              <span className="w-2 h-2" style={{ background: f.color }} />
+              {f.name}
+              {connection.folderId === f.id && <span className="ml-auto text-[9px]">current</span>}
+            </button>
+          ))}
+          <button
+            onClick={() => onMove(connection.id, null)}
+            className={`w-full text-left px-3 py-1.5 text-xs font-inconsolata hover:bg-scroll/30 border-t border-border ${
+              !connection.folderId ? "text-gold" : "text-text-dim"
+            }`}
+          >
+            Unfiled
+            {!connection.folderId && <span className="ml-2 text-[9px]">current</span>}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

@@ -22,6 +22,7 @@ model Account {
   scope             String?
   id_token          String? @db.Text
   session_state     String?
+  ext_expires_in Int?
   user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
@@ -36,19 +37,24 @@ model Session {
 }
 
 model User {
-  id              String           @id @default(cuid())
-  name            String?
-  email           String?          @unique
-  emailVerified   DateTime?
-  image           String?
-  accounts        Account[]
-  sessions        Session[]
-  reports         Report[]
+  id               String             @id @default(cuid())
+  name             String?
+  email            String?            @unique
+  emailVerified    DateTime?
+  image            String?
+  accounts         Account[]
+  sessions         Session[]
+  reports          Report[]
   sftpConnections  SftpConnection[]
   emailConnections EmailConnection[]
   blueprints       Blueprint[]
   bifrostRoutes    BifrostRoute[]
   connections      Connection[]
+
+  // Multi-tenant
+  memberships      TenantMembership[]
+  activeTenantId   String?
+  activeTenant     Tenant?            @relation("ActiveTenant", fields: [activeTenantId], references: [id], onDelete: SetNull)
 }
 
 model VerificationToken {
@@ -57,6 +63,90 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+// ─── Multi-Tenant ───────────────────────────────────
+
+enum UserRole {
+  OWNER
+  ADMIN
+  USER
+  ANALYTICS
+  BILLING
+  API_SERVICE
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+model Tenant {
+  id               String             @id @default(cuid())
+  name             String
+  slug             String             @unique
+  domain           String?            @unique
+  logoUrl          String?
+
+  // Subscription placeholder
+  plan             String             @default("loki")
+  planExpiresAt    DateTime?
+
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  // Relations
+  memberships      TenantMembership[]
+  invitations      Invitation[]
+  activeUsers      User[]             @relation("ActiveTenant")
+
+  // Tenant-scoped data
+  reports           Report[]
+  connections       Connection[]
+  connectionFolders ConnectionFolder[]
+  bifrostRoutes     BifrostRoute[]
+  forgeBlueprints   ForgeBlueprint[]
+  sftpConnections   SftpConnection[]
+  emailConnections  EmailConnection[]
+}
+
+model TenantMembership {
+  id        String   @id @default(cuid())
+  userId    String
+  tenantId  String
+  role      UserRole @default(USER)
+
+  invitedBy String?
+  joinedAt  DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@index([userId])
+}
+
+model Invitation {
+  id        String           @id @default(cuid())
+  tenantId  String
+  email     String
+  role      UserRole         @default(USER)
+  status    InvitationStatus @default(PENDING)
+
+  invitedBy String
+  token     String           @unique @default(cuid())
+
+  expiresAt DateTime
+  createdAt DateTime         @default(now())
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([tenantId])
+  @@index([token])
 }
 
 // ─── SFTP Connections ────────────────────────────────
@@ -81,8 +171,12 @@ model SftpConnection {
   filesProcessed     Int               @default(0)
   userId             String
   user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId           String?
+  tenant             Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
+
+  @@index([tenantId])
 }
 
 enum SftpSourceType {
@@ -130,9 +224,13 @@ model EmailConnection {
   fromAddress String
   userId      String
   user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId    String?
+  tenant      Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   schedules   Schedule[]
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+
+  @@index([tenantId])
 }
 
 // ─── Reports ─────────────────────────────────────────
@@ -150,10 +248,14 @@ model Report {
   blueprint    Blueprint? @relation(fields: [blueprintId], references: [id], onDelete: SetNull)
   userId       String
   user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId     String?
+  tenant       Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   schedule     Schedule?
   runHistory   RunLog[]
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+
+  @@index([tenantId])
 }
 
 // ─── Schedules ───────────────────────────────────────
@@ -267,12 +369,16 @@ model ForgeBlueprint {
   description     String?
   currentVersion  Int                       @default(1)
   status          ForgeBlueprintStatus      @default(ACTIVE)
+  tenantId        String?
+  tenant          Tenant?                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt       DateTime                  @default(now())
   updatedAt       DateTime                  @updatedAt
   createdBy       String?
 
   versions        ForgeBlueprintVersion[]
   executions      ForgeBlueprintExecution[]
+
+  @@index([tenantId])
 }
 
 model ForgeBlueprintVersion {
@@ -377,20 +483,87 @@ enum ConnectionStatus {
 }
 
 model Connection {
-  id            String           @id @default(cuid())
-  name          String
-  type          ConnectionType
-  config        Json
-  credentials   String?          @db.Text  // Encrypted JSON: passwords, tokens, service account keys
-  status        ConnectionStatus @default(ACTIVE)
-  lastTestedAt  DateTime?
-  userId        String
-  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String           @id @default(cuid())
+  name           String
+  type           ConnectionType
+  config         Json
+  credentials    String?          @db.Text  // Encrypted JSON: passwords, tokens, service account keys
+  status         ConnectionStatus @default(ACTIVE)
+  lastTestedAt   DateTime?
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId       String?
+  tenant         Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  folderId       String?
+  folder         ConnectionFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
   reports        Report[]
+  fileEntries    FileEntry[]
   routesAsSource BifrostRoute[] @relation("routeSource")
   routesAsDest   BifrostRoute[] @relation("routeDest")
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
+
+  @@index([tenantId])
+  @@index([folderId])
+}
+
+// ─── Connection Folders ──────────────────────────────
+
+model ConnectionFolder {
+  id          String       @id @default(cuid())
+  name        String
+  color       String       @default("#d4af37")
+  icon        String?
+  sortOrder   Int          @default(0)
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connections Connection[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, sortOrder])
+}
+
+// ─── File Entries (Jötunheim) ────────────────────────
+
+model FileEntry {
+  id            String          @id @default(cuid())
+  connectionId  String
+  connection    Connection      @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  fileName      String
+  fileSize      Int
+  mimeType      String?
+
+  rowCount      Int?
+  columnCount   Int?
+  schema        Json?
+  schemaDrift   Json?
+
+  status        FileEntryStatus @default(PENDING)
+  loadMode      String          @default("APPEND")
+  error         String?         @db.Text
+
+  routeLogId    String?
+  storagePath   String?
+
+  uploadedAt    DateTime        @default(now())
+  processedAt   DateTime?
+  uploadedBy    String?
+  tenantId      String
+
+  @@index([connectionId, uploadedAt])
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum FileEntryStatus {
+  PENDING
+  PROCESSING
+  LOADED
+  SCHEMA_DRIFT
+  FAILED
 }
 
 // ─── Bifrost Routes ─────────────────────────────────
@@ -431,6 +604,8 @@ model BifrostRoute {
   // Ownership
   userId           String
   user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId         String?
+  tenant           Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Relations
   routeLogs        RouteLog[]
@@ -443,6 +618,7 @@ model BifrostRoute {
   @@index([sourceId])
   @@index([destId])
   @@index([enabled, nextRunAt])
+  @@index([tenantId])
 }
 
 model RouteLog {
@@ -479,11 +655,13 @@ model HelheimEntry {
   maxRetries    Int          @default(3)
   nextRetryAt   DateTime?
   status        String       @default("pending") // "pending", "retrying", "recovered", "dead"
+  tenantId      String?
   createdAt     DateTime     @default(now())
   lastRetriedAt DateTime?
 
   @@index([status, nextRetryAt])
   @@index([status, lastRetriedAt])
+  @@index([tenantId])
 }
 
 // ─── Pipeline Watermarks (Incremental Sync) ─────────
@@ -495,11 +673,13 @@ model PipelineWatermark {
   tableName     String
   watermark     String       // serialized: ISO timestamp, integer ID, or hex hash
   watermarkType String       // "timestamp_cursor", "integer_id_cursor", "rowversion_cursor", "full_refresh"
+  tenantId      String?
   rowsSynced    Int?
   runAt         DateTime     @default(now())
 
   @@unique([routeId, tableName])
   @@index([routeId])
+  @@index([tenantId])
 }
 
 // ─── Alfheim (API Catalog) ──────────────────────────

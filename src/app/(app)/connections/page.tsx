@@ -7,7 +7,7 @@ import { RealmBanner } from "@/components/realm-banner";
 export default async function ConnectionsPage() {
   const session = await requireAuth();
 
-  const [connections, emailConnections] = await Promise.all([
+  const [connections, emailConnections, folders] = await Promise.all([
     prisma.connection.findMany({
       where: { userId: session.user.id },
       orderBy: { createdAt: "desc" },
@@ -18,6 +18,7 @@ export default async function ConnectionsPage() {
         config: true,
         status: true,
         lastTestedAt: true,
+        folderId: true,
       },
     }),
     prisma.emailConnection.findMany({
@@ -34,14 +35,28 @@ export default async function ConnectionsPage() {
         fromAddress: true,
       },
     }),
+    prisma.connectionFolder.findMany({
+      where: { tenantId: session.user.tenantId ?? undefined },
+      orderBy: { sortOrder: "asc" },
+      include: { _count: { select: { connections: true } } },
+    }),
   ]);
 
-  // Serialize dates and cast config for client component
   const serializedConnections = connections.map((c) => ({
     ...c,
     config: (c.config ?? {}) as Record<string, unknown>,
     status: c.status as string,
     lastTestedAt: c.lastTestedAt?.toISOString() ?? null,
+    folderId: c.folderId ?? null,
+  }));
+
+  const serializedFolders = folders.map((f) => ({
+    id: f.id,
+    name: f.name,
+    color: f.color,
+    icon: f.icon,
+    sortOrder: f.sortOrder,
+    connectionCount: f._count.connections,
   }));
 
   return (
@@ -54,15 +69,18 @@ export default async function ConnectionsPage() {
         accentColor="#ce93d8"
         objectPosition="center 35%"
         action={
-          <Link href="/connections/new" className="btn-primary">
-            <span>Add Connection</span>
-          </Link>
+          <div className="flex gap-2">
+            <Link href="/connections/new" className="btn-primary">
+              <span>Add Connection</span>
+            </Link>
+          </div>
         }
       />
 
       <ConnectionList
         connections={serializedConnections}
         emailConnections={emailConnections}
+        folders={serializedFolders}
       />
     </div>
   );
