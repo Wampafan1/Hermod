@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Hermod — Electric Norse Architecture</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400..800;1,400..800&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&amp;family=Space+Grotesk:wght@300..700&amp;family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&amp;family=Noto+Serif:ital,wght@0,100..900;1,100..900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-tertiary": "#490005",
+              "on-secondary": "#001e4a",
+              "on-tertiary-container": "#1f0001",
+              "primary": "#ffad3a",
+              "primary-fixed-dim": "#e79400",
+              "on-surface": "#f9f5fd",
+              "primary-dim": "#e79400",
+              "on-primary-fixed": "#2a1700",
+              "secondary-fixed": "#bfd1ff",
+              "surface-tint": "#ffad3a",
+              "secondary-container": "#005ac2",
+              "error": "#ff7351",
+              "on-primary": "#543300",
+              "on-error-container": "#ffd2c8",
+              "surface-container-lowest": "#000000",
+              "secondary-fixed-dim": "#a9c4ff",
+              "error-dim": "#d53d18",
+              "on-surface-variant": "#acaab1",
+              "surface-variant": "#25252d",
+              "tertiary": "#ff716a",
+              "tertiary-fixed-dim": "#ff7b74",
+              "surface-container-high": "#1f1f26",
+              "primary-fixed": "#f8a010",
+              "inverse-on-surface": "#55545b",
+              "on-secondary-fixed": "#003271",
+              "tertiary-fixed": "#ff928b",
+              "inverse-primary": "#865400",
+              "on-primary-fixed-variant": "#563400",
+              "on-error": "#450900",
+              "inverse-surface": "#fcf8ff",
+              "tertiary-container": "#fd4e4d",
+              "secondary-dim": "#699cff",
+              "on-secondary-container": "#f7f7ff",
+              "on-primary-container": "#472a00",
+              "surface-dim": "#0e0e13",
+              "on-background": "#f9f5fd",
+              "surface": "#0e0e13",
+              "secondary": "#699cff",
+              "surface-bright": "#2c2b33",
+              "on-secondary-fixed-variant": "#004da8",
+              "surface-container": "#19191f",
+              "background": "#0e0e13",
+              "outline": "#76747b",
+              "tertiary-dim": "#ff716a",
+              "surface-container-highest": "#25252d",
+              "outline-variant": "#48474d",
+              "on-tertiary-fixed-variant": "#79000e",
+              "primary-container": "#f59e0a",
+              "error-container": "#b92902",
+              "surface-container-low": "#131319",
+              "on-tertiary-fixed": "#3a0003"
+            },
+            fontFamily: {
+              "headline": ["Newsreader", "serif"],
+              "body": ["Noto Serif", "serif"],
+              "label": ["Space Grotesk", "sans-serif"],
+              "serif-accent": ["EB Garamond", "serif"],
+              "serif-body": ["Source Serif 4", "serif"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            display: inline-block;
+            line-height: 1;
+            text-transform: none;
+            letter-spacing: normal;
+            word-wrap: normal;
+            white-space: nowrap;
+            direction: ltr;
+        }
+        .grain-overlay {
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+            opacity: 0.05;
+        }
+        .aurora-bg {
+            background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(120,119,198,0.12), transparent);
+        }
+        .card-matte-gradient {
+            background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
+            backdrop-filter: blur(8px);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-400 font-body selection:bg-amber-500/30">
+<!-- TopNavBar -->
+<nav class="fixed top-0 w-full z-50 bg-slate-950/50 backdrop-blur-md border-b border-slate-900 shadow-2xl shadow-amber-500/5 flex justify-between items-center px-8 h-20 max-w-full">
+<div class="text-2xl font-serif italic text-amber-500 tracking-tight">Hermod</div>
+<div class="hidden md:flex items-center gap-8">
+<a class="text-amber-500 border-b-2 border-amber-500 pb-1 font-label uppercase text-[11px] tracking-widest hover:text-amber-400 transition-colors duration-300" href="#">Realms</a>
+<a class="text-slate-400 font-serif font-label uppercase text-[11px] tracking-widest hover:text-amber-400 transition-colors duration-300" href="#">Power</a>
+<a class="text-slate-400 font-serif font-label uppercase text-[11px] tracking-widest hover:text-amber-400 transition-colors duration-300" href="#">Lore</a>
+<a class="text-slate-400 font-serif font-label uppercase text-[11px] tracking-widest hover:text-amber-400 transition-colors duration-300" href="#">Network</a>
+</div>
+<div class="flex items-center gap-4">
+<button class="text-slate-400 hover:text-amber-400 transition-colors duration-300">
+<span class="material-symbols-outlined">search</span>
+</button>
+<button class="text-slate-400 hover:text-amber-400 transition-colors duration-300">
+<span class="material-symbols-outlined">bolt</span>
+</button>
+<button class="bg-primary-container text-on-primary-container px-5 py-2 rounded font-label uppercase text-[11px] font-bold tracking-widest hover:opacity-80 transition-opacity">
+                Begin Journey
+            </button>
+</div>
+</nav>
+<main class="relative min-h-screen pt-32 pb-24 overflow-hidden aurora-bg">
+<div class="absolute inset-0 grain-overlay pointer-events-none"></div>
+<!-- Header Section -->
+<header class="relative z-10 max-w-4xl mx-auto text-center px-6 mb-20">
+<p class="font-label text-[11px] tracking-[0.25em] text-amber-500/60 uppercase mb-4">The Architecture</p>
+<h1 class="font-serif-accent text-5xl md:text-7xl text-white mb-6">The Nine Realms</h1>
+<p class="font-serif-body italic text-lg text-slate-400 mb-8 max-w-2xl mx-auto">Every data source. Every destination. One mythology.</p>
+<div class="w-12 h-[1px] bg-amber-500/30 mx-auto"></div>
+</header>
+<!-- Feature Bento Grid -->
+<div class="relative z-10 max-w-5xl mx-auto px-8 grid grid-cols-1 md:grid-cols-3 gap-5">
+<!-- Row 1 -->
+<div class="group relative flex flex-col justify-between p-6 min-h-[220px] rounded-lg border-b-2 border-amber-500 card-matte-gradient hover:-translate-y-1 transition-all duration-300 hover:shadow-[0_10px_30px_-10px_rgba(30,58,138,0.5)] bg-gradient-to-br from-blue-950/40 to-indigo-950/40">
+<div>
+<span class="font-label text-[10px] tracking-widest text-amber-500/70 uppercase">Database Realm</span>
+<h3 class="text-white font-serif-accent text-2xl mt-2">ASGARD</h3>
+</div>
+<p class="text-slate-400 font-serif-body text-sm mt-4">Scalable SQL databases engineered for the gods. Relational perfection at celestial scale.</p>
+<div class="mt-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-500 text-sm">database</span>
+<span class="font-label text-[10px] uppercase tracking-tighter">SQL Structures</span>
+</div>
+</div>
+<div class="group relative flex flex-col justify-between p-6 min-h-[220px] rounded-lg border-b-2 border-amber-500 card-matte-gradient hover:-translate-y-1 transition-all duration-300 hover:shadow-[0_10px_30px_-10px_rgba(120,53,15,0.5)] bg-gradient-to-br from-amber-950/40 to-yellow-950/40">
+<div>
+<span class="font-label text-[10px] tracking-widest text-amber-500/70 uppercase">Spreadsheet Realm</span>
+<h3 class="text-white font-serif-accent text-2xl mt-2">VANAHEIM</h3>
+</div>
+<p class="text-slate-400 font-serif-body text-sm mt-4">Excel and workbooks harmonized. Where unstructured cells find their divine order.</p>
+<div class="mt-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-500 text-sm">table_view</span>
+<span class="font-label text-[10px] uppercase tracking-tighter">Workbook Sync</span>
+</div>
+</div>
+<div class="group relative flex flex-col justify-between p-6 min-h-[220px] rounded-lg border-b-2 border-amber-500 card-matte-gradient hover:-translate-y-1 transition-all duration-300 hover:shadow-[0_10px_30px_-10px_rgba(6,78,59,0.5)] bg-gradient-to-br from-emerald-950/40 to-green-950/40">
+<div>
+<span class="font-label text-[10px] tracking-widest text-amber-500/70 uppercase">Transit Realm</span>
+<h3 class="text-white font-serif-accent text-2xl mt-2">MIDGARD</h3>
+</div>
+<p class="text-slate-400 font-serif-body text-sm mt-4">Email, SFTP, and legacy gateways. The vital bridge connecting the mortal and digital.</p>
+<div class="mt-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-500 text-sm">terminal</span>
+<span class="font-label text-[10px] uppercase tracking-tighter">Legacy Protocol</span>
+</div>
+</div>
+<!-- Row 2 -->
+<div class="group relative flex flex-col justify-between p-6 min-h-[220px] rounded-lg border-b-2 border-amber-500 card-matte-gradient hover:-translate-y-1 transition-all duration-300 hover:shadow-[0_10px_30px_-10px_rgba(8,145,178,0.5)] bg-gradient-to-br from-sky-950/40 to-cyan-950/40">
+<div>
+<span class="font-label text-[10px] tracking-widest text-amber-500/70 uppercase">Cloud Realm</span>
+<h3 class="text-white font-serif-accent text-2xl mt-2">ALFHEIM</h3>
+</div>
+<p class="text-slate-400 font-serif-body text-sm mt-4">Cloud APIs and serverless light. Pure connectivity through the luminous upper air.</p>
+<div class="mt-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-500 text-sm">cloud</span>
+<span class="font-label text-[10px] uppercase tracking-tighter">API Weaver</span>
+</div>
+</div>
+<div class="group relative flex flex-col justify-between p-6 min-h-[220px] rounded-lg border-b-2 border-amber-500 card-matte-gradient hover:-translate-y-1 transition-all duration-300 hover:shadow-[0_10px_30px_-10px_rgba(154,52,18,0.5)] bg-gradient-to-br from-orange-950/40 to-red-950/40">
+<div>
+<span class="font-label text-[10px] tracking-widest text-amber-500/70 uppercase">Forge Realm</span>
+<h3 class="text-white font-serif-accent text-2xl mt-2">NIDAVELLIR</h3>
+</div>
+<p class="text-slate-400 font-serif-body text-sm mt-4">The transformation engine. Hammering raw data into masterwork payloads.</p>
+<div class="mt-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-500 text-sm">precision_manufacturing</span>
+<span class="font-label text-[10px] uppercase tracking-tighter">Logic Forge</span>
+</div>
+</div>
+<div class="group relative flex flex-col justify-between p-6 min-h-[220px] rounded-lg border-b-2 border-amber-500 card-matte-gradient hover:-translate-y-1 transition-all duration-300 hover:shadow-[0_10px_30px_-10px_rgba(159,18,57,0.5)] bg-gradient-to-br from-red-950/40 to-rose-950/40">
+<div>
+<span class="font-label text-[10px] tracking-widest text-amber-500/70 uppercase">Spark Realm</span>
+<h3 class="text-white font-serif-accent text-2xl mt-2">MUSPELHEIM</h3>
+</div>
+<p class="text-slate-400 font-serif-body text-sm mt-4">Real-time triggers and hot-path execution. Ignite your workflow with instant heat.</p>
+<div class="mt-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-500 text-sm">bolt</span>
+<span class="font-label text-[10px] uppercase tracking-tighter">Live Trigger</span>
+</div>
+</div>
+<!-- Row 3 -->
+<div class="group relative flex flex-col justify-between p-6 min-h-[220px] rounded-lg border-b-2 border-amber-500 card-matte-gradient hover:-translate-y-1 transition-all duration-300 hover:shadow-[0_10px_30px_-10px_rgba(68,64,60,0.5)] bg-gradient-to-br from-stone-900/40 to-stone-800/40">
+<div>
+<span class="font-label text-[10px] tracking-widest text-amber-500/70 uppercase">Goliath Realm</span>
+<h3 class="text-white font-serif-accent text-2xl mt-2">JÖTUNHEIM</h3>
+</div>
+<p class="text-slate-400 font-serif-body text-sm mt-4">Bulk data storage and massive ingestion. Where petabytes rest like ancient stone.</p>
+<div class="mt-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-500 text-sm">data_object</span>
+<span class="font-label text-[10px] uppercase tracking-tighter">Bulk Gravity</span>
+</div>
+</div>
+<div class="group relative flex flex-col justify-between p-6 min-h-[220px] rounded-lg border-b-2 border-amber-500 card-matte-gradient hover:-translate-y-1 transition-all duration-300 hover:shadow-[0_10px_30px_-10px_rgba(30,58,138,0.5)] bg-gradient-to-br from-slate-900/40 to-blue-950/40">
+<div>
+<span class="font-label text-[10px] tracking-widest text-amber-500/70 uppercase">Mist Realm</span>
+<h3 class="text-white font-serif-accent text-2xl mt-2">NIFLHEIM</h3>
+</div>
+<p class="text-slate-400 font-serif-body text-sm mt-4">Compliance, retention, and cold storage. Immutable records frozen in the ether.</p>
+<div class="mt-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-500 text-sm">gavel</span>
+<span class="font-label text-[10px] uppercase tracking-tighter">Cold Archive</span>
+</div>
+</div>
+<div class="group relative flex flex-col justify-between p-6 min-h-[220px] rounded-lg border-b-2 border-amber-500 card-matte-gradient hover:-translate-y-1 transition-all duration-300 hover:shadow-[0_10px_30px_-10px_rgba(88,28,135,0.5)] bg-gradient-to-br from-purple-950/40 to-violet-950/40">
+<div>
+<span class="font-label text-[10px] tracking-widest text-amber-500/70 uppercase">Shadow Realm</span>
+<h3 class="text-white font-serif-accent text-2xl mt-2">HELHEIM</h3>
+</div>
+<p class="text-slate-400 font-serif-body text-sm mt-4">Error recovery and dead-letter queues. Resurrect failed packets from the deep.</p>
+<div class="mt-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-500 text-sm">healing</span>
+<span class="font-label text-[10px] uppercase tracking-tighter">Auto Recovery</span>
+</div>
+</div>
+</div>
+<!-- Footer Text -->
+<footer class="mt-20 max-w-4xl mx-auto px-6 text-center">
+<div class="w-24 h-[1px] bg-amber-500/20 mx-auto mb-6"></div>
+<p class="font-serif-body italic text-slate-500 text-base leading-relaxed">
+                Connected by the Bifrost — data flows between any realm, on any schedule, forever.
+            </p>
+<div class="w-24 h-[1px] bg-amber-500/20 mx-auto mt-6"></div>
+</footer>
+</main>
+<!-- Global Footer -->
+<footer class="bg-slate-950 py-12 border-t border-slate-900 w-full">
+<div class="max-w-7xl mx-auto px-8 flex flex-col md:flex-row justify-between items-center gap-6">
+<div class="text-lg font-serif text-slate-200">Hermod</div>
+<div class="flex flex-wrap justify-center gap-8">
+<a class="text-slate-500 hover:text-slate-200 transition-colors font-label text-[10px] tracking-widest uppercase" href="#">The Nine Realms</a>
+<a class="text-slate-500 hover:text-slate-200 transition-colors font-label text-[10px] tracking-widest uppercase" href="#">Runes</a>
+<a class="text-slate-500 hover:text-slate-200 transition-colors font-label text-[10px] tracking-widest uppercase" href="#">Privacy</a>
+<a class="text-slate-500 hover:text-slate-200 transition-colors font-label text-[10px] tracking-widest uppercase" href="#">Contact</a>
+</div>
+<div class="text-slate-500 font-serif text-sm">
+                © 2024 Hermod — Electric Norse. Bound by the World Tree.
+            </div>
+</div>
+</footer>
+</body></html>

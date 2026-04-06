@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Hermod — Swift Messenger of Your Data</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400..800;1,400..800&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&amp;family=Space+Grotesk:wght@300..700&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-secondary-container": "#66625d",
+                        "primary-fixed-dim": "#f2bf50",
+                        "on-tertiary-container": "#6b0d11",
+                        "secondary-container": "#e5dfd8",
+                        "on-tertiary-fixed-variant": "#852221",
+                        "on-secondary-fixed": "#1d1b17",
+                        "on-surface-variant": "#4f4636",
+                        "surface-container-highest": "#efe0cd",
+                        "on-tertiary": "#ffffff",
+                        "tertiary-fixed": "#ffdad7",
+                        "on-primary-fixed": "#261900",
+                        "on-primary-fixed-variant": "#5c4300",
+                        "surface-tint": "#7a5900",
+                        "surface-dim": "#e6d8c5",
+                        "primary-fixed": "#ffdea1",
+                        "surface-container": "#fbecd9",
+                        "outline-variant": "#d2c5b0",
+                        "secondary-fixed-dim": "#cbc6bf",
+                        "surface-container-high": "#f5e6d3",
+                        "primary-container": "#c4962a",
+                        "inverse-on-surface": "#feefdb",
+                        "on-background": "#221a0f",
+                        "error": "#ba1a1a",
+                        "on-primary": "#ffffff",
+                        "inverse-surface": "#372f22",
+                        "on-secondary": "#ffffff",
+                        "on-secondary-fixed-variant": "#494641",
+                        "on-surface": "#221a0f",
+                        "primary": "#7a5900",
+                        "surface-container-low": "#fff2e2",
+                        "on-primary-container": "#453100",
+                        "tertiary-fixed-dim": "#ffb3ad",
+                        "on-error": "#ffffff",
+                        "secondary": "#615e59",
+                        "tertiary": "#a53936",
+                        "error-container": "#ffdad6",
+                        "tertiary-container": "#f6766e",
+                        "background": "#fff8f3",
+                        "surface-variant": "#efe0cd",
+                        "surface": "#fff8f3",
+                        "surface-bright": "#fff8f3",
+                        "on-error-container": "#93000a",
+                        "secondary-fixed": "#e8e1db",
+                        "on-tertiary-fixed": "#410004",
+                        "outline": "#807664",
+                        "surface-container-lowest": "#ffffff",
+                        "inverse-primary": "#f2bf50"
+                    },
+                    fontFamily: {
+                        "headline": ["EB Garamond", "serif"],
+                        "body": ["Source Serif 4", "serif"],
+                        "label": ["Space Grotesk", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+                },
+            },
+        }
+    </script>
+<style>.material-symbols-outlined {
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24
+    }
+body {
+    font-family: "Source Serif 4", serif;
+    background-color: #fff8f3;
+    color: #221a0f
+    }
+.hero-gradient {
+    background: radial-gradient(circle at top right, rgba(196, 150, 42, 0.08), transparent 50%), radial-gradient(circle at bottom left, rgba(122, 89, 0, 0.05), transparent 50%)
+    }
+.parchment-texture {
+    background-image: url(https://lh3.googleusercontent.com/aida-public/AB6AXuCXJtX5NFUu8ArdHGJ6zZ9EOugTC9VNsfm09MiWLn7mT1pQ_O-WeKLVZa4p0cSfnzCKR_Ty5yB3lzmCqrrG40q7Mh7o7lvTqJ1x2GvfHVX4fW5spgeOTrg3pyPmiErUUwfngudwk8zaKhgI-PZEUpCKN20Bk6UMyDzmsjVRoNaPyYlcCIwzikUoC_sgAvrbs49k_FNsd3219pn8ko3fHCKNWFvtxnrzh1XpfItosRhcFpG8Bx5khFohEhi2EqRKNHxRdlaSC1_3j58g)
+    }
+.gold-foil-text {
+    background: linear-gradient(135deg, #7a5900 0%, #c4962a 50%, #7a5900 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent
+    }
+.bento-card {
+    background-color: #fbecd9;
+    transition: transform 0.3s ease, background-color 0.3s ease
+    }
+.bento-card:hover {
+    background-color: #efe0cd;
+    transform: translatey(-4px)
+    }</style>
+</head>
+<body class="bg-surface selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopNavBar -->
+<nav class="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-8 py-4 backdrop-blur-md bg-stone-950/90 border-b border-stone-800/50 shadow-xl shadow-stone-950/50">
+<div class="text-2xl font-headline font-bold text-yellow-600 uppercase tracking-widest">
+            ᚺ Hermod
+        </div>
+<div class="hidden md:flex items-center gap-8">
+<a class="text-yellow-500 font-bold border-b-2 border-yellow-600 pb-1 font-headline tracking-tight" href="#">How It Works</a>
+<a class="text-stone-400 font-label text-sm hover:text-stone-200 transition-colors" href="#">The Realms</a>
+<a class="text-stone-400 font-label text-sm hover:text-stone-200 transition-colors" href="#">The Forge</a>
+<a class="text-stone-400 font-label text-sm hover:text-stone-200 transition-colors" href="#">Pricing</a>
+<a class="text-stone-400 font-label text-sm hover:text-stone-200 transition-colors" href="#">Docs</a>
+</div>
+<button class="bg-primary hover:bg-primary-container text-on-primary px-6 py-2 rounded font-label font-bold transition-all active:scale-95">
+            Get Started
+        </button>
+</nav>
+<!-- Hero Section -->
+<header class="relative pt-40 pb-24 overflow-hidden hero-gradient parchment-texture">
+<div class="max-w-7xl mx-auto px-8 grid lg:grid-cols-2 gap-16 items-center">
+<div class="z-10">
+<span class="font-label text-xs tracking-[0.2em] uppercase text-primary font-bold mb-4 block">Ancient Mastery • Modern Performance</span>
+<h1 class="text-6xl md:text-8xl font-headline font-bold leading-tight text-on-surface mb-6">
+                    Your Data, <span class="gold-foil-text italic font-normal">Delivered.</span>
+</h1>
+<p class="text-xl md:text-2xl font-body text-on-surface-variant max-w-xl mb-10 leading-relaxed">
+                    Query any database. Forge it into any format. Deliver it to any destination. Scheduled. Automated. Reliable.
+                </p>
+<div class="flex flex-wrap gap-4">
+<button class="px-8 py-4 bg-gradient-to-r from-primary to-primary-container text-on-primary font-label font-bold rounded-lg shadow-lg hover:shadow-primary/20 transition-all flex items-center gap-2">
+                        Start Free <span class="material-symbols-outlined text-lg">bolt</span>
+</button>
+<button class="px-8 py-4 bg-surface-container-high text-primary font-label font-bold rounded-lg hover:bg-surface-container-highest transition-all">
+                        See How It Works
+                    </button>
+</div>
+</div>
+<div class="relative">
+<div class="absolute -inset-4 bg-primary-container/10 blur-3xl rounded-full"></div>
+<div class="relative bg-surface-container-highest p-8 rounded-xl border border-outline-variant/30 shadow-2xl">
+<div class="flex flex-col gap-6">
+<!-- Visual Flow -->
+<div class="flex items-center justify-between gap-4">
+<div class="flex flex-col items-center gap-2 p-4 bg-surface rounded border border-outline-variant/50 w-32 shadow-sm">
+<span class="material-symbols-outlined text-primary text-3xl">database</span>
+<span class="font-label text-[10px] uppercase font-bold text-on-surface-variant">Asgard</span>
+</div>
+<div class="flex-1 h-[2px] bg-gradient-to-r from-primary to-primary-container relative">
+<span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-surface px-2 text-xs font-label text-primary">⚡</span>
+</div>
+<div class="flex flex-col items-center gap-2 p-4 bg-surface rounded border border-outline-variant/50 w-32 shadow-sm">
+<span class="material-symbols-outlined text-primary text-3xl">build</span>
+<span class="font-label text-[10px] uppercase font-bold text-on-surface-variant">Nidavellir</span>
+</div>
+<div class="flex-1 h-[2px] bg-gradient-to-r from-primary to-primary-container relative">
+<span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-surface px-2 text-xs font-label text-primary">⚒</span>
+</div>
+<div class="flex flex-col items-center gap-2 p-4 bg-surface rounded border border-outline-variant/50 w-32 shadow-sm">
+<span class="material-symbols-outlined text-primary text-3xl">mail</span>
+<span class="font-label text-[10px] uppercase font-bold text-on-surface-variant">Midgard</span>
+</div>
+</div>
+<!-- Status Badge -->
+<div class="flex items-center justify-center">
+<div class="bg-surface-container-low border border-primary/20 px-4 py-2 rounded-full flex items-center gap-3">
+<span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+<span class="font-label text-sm text-on-surface font-medium">Every Monday, 7:00 AM</span>
+</div>
+</div>
+<img class="rounded-lg shadow-inner grayscale contrast-125 opacity-80 mix-blend-multiply" data-alt="Technical dashboard showing data pipeline logs with a warm amber interface on a dark wooden desk" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCAMSZPrCG4k1J-iTEKIaF-IC6LeTW8w_-pWmmIZxCiLItkO06bQWm-KtY9VYHg7vJ9yFk6BOISOlPXQVo9pVLa_GHwVPzMZm60k_fEhNnRWnhWmN0KvF01ys5TkkPDZlQCSvquyiGba5s9rAT-e3oC7UpvqKscNvDb-w02-klXWm2JEKYy8tqifzN9tcEKQGRTNegEpENcOJcutKHtufCZUvWeplAsI3-nrLjz6KCvpdS9h4wsDRmAmCmkC9nO2nOFZDtyRrBT8pSr"/>
+</div>
+</div>
+</div>
+</div>
+</header>
+<!-- Social Proof -->
+<section class="py-12 bg-surface-dim/30 border-y border-outline-variant/10 overflow-hidden">
+<div class="max-w-7xl mx-auto px-8">
+<p class="font-label text-[10px] uppercase tracking-[0.3em] text-center text-outline mb-10 font-bold">Trusted by the most elite data teams</p>
+<div class="flex flex-wrap justify-center items-center gap-12 md:gap-24 opacity-60 grayscale brightness-50">
+<span class="font-headline text-3xl font-bold">VALHALLA DATA</span>
+<span class="font-headline text-3xl font-bold">ODIN SQUASH</span>
+<span class="font-headline text-3xl font-bold">RUNIC ANALYTICS</span>
+<span class="font-headline text-3xl font-bold">FJORD TECH</span>
+<span class="font-headline text-3xl font-bold">LONGSHIP INC</span>
+</div>
+</div>
+</section>
+<!-- How It Works -->
+<section class="py-24 bg-surface px-8" id="how-it-works">
+<div class="max-w-7xl mx-auto">
+<div class="text-center mb-20">
+<h2 class="text-5xl font-headline font-bold mb-4">The Scribe's Journey</h2>
+<div class="w-24 h-1 bg-primary mx-auto"></div>
+</div>
+<div class="grid md:grid-cols-3 gap-12 relative">
+<!-- Connective Line -->
+<div class="hidden md:block absolute top-1/3 left-0 w-full h-px bg-outline-variant/30 z-0"></div>
+<!-- Step 1 -->
+<div class="relative z-10 flex flex-col items-center text-center group">
+<div class="w-20 h-20 rounded-full bg-surface-container-high border-2 border-primary flex items-center justify-center mb-6 group-hover:bg-primary transition-all duration-500">
+<span class="material-symbols-outlined text-primary text-3xl group-hover:text-on-primary">anchor</span>
+</div>
+<h3 class="font-headline text-2xl font-bold mb-4">Pick Up</h3>
+<p class="font-body text-on-surface-variant leading-relaxed">Connect to any realm. SQL, APIs, or raw CSVs. Hermod arrives and gathers the essence of your raw data.</p>
+</div>
+<!-- Step 2 -->
+<div class="relative z-10 flex flex-col items-center text-center group">
+<div class="w-20 h-20 rounded-full bg-surface-container-high border-2 border-primary flex items-center justify-center mb-6 group-hover:bg-primary transition-all duration-500">
+<span class="material-symbols-outlined text-primary text-3xl group-hover:text-on-primary">hardware</span>
+</div>
+<h3 class="font-headline text-2xl font-bold mb-4">Forge</h3>
+<p class="font-body text-on-surface-variant leading-relaxed">Transmute raw bytes into golden insights. Filter, map, and join. The hammer of Nidavellir shapes your vision.</p>
+</div>
+<!-- Step 3 -->
+<div class="relative z-10 flex flex-col items-center text-center group">
+<div class="w-20 h-20 rounded-full bg-surface-container-high border-2 border-primary flex items-center justify-center mb-6 group-hover:bg-primary transition-all duration-500">
+<span class="material-symbols-outlined text-primary text-3xl group-hover:text-on-primary">send</span>
+</div>
+<h3 class="font-headline text-2xl font-bold mb-4">Deliver</h3>
+<p class="font-body text-on-surface-variant leading-relaxed">Swift as Sleipnir, your data reaches its destination. Whether an inbox or a warehouse, it arrives without fail.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- The Nine Realms -->
+<section class="py-24 bg-surface-dim/40 parchment-texture px-8 relative overflow-hidden" id="the-realms">
+<div class="max-w-7xl mx-auto">
+<div class="flex justify-between items-end mb-16">
+<div>
+<span class="font-label text-xs tracking-widest uppercase text-primary font-bold mb-2 block">Connectors &amp; Destinations</span>
+<h2 class="text-5xl font-headline font-bold">The Nine Realms</h2>
+</div>
+<div class="hidden lg:block text-right max-w-xs italic font-body text-on-surface-variant">
+                    "From the heights of Asgard to the depths of Helheim, no data source is beyond the reach of the messenger."
+                </div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<!-- Asgard -->
+<div class="bento-card p-8 rounded-lg border border-outline-variant/20 flex flex-col gap-4">
+<div class="flex justify-between items-start">
+<span class="text-4xl">⚡</span>
+<span class="font-label text-[10px] font-bold uppercase tracking-tighter text-primary bg-primary/5 px-2 py-1 rounded">Highly Available</span>
+</div>
+<div>
+<h4 class="font-headline text-2xl font-bold">ASGARD</h4>
+<span class="font-label text-xs uppercase text-on-surface-variant opacity-70">Databases</span>
+</div>
+<p class="font-body text-sm text-on-surface-variant flex-grow">SQL Server, PostgreSQL, MySQL, BigQuery, NetSuite. High-performance elite sources.</p>
+<div class="flex gap-2 flex-wrap">
+<div class="px-2 py-1 bg-surface-container text-[10px] font-label border border-outline-variant">POSTGRES</div>
+<div class="px-2 py-1 bg-surface-container text-[10px] font-label border border-outline-variant">SNOWFLAKE</div>
+</div>
+</div>
+<!-- Vanaheim -->
+<div class="bento-card p-8 rounded-lg border border-outline-variant/20 flex flex-col gap-4">
+<span class="text-4xl">📜</span>
+<div>
+<h4 class="font-headline text-2xl font-bold">VANAHEIM</h4>
+<span class="font-label text-xs uppercase text-on-surface-variant opacity-70">Excel &amp; Workbooks</span>
+</div>
+<p class="font-body text-sm text-on-surface-variant flex-grow">Automate the extraction of ancient scrolls (.xlsx). No more manual copy-pasting from spreadsheets.</p>
+</div>
+<!-- Midgard -->
+<div class="bento-card p-8 rounded-lg border border-outline-variant/20 flex flex-col gap-4">
+<span class="text-4xl">🌍</span>
+<div>
+<h4 class="font-headline text-2xl font-bold">MIDGARD</h4>
+<span class="font-label text-xs uppercase text-on-surface-variant opacity-70">Email &amp; SFTP</span>
+</div>
+<p class="font-body text-sm text-on-surface-variant flex-grow">Gmail API, SMTP, SFTP. Delivery to the mortal realm where business decisions are made.</p>
+</div>
+<!-- Alfheim -->
+<div class="bento-card p-8 rounded-lg border border-outline-variant/20 flex flex-col gap-4">
+<span class="text-4xl">✦</span>
+<div>
+<h4 class="font-headline text-2xl font-bold">ALFHEIM</h4>
+<span class="font-label text-xs uppercase text-on-surface-variant opacity-70">Cloud &amp; APIs</span>
+</div>
+<p class="font-body text-sm text-on-surface-variant flex-grow">REST, SharePoint, OneDrive, S3. Light-speed connections to modern ethereal services.</p>
+</div>
+<!-- Nidavellir -->
+<div class="bento-card p-8 rounded-lg border border-outline-variant/20 bg-surface-container-highest flex flex-col gap-4">
+<span class="text-4xl">⚒</span>
+<div>
+<h4 class="font-headline text-2xl font-bold gold-foil-text">NIDAVELLIR</h4>
+<span class="font-label text-xs uppercase text-on-surface-variant opacity-70">The Forge</span>
+</div>
+<p class="font-body text-sm text-on-surface-variant flex-grow">Column mapping, data casting, and SQL transformation. The engine of pure transmutation.</p>
+</div>
+<!-- Muspelheim -->
+<div class="bento-card p-8 rounded-lg border border-outline-variant/20 flex flex-col gap-4">
+<span class="text-4xl">🔥</span>
+<div>
+<h4 class="font-headline text-2xl font-bold">MUSPELHEIM</h4>
+<span class="font-label text-xs uppercase text-on-surface-variant opacity-70">Real-Time Triggers</span>
+</div>
+<p class="font-body text-sm text-on-surface-variant flex-grow">Webhooks and database triggers. Instantaneous fire for urgent data needs.</p>
+</div>
+<!-- Jötunheim -->
+<div class="bento-card p-8 rounded-lg border border-outline-variant/20 flex flex-col gap-4">
+<span class="text-4xl">⛰️</span>
+<div>
+<h4 class="font-headline text-2xl font-bold">JÖTUNHEIM</h4>
+<span class="font-label text-xs uppercase text-on-surface-variant opacity-70">Bulk Data</span>
+</div>
+<p class="font-body text-sm text-on-surface-variant flex-grow">Streaming CSV, 2GB+ files. For the giants of data that require massive strength to move.</p>
+</div>
+<!-- Niflheim -->
+<div class="bento-card p-8 rounded-lg border border-outline-variant/20 flex flex-col gap-4">
+<span class="text-4xl">❄️</span>
+<div>
+<h4 class="font-headline text-2xl font-bold">NIFLHEIM</h4>
+<span class="font-label text-xs uppercase text-on-surface-variant opacity-70">Cold Storage</span>
+</div>
+<p class="font-body text-sm text-on-surface-variant flex-grow">Azure Blob, S3 Glacier, long-term archives. Frozen states for eternal preservation.</p>
+</div>
+<!-- Helheim -->
+<div class="bento-card p-8 rounded-lg border border-outline-variant/20 flex flex-col gap-4">
+<span class="text-4xl">💀</span>
+<div>
+<h4 class="font-headline text-2xl font-bold">HELHEIM</h4>
+<span class="font-label text-xs uppercase text-on-surface-variant opacity-70">Error Recovery</span>
+</div>
+<p class="font-body text-sm text-on-surface-variant flex-grow">Auto-retry, exponential backoff. No data packet is truly lost in the underworld.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Pricing / The Forge -->
+<section class="py-24 bg-surface px-8" id="pricing">
+<div class="max-w-5xl mx-auto">
+<div class="text-center mb-20">
+<h2 class="text-5xl font-headline font-bold mb-4">Select Your Hammer</h2>
+<p class="font-body text-on-surface-variant max-w-xl mx-auto">Choose the strength of your data transformation.</p>
+</div>
+<div class="grid md:grid-cols-2 gap-8">
+<!-- Loki -->
+<div class="border border-outline-variant p-10 rounded-xl relative overflow-hidden group">
+<div class="absolute top-4 right-4 text-outline-variant/20 font-headline text-6xl font-bold">LOKI</div>
+<h3 class="font-headline text-3xl font-bold mb-2">Free Tier</h3>
+<div class="text-4xl font-headline font-bold text-on-surface mb-6">$0 <span class="text-lg font-body font-normal text-on-surface-variant">/ forever</span></div>
+<ul class="space-y-4 mb-10">
+<li class="flex items-center gap-3 font-body text-on-surface-variant">
+<span class="material-symbols-outlined text-sm text-primary">check_circle</span>
+                            Manual SQL configuration
+                        </li>
+<li class="flex items-center gap-3 font-body text-on-surface-variant">
+<span class="material-symbols-outlined text-sm text-primary">check_circle</span>
+                            3 Active Pipelines
+                        </li>
+<li class="flex items-center gap-3 font-body text-on-surface-variant">
+<span class="material-symbols-outlined text-sm text-primary">check_circle</span>
+                            Daily Scheduling
+                        </li>
+</ul>
+<button class="w-full py-4 border-2 border-primary text-primary font-label font-bold rounded-lg hover:bg-primary hover:text-on-primary transition-all">
+                        Pick Up the Hammer
+                    </button>
+</div>
+<!-- Mjölnir -->
+<div class="bg-surface-container-highest border-2 border-primary p-10 rounded-xl relative overflow-hidden shadow-2xl">
+<div class="absolute -top-10 -right-10 w-40 h-40 bg-primary/10 rounded-full blur-3xl"></div>
+<div class="absolute top-4 right-4 text-primary/10 font-headline text-5xl font-bold">MJÖLNIR</div>
+<div class="inline-block bg-primary text-on-primary font-label text-[10px] px-2 py-1 rounded mb-4 uppercase font-bold tracking-widest">AI-Powered Forge</div>
+<h3 class="font-headline text-3xl font-bold mb-2">Premium</h3>
+<div class="text-4xl font-headline font-bold text-on-surface mb-6">$299 <span class="text-lg font-body font-normal text-on-surface-variant">/ month</span></div>
+<ul class="space-y-4 mb-10">
+<li class="flex items-center gap-3 font-body text-on-surface-variant">
+<span class="material-symbols-outlined text-sm text-primary" style="font-variation-settings: 'FILL' 1;">stars</span>
+                            AI Blueprint Generation (Setup once)
+                        </li>
+<li class="flex items-center gap-3 font-body text-on-surface-variant">
+<span class="material-symbols-outlined text-sm text-primary">check_circle</span>
+                            Unlimited Active Pipelines
+                        </li>
+<li class="flex items-center gap-3 font-body text-on-surface-variant">
+<span class="material-symbols-outlined text-sm text-primary">check_circle</span>
+                            Real-time Triggers
+                        </li>
+<li class="flex items-center gap-3 font-body text-on-surface-variant">
+<span class="material-symbols-outlined text-sm text-primary">check_circle</span>
+                            99.99% Bifrost Uptime SLA
+                        </li>
+</ul>
+<button class="w-full py-4 bg-gradient-to-r from-primary to-primary-container text-on-primary font-label font-bold rounded-lg shadow-xl hover:scale-[1.02] transition-all">
+                        Wield Mjölnir
+                    </button>
+</div>
+</div>
+</div>
+</section>
+<!-- CTA Section -->
+<section class="py-24 bg-stone-950 text-white relative px-8">
+<div class="absolute inset-0 opacity-10 mix-blend-overlay">
+<img class="w-full h-full object-cover" data-alt="Close-up of molten gold being poured into a mold in a dark, atmospheric forge with glowing sparks" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBpKeweAhHGIR6uuzVZ7qdkLcS2ItayWaB9duj-GkneM-tPg8Xe9fHyMGtQI6iznS86GRVHDD7yatXYCYcWfKrfjJ5Y9rkq-8ozzGJ95xqWdOvC_PUPIQupzXwBf2078aPhV1VpzvoSy_GbQ39U4FeePPiG6RBN3ZZcmd_bgLAMvnDOBD4d2RlIa4ylbhgEj4xDT8akeUa94DKtcH4QMUpae103-i1E83oy9rZMVHUuaztDCt2wjop7T88hyEMUNvFy0aC3UQ-G2VEX"/>
+</div>
+<div class="max-w-4xl mx-auto text-center relative z-10">
+<h2 class="text-6xl font-headline font-bold mb-8">Begin Your Journey.</h2>
+<p class="text-2xl font-body text-stone-400 mb-12 italic">
+                "The messenger of the gods doesn't forget, doesn't sleep, and doesn't miss a deadline."
+            </p>
+<div class="flex flex-wrap justify-center gap-6">
+<button class="px-10 py-5 bg-yellow-600 text-stone-950 font-label font-bold rounded hover:bg-yellow-500 transition-colors uppercase tracking-widest">
+                    Start Free
+                </button>
+<button class="px-10 py-5 border border-stone-700 text-white font-label font-bold rounded hover:bg-stone-900 transition-colors uppercase tracking-widest">
+                    Read Docs
+                </button>
+</div>
+</div>
+</section>
+<!-- Footer -->
+<footer class="w-full py-16 px-12 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8 bg-stone-950 text-stone-400 font-body border-t border-stone-800">
+<div class="col-span-2 lg:col-span-1">
+<div class="text-xl font-headline text-yellow-600 mb-6">ᚺ Hermod</div>
+<p class="text-sm font-label text-stone-500 max-w-xs mb-8">Automating the data bridges between realms with Norse precision and divine speed.</p>
+</div>
+<div class="flex flex-col gap-4">
+<h5 class="text-white font-label text-xs uppercase tracking-widest font-bold mb-2">Platform</h5>
+<a class="text-stone-500 font-label text-sm hover:text-yellow-500 underline decoration-stone-700 underline-offset-4 transition-opacity" href="#">How It Works</a>
+<a class="text-stone-500 font-label text-sm hover:text-yellow-500 underline decoration-stone-700 underline-offset-4 transition-opacity" href="#">The Realms</a>
+<a class="text-stone-500 font-label text-sm hover:text-yellow-500 underline decoration-stone-700 underline-offset-4 transition-opacity" href="#">The Forge</a>
+</div>
+<div class="flex flex-col gap-4">
+<h5 class="text-white font-label text-xs uppercase tracking-widest font-bold mb-2">Resources</h5>
+<a class="text-stone-500 font-label text-sm hover:text-yellow-500 underline decoration-stone-700 underline-offset-4 transition-opacity" href="#">Pricing</a>
+<a class="text-stone-500 font-label text-sm hover:text-yellow-500 underline decoration-stone-700 underline-offset-4 transition-opacity" href="#">Docs</a>
+<a class="text-stone-500 font-label text-sm hover:text-yellow-500 underline decoration-stone-700 underline-offset-4 transition-opacity" href="#">Security</a>
+</div>
+<div class="flex flex-col gap-4">
+<h5 class="text-white font-label text-xs uppercase tracking-widest font-bold mb-2">Company</h5>
+<a class="text-stone-500 font-label text-sm hover:text-yellow-500 underline decoration-stone-700 underline-offset-4 transition-opacity" href="#">Privacy Policy</a>
+<a class="text-stone-500 font-label text-sm hover:text-yellow-500 underline decoration-stone-700 underline-offset-4 transition-opacity" href="#">Terms of Service</a>
+<a class="text-stone-500 font-label text-sm hover:text-yellow-500 underline decoration-stone-700 underline-offset-4 transition-opacity" href="#">Contact</a>
+</div>
+<div class="col-span-2 md:col-span-4 lg:col-span-5 border-t border-stone-800 pt-8 mt-8 flex justify-between items-center text-xs text-stone-600 font-label uppercase tracking-widest">
+<div>© 2026 Hermod — Swift Messenger of Your Data</div>
+<div class="flex gap-4">
+<span>Twitter</span>
+<span>Github</span>
+<span>Discord</span>
+</div>
+</div>
+</footer>
+</body></html>

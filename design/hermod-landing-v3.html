@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Hermod | Messenger of the Data Gods</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,300;0,400;0,700;1,400&amp;family=Noto+Serif:wght@300;400;600&amp;family=Space+Grotesk:wght@300;400;500;600;700&amp;family=EB+Garamond:ital,wght@0,400;0,700;1,400&amp;family=Source+Serif+4:ital,wght@0,300;0,400;0,600;1,400&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "outline": "#807665",
+              "inverse-primary": "#ecc165",
+              "on-error-container": "#93000a",
+              "secondary-fixed": "#f0e0d0",
+              "error-container": "#ffdad6",
+              "surface-tint": "#795900",
+              "surface": "#fff9ee",
+              "surface-variant": "#eae2ce",
+              "on-primary-container": "#fff0da",
+              "on-surface-variant": "#4e4637",
+              "secondary-fixed-dim": "#d3c4b5",
+              "tertiary-container": "#8e6800",
+              "on-secondary-fixed": "#221a11",
+              "on-error": "#ffffff",
+              "background": "#fff9ee",
+              "inverse-on-surface": "#f8f0dc",
+              "inverse-surface": "#343023",
+              "tertiary": "#6f5100",
+              "surface-container-high": "#f0e8d4",
+              "secondary": "#685c50",
+              "on-surface": "#1f1c0f",
+              "primary": "#6f5100",
+              "on-primary-fixed-variant": "#5c4300",
+              "surface-bright": "#fff9ee",
+              "surface-container-low": "#fbf3df",
+              "error": "#ba1a1a",
+              "primary-fixed-dim": "#ecc165",
+              "on-tertiary-fixed-variant": "#5c4300",
+              "surface-container": "#f5edd9",
+              "on-secondary-fixed-variant": "#4f453a",
+              "tertiary-fixed": "#ffdea1",
+              "outline-variant": "#d1c5b2",
+              "surface-container-highest": "#eae2ce",
+              "secondary-container": "#f0e0d0",
+              "primary-fixed": "#ffdfa0",
+              "surface-container-lowest": "#ffffff",
+              "on-tertiary-container": "#fff0da",
+              "on-tertiary": "#ffffff",
+              "on-secondary": "#ffffff",
+              "tertiary-fixed-dim": "#f2bf50",
+              "on-primary-fixed": "#261a00",
+              "on-tertiary-fixed": "#261900",
+              "on-background": "#1f1c0f",
+              "on-secondary-container": "#6e6256",
+              "surface-dim": "#e1dac6",
+              "primary-container": "#8b6914",
+              "on-primary": "#ffffff"
+            },
+            fontFamily: {
+              "headline": ["Newsreader", "EB Garamond", "serif"],
+              "body": ["Noto Serif", "Source Serif 4", "serif"],
+              "label": ["Space Grotesk", "sans-serif"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>.material-symbols-outlined {
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24
+    }
+.grainy-bg {
+    background-image: url(https://lh3.googleusercontent.com/aida-public/AB6AXuDhHPR_3JAV_G_pb61xBC2ySGRZ9HzMzc0nZY7iYefx0nhkFm2PBrbUr9Hf5RQKxsqhVBhr53YTXq9a5PdvB5de4eca0HilDo16VkmG786ua-cRXIw8sY6eba_QdAyLWQV4SyVWJaxGdjYRaemYEaeqY--8FZWiMkvtGOJw1jREdhIwZt1xC3_4SKyT3K7206xvPGp0B-sCY_bXqUcOA1gP--nMVVCIz_Tp19SY_j3WRMKaO62boVw6bTaOY5-1e5lRnlypJS9ZPQB_)
+    }
+.knotwork-watermark {
+    mask-image: url("data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><path d=\"M50 5 L60 25 L80 25 L65 40 L75 60 L50 45 L25 60 L35 40 L20 25 L40 25 Z\" fill=\"black\"/></svg>");
+    mask-repeat: no-repeat;
+    mask-position: center
+    }
+.glass-vellum {
+    background: rgba(255, 249, 238, 0.85);
+    backdrop-filter: blur(20px)
+    }</style>
+</head>
+<body class="bg-surface text-on-surface grainy-bg selection:bg-primary-fixed selection:text-on-primary-fixed">
+<!-- TopNavBar -->
+<nav class="fixed top-0 w-full z-50 bg-[#2D2A24] backdrop-blur-md opacity-95 flex justify-between items-center px-8 py-4 shadow-[0_40px_40px_-10px_rgba(34,26,17,0.06)]">
+<div class="flex items-center gap-3">
+<span class="text-primary-container text-2xl font-bold">ᚺ</span>
+<span class="text-2xl font-headline italic text-primary-container">Hermod</span>
+</div>
+<div class="hidden md:flex items-center gap-6">
+<a class="font-label text-sm font-medium tracking-tight text-primary-container border-b-2 border-primary-container pb-1 transition-colors duration-300" href="#">Bifrost</a>
+<span class="text-[#fff9ee] opacity-20">|</span>
+<a class="font-label text-sm font-medium tracking-tight text-[#fff9ee] opacity-80 hover:text-primary-container transition-colors duration-300" href="#">Midgard</a>
+<span class="text-[#fff9ee] opacity-20">|</span>
+<a class="font-label text-sm font-medium tracking-tight text-[#fff9ee] opacity-80 hover:text-primary-container transition-colors duration-300" href="#">Valhalla</a>
+<span class="text-[#fff9ee] opacity-20">|</span>
+<a class="font-label text-sm font-medium tracking-tight text-[#fff9ee] opacity-80 hover:text-primary-container transition-colors duration-300" href="#">Mimir</a>
+</div>
+<div class="flex items-center gap-4">
+<button class="font-label text-xs uppercase tracking-widest text-[#fff9ee] opacity-80 hover:opacity-100 transition-opacity">Login</button>
+<button class="bg-primary-container text-on-primary-container px-6 py-2 rounded-sm font-label text-sm font-semibold hover:bg-inverse-primary transition-all duration-300 active:scale-95">Summon Access</button>
+<span class="material-symbols-outlined text-[#fff9ee] opacity-80 cursor-pointer" data-icon="account_balance_wallet">account_balance_wallet</span>
+</div>
+</nav>
+<!-- Hero Section -->
+<header class="relative pt-48 pb-32 px-8 overflow-hidden">
+<!-- Subtle Knotwork Watermark -->
+<div class="absolute inset-0 flex items-center justify-center opacity-[0.04] pointer-events-none">
+<div class="w-[800px] h-[800px] border-[40px] border-primary rounded-full flex items-center justify-center">
+<span class="text-[400px]">ᚺ</span>
+</div>
+</div>
+<div class="max-w-6xl mx-auto text-center relative z-10">
+<p class="font-label text-sm tracking-[0.3em] text-secondary mb-6 uppercase">The Messenger of the Gods</p>
+<h1 class="font-headline text-7xl md:text-8xl lg:text-9xl text-on-surface leading-tight mb-8">
+                Your Data, <span class="text-primary-container italic">Delivered.</span>
+</h1>
+<p class="font-body text-xl md:text-2xl text-secondary max-w-3xl mx-auto leading-relaxed mb-12">
+                A legendary ledger for the modern cloud. Orchestrate complex data flows across realms with the speed of Hermod and the precision of the All-Father.
+            </p>
+<div class="flex flex-col md:flex-row items-center justify-center gap-6 mb-24">
+<button class="bg-primary-container text-on-primary-container px-10 py-4 rounded-sm font-label text-lg font-bold shadow-lg hover:bg-inverse-primary transition-all flex items-center gap-2">
+                    Start Free <span class="material-symbols-outlined" data-icon="bolt" data-weight="fill">bolt</span>
+</button>
+<button class="border-2 border-primary-container text-primary-container px-10 py-4 rounded-sm font-label text-lg font-bold hover:bg-surface-container-low transition-all">
+                    See How It Works
+                </button>
+</div>
+<!-- Pipeline Visualization -->
+<div class="max-w-4xl mx-auto">
+<div class="flex items-center justify-between relative">
+<div class="absolute top-1/2 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-primary-container to-transparent -translate-y-1/2"></div>
+<div class="relative z-10 flex flex-col items-center gap-4 bg-surface px-4">
+<div class="w-16 h-16 rounded-full border-2 border-primary-container flex items-center justify-center bg-surface shadow-xl">
+<span class="text-2xl">⚡</span>
+</div>
+<span class="font-label text-sm font-bold">ASGARD</span>
+<span class="text-[10px] text-outline">ᛒ Source</span>
+</div>
+<div class="relative z-10 flex flex-col items-center gap-4 bg-surface px-4">
+<div class="w-20 h-20 rounded-full border-2 border-primary-container flex items-center justify-center bg-surface shadow-2xl scale-110">
+<span class="text-3xl">⚒</span>
+</div>
+<span class="font-label text-sm font-bold">NIDAVELLIR</span>
+<span class="text-[10px] text-outline">ᛒ Forge</span>
+</div>
+<div class="relative z-10 flex flex-col items-center gap-4 bg-surface px-4">
+<div class="w-16 h-16 rounded-full border-2 border-primary-container flex items-center justify-center bg-surface shadow-xl">
+<span class="text-2xl">🌍</span>
+</div>
+<span class="font-label text-sm font-bold">MIDGARD</span>
+<span class="text-[10px] text-outline">ᛒ Destination</span>
+</div>
+</div>
+<p class="mt-12 font-label text-xs tracking-widest text-outline uppercase">Scheduled Delivery: Every Monday, 7:00 AM EST</p>
+</div>
+</div>
+</header>
+<!-- Social Proof Strip -->
+<section class="bg-[#EDE4CC] py-12 border-y border-outline-variant/30 overflow-hidden">
+<div class="max-w-7xl mx-auto px-8 flex flex-col md:flex-row items-center justify-between gap-8">
+<p class="font-label text-xs tracking-[0.2em] text-secondary shrink-0">TRUSTED BY DATA TEAMS AT</p>
+<div class="flex flex-wrap justify-center items-center gap-12 opacity-60 grayscale">
+<div class="font-headline text-2xl font-bold tracking-tighter">AESIR_CORP</div>
+<div class="font-headline text-2xl font-bold tracking-tighter">VALKYRIE.IO</div>
+<div class="font-headline text-2xl font-bold tracking-tighter">YGGDRASIL</div>
+<div class="font-headline text-2xl font-bold tracking-tighter">MJOLNIR_SYSTEMS</div>
+<div class="font-headline text-2xl font-bold tracking-tighter">FROST_DATA</div>
+</div>
+</div>
+</section>
+<!-- How It Works Section -->
+<section class="py-32 px-8 bg-surface-container-low">
+<div class="max-w-7xl mx-auto">
+<div class="mb-24 text-center">
+<p class="font-label text-sm tracking-[0.3em] text-secondary mb-4 uppercase">The Journey</p>
+<h2 class="font-headline text-5xl md:text-6xl text-on-surface">Three Steps. <span class="italic font-light">One Route.</span></h2>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-12">
+<!-- Card 1 -->
+<div class="glass-vellum p-10 rounded-lg border-l-4 border-primary-container shadow-sm hover:shadow-xl transition-all group">
+<div class="mb-8 opacity-20 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-4xl" data-icon="cloud_download">cloud_download</span>
+</div>
+<h3 class="font-headline text-3xl mb-4">Pick Up</h3>
+<p class="font-body text-secondary leading-relaxed">Extract data from any source—be it cloud silos or ancient legacy databases—with the speed of Sleipnir.</p>
+</div>
+<!-- Card 2 -->
+<div class="glass-vellum p-10 rounded-lg border-l-4 border-primary-container shadow-sm hover:shadow-xl transition-all group translate-y-8">
+<div class="mb-8 opacity-20 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-4xl" data-icon="auto_fix_high">auto_fix_high</span>
+</div>
+<h3 class="font-headline text-3xl mb-4">Forge</h3>
+<p class="font-body text-secondary leading-relaxed">Cleanse and transform your raw inputs in the fires of Nidavellir. High-performance schemas forged for eternity.</p>
+</div>
+<!-- Card 3 -->
+<div class="glass-vellum p-10 rounded-lg border-l-4 border-primary-container shadow-sm hover:shadow-xl transition-all group">
+<div class="mb-8 opacity-20 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-4xl" data-icon="local_shipping">local_shipping</span>
+</div>
+<h3 class="font-headline text-3xl mb-4">Deliver</h3>
+<p class="font-body text-secondary leading-relaxed">Secure, guaranteed delivery to your chosen destination. No packet left behind in the void of Ginnungagap.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Nine Realms Section -->
+<section class="py-32 px-8 bg-[#2D2A24] text-[#fff9ee]">
+<div class="max-w-7xl mx-auto">
+<div class="mb-24">
+<p class="font-label text-sm tracking-[0.3em] text-primary-container mb-4 uppercase">The Architecture</p>
+<h2 class="font-headline text-5xl md:text-6xl text-[#fff9ee]">The Nine Realms</h2>
+<div class="h-1 w-24 bg-primary-container mt-8"></div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+<!-- Realm 1: Asgard -->
+<div class="bg-[#1A1815] p-8 rounded-lg hover:ring-1 ring-primary-container transition-all group">
+<div class="text-3xl mb-6">🔱</div>
+<h4 class="font-label text-lg font-bold mb-2 tracking-tight">Asgard</h4>
+<p class="font-body text-sm opacity-60">High-availability master node cluster for divine orchestration.</p>
+</div>
+<!-- Realm 2: Vanaheim -->
+<div class="bg-[#1A1815] p-8 rounded-lg hover:ring-1 ring-emerald-600 transition-all group">
+<div class="text-3xl mb-6">🌿</div>
+<h4 class="font-label text-lg font-bold mb-2 tracking-tight">Vanaheim</h4>
+<p class="font-body text-sm opacity-60">Natural growth algorithms for predictive scaling and auto-healing.</p>
+</div>
+<!-- Realm 3: Midgard -->
+<div class="bg-[#1A1815] p-8 rounded-lg hover:ring-1 ring-blue-500 transition-all group">
+<div class="text-3xl mb-6">🌍</div>
+<h4 class="font-label text-lg font-bold mb-2 tracking-tight">Midgard</h4>
+<p class="font-body text-sm opacity-60">Primary gateway for all mortal-facing data applications.</p>
+</div>
+<!-- Realm 4: Alfheim -->
+<div class="bg-[#1A1815] p-8 rounded-lg hover:ring-1 ring-yellow-200 transition-all group">
+<div class="text-3xl mb-6">✨</div>
+<h4 class="font-label text-lg font-bold mb-2 tracking-tight">Alfheim</h4>
+<p class="font-body text-sm opacity-60">Light-speed delivery protocols for ultra-low latency transfers.</p>
+</div>
+<!-- Realm 5: Nidavellir -->
+<div class="bg-[#1A1815] p-8 rounded-lg hover:ring-1 ring-primary-container transition-all group">
+<div class="text-3xl mb-6">⚒</div>
+<h4 class="font-label text-lg font-bold mb-2 tracking-tight">Nidavellir</h4>
+<p class="font-body text-sm opacity-60">The core processing engine where complex ETL joins are forged.</p>
+</div>
+<!-- Realm 6: Muspelheim -->
+<div class="bg-[#1A1815] p-8 rounded-lg hover:ring-1 ring-red-600 transition-all group">
+<div class="text-3xl mb-6">🔥</div>
+<h4 class="font-label text-lg font-bold mb-2 tracking-tight">Muspelheim</h4>
+<p class="font-body text-sm opacity-60">Stress-testing environment for extreme data volatility.</p>
+</div>
+<!-- Realm 7: Jötunheim -->
+<div class="bg-[#1A1815] p-8 rounded-lg hover:ring-1 ring-stone-500 transition-all group">
+<div class="text-3xl mb-6">⛰</div>
+<h4 class="font-label text-lg font-bold mb-2 tracking-tight">Jötunheim</h4>
+<p class="font-body text-sm opacity-60">Massive cold-storage archives for petabyte-scale data lakes.</p>
+</div>
+<!-- Realm 8: Niflheim -->
+<div class="bg-[#1A1815] p-8 rounded-lg hover:ring-1 ring-sky-300 transition-all group">
+<div class="text-3xl mb-6">❄</div>
+<h4 class="font-label text-lg font-bold mb-2 tracking-tight">Niflheim</h4>
+<p class="font-body text-sm opacity-60">Encrypted backup vaults shielded by primordial ice protocols.</p>
+</div>
+<!-- Realm 9: Helheim -->
+<div class="bg-[#1A1815] p-8 rounded-lg hover:ring-1 ring-purple-900 transition-all group">
+<div class="text-3xl mb-6">💀</div>
+<h4 class="font-label text-lg font-bold mb-2 tracking-tight">Helheim</h4>
+<p class="font-body text-sm opacity-60">Dead-letter queues and error reconciliation chamber.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- CTA Section -->
+<section class="py-48 px-8 relative overflow-hidden bg-surface">
+<div class="max-w-4xl mx-auto text-center">
+<span class="text-primary-container text-6xl mb-12 block">ᚺ</span>
+<h2 class="font-headline text-6xl mb-8 text-on-surface">Begin Your <span class="italic">Journey.</span></h2>
+<p class="font-body text-xl text-secondary mb-12 max-w-2xl mx-auto">Join the ranks of data architects who have transcended modern limitations. The messenger is waiting for your signal.</p>
+<div class="flex flex-col md:flex-row items-center justify-center gap-6 mb-20">
+<button class="bg-primary-container text-on-primary-container px-12 py-5 rounded-sm font-label text-xl font-bold hover:bg-inverse-primary transition-all shadow-xl">
+                    Claim Your Access
+                </button>
+<button class="text-secondary font-label font-bold hover:text-primary transition-colors flex items-center gap-2">
+                    Request a Demo <span class="material-symbols-outlined" data-icon="arrow_right_alt">arrow_right_alt</span>
+</button>
+</div>
+<figure class="max-w-2xl mx-auto border-t border-outline-variant/30 pt-12">
+<blockquote class="font-body text-2xl italic text-on-surface mb-4">
+                    "The messenger of the gods doesn't forget, and neither does Hermod. Our data pipelines have never been more reliable."
+                </blockquote>
+<figcaption class="font-label text-sm tracking-widest text-primary-container font-bold">— ODIN, ARCHITECT AT VALHALLA CLOUD</figcaption>
+</figure>
+</div>
+</section>
+<!-- Footer -->
+<footer class="bg-[#2D2A24] py-24 px-12 text-[#fff9ee]">
+<div class="grid grid-cols-1 md:grid-cols-4 gap-12 w-full max-w-7xl mx-auto mb-20">
+<div>
+<h4 class="text-xl font-headline text-primary-container mb-8">Hermod Scribe</h4>
+<p class="font-body text-sm opacity-60 leading-relaxed mb-8">Modern data orchestration forged for the next millennium. Archival precision meets cloud-scale speed.</p>
+<div class="text-primary-container text-2xl font-bold">ᚺ</div>
+</div>
+<div>
+<p class="text-xs uppercase tracking-widest font-label text-primary-container mb-8">Product</p>
+<ul class="space-y-4 font-label text-sm opacity-60">
+<li class="hover:text-primary-container cursor-pointer transition-colors">Bifrost Pipeline</li>
+<li class="hover:text-primary-container cursor-pointer transition-colors">Nidavellir Engine</li>
+<li class="hover:text-primary-container cursor-pointer transition-colors">Security Sigils</li>
+<li class="hover:text-primary-container cursor-pointer transition-colors">Relic Connectors</li>
+</ul>
+</div>
+<div>
+<p class="text-xs uppercase tracking-widest font-label text-primary-container mb-8">Realms</p>
+<ul class="space-y-4 font-label text-sm opacity-60">
+<li class="hover:text-primary-container cursor-pointer transition-colors">Documentation</li>
+<li class="hover:text-primary-container cursor-pointer transition-colors">The Mead Hall</li>
+<li class="hover:text-primary-container cursor-pointer transition-colors">Service Status</li>
+<li class="hover:text-primary-container cursor-pointer transition-colors">Developer Runes</li>
+</ul>
+</div>
+<div>
+<p class="text-xs uppercase tracking-widest font-label text-primary-container mb-8">Company</p>
+<ul class="space-y-4 font-label text-sm opacity-60">
+<li class="hover:text-primary-container cursor-pointer transition-colors">About Us</li>
+<li class="hover:text-primary-container cursor-pointer transition-colors">Careers</li>
+<li class="hover:text-primary-container cursor-pointer transition-colors">Press</li>
+<li class="hover:text-primary-container cursor-pointer transition-colors">Contact</li>
+</ul>
+</div>
+</div>
+<div class="max-w-7xl mx-auto pt-12 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-6 text-xs font-label uppercase tracking-widest opacity-40">
+<p>© 2024 Hermod Scribe. Forged in the Cloud.</p>
+<div class="flex gap-8">
+<a class="hover:text-primary-container" href="#">Privacy</a>
+<a class="hover:text-primary-container" href="#">Terms</a>
+<a class="hover:text-primary-container" href="#">SLA</a>
+</div>
+</div>
+</footer>
+</body></html>
