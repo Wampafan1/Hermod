@@ -44,18 +44,11 @@ export const POST = withAuth(async (req, session) => {
     return NextResponse.json({ error: msg }, { status: 422 });
   }
 
-  console.log("[MJOLNIR-DIAG] BEFORE parsed:", { columns: before.columns, columnCount: before.columns.length, rowCount: before.rowCount, headerRowIndex: before.headerRowIndex, formulaCount: before.formulas?.length ?? 0, columnGroups: before.columnGroups?.length ?? 0 });
-  console.log("[MJOLNIR-DIAG] AFTER parsed:", { columns: after.columns, columnCount: after.columns.length, rowCount: after.rowCount, headerRowIndex: after.headerRowIndex, formulaCount: after.formulas?.length ?? 0, columnGroups: after.columnGroups?.length ?? 0 });
-
   // Phase 1: Structural diff
   const diff = computeStructuralDiff(before, after);
 
-  console.log("[MJOLNIR-DIAG] Structural diff result:", { matchedColumns: diff.matchedColumns.length, removedColumns: diff.removedColumns, addedColumns: diff.addedColumns, deterministicStepCount: diff.deterministicSteps.length, deterministicStepTypes: diff.deterministicSteps.map(s => s.type), ambiguousCaseCount: diff.ambiguousCases.length, ambiguousCaseTypes: diff.ambiguousCases.map(c => c.type), formatChanges: diff.formatChanges.length, sortDetected: diff.sortDetected ?? null, reorderDetected: diff.reorderDetected });
-
   // Phase 2: AI inference (only if there are ambiguous cases)
   const aiResult = await runAiInference(diff, before, after, description);
-
-  console.log("[MJOLNIR-DIAG] AI inference result:", { stepCount: aiResult.steps.length, stepTypes: aiResult.steps.map(s => `${s.type}(order:${s.order}, conf:${s.confidence})`), warnings: aiResult.warnings });
 
   const allSteps = [...diff.deterministicSteps, ...aiResult.steps]
     .sort((a, b) => a.order - b.order);
@@ -85,8 +78,6 @@ export const POST = withAuth(async (req, session) => {
       }
     }
   }
-
-  console.log("[MJOLNIR-DIAG] Final merged steps:", JSON.stringify(allSteps, null, 2));
 
   // Phase 3: Extract AFTER workbook formatting for pixel-perfect mirror
   let afterFormatting = null;

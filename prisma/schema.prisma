@@ -91,7 +91,7 @@ model Tenant {
   logoUrl          String?
 
   // Subscription placeholder
-  plan             String             @default("loki")
+  plan             String             @default("heimdall")
   planExpiresAt    DateTime?
 
   createdAt        DateTime           @default(now())

@@ -113,7 +113,6 @@ export function validateStepConfig(step: ForgeStep): StepValidationResult {
   }
 
   if (missing.length > 0) {
-    console.log("[MJOLNIR-DIAG] Step validation FAILED:", { stepType: step.type, stepOrder: step.order, missingFields: missing, availableConfigKeys: Object.keys(config), fullConfig: config });
     warnings.push(
       `Step "${step.type}": missing required config field(s): ${missing.join(", ")}`
     );

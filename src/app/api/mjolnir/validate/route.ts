@@ -42,14 +42,8 @@ export const POST = withAuth(async (req, session) => {
     return NextResponse.json({ error: msg }, { status: 422 });
   }
 
-  console.log("[MJOLNIR-DIAG] VALIDATE — BEFORE re-parsed:", { columns: before.columns, columnCount: before.columns.length, rowCount: before.rowCount });
-  console.log("[MJOLNIR-DIAG] VALIDATE — AFTER re-parsed:", { columns: after.columns, columnCount: after.columns.length, rowCount: after.rowCount });
-  console.log("[MJOLNIR-DIAG] VALIDATE — Steps received:", { stepCount: steps.length, stepTypes: steps.map((s: any) => `${s.type}(order:${s.order})`) });
-
   // Run validation
   const result = validateBlueprint(steps, before, after, mode);
-
-  console.log("[MJOLNIR-DIAG] VALIDATE — Result:", { passed: result.passed, overallMatchRate: result.overallMatchRate, rowMatchMode: result.rowMatchMode, totalCells: result.totalCells, matchedCells: result.matchedCells, unmatchedAfterRows: result.unmatchedAfterRows, unmatchedExecutedRows: result.unmatchedExecutedRows, unsupportedSteps: result.unsupportedSteps, patternChecks: result.patternChecks, mismatchCount: result.mismatches?.length ?? 0, first5Mismatches: result.mismatches?.slice(0, 5), columnValidations: result.columnValidations?.filter(cv => cv.matchRate < 1.0) });
 
   return NextResponse.json(result);
 });

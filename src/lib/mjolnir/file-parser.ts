@@ -8,7 +8,7 @@
  *   Mjölnir: AI analyzes the first 20 raw rows → returns headerRow + confidence.
  *            Validated (cells must look like labels, not data). Falls back to
  *            heuristic on failure or low confidence.
- *   Freya:   Heuristic scoring — uniqueness, string-only, merge penalty, width match.
+ *   Heimdall/Thor: Heuristic scoring — uniqueness, string-only, merge penalty, width match.
  *   Both:    Rows above the header are treated as title/metadata (skipped).
  *            Data starts at headerRow + 1.
  *
@@ -256,7 +256,7 @@ async function detectHeaderRowWithAI(
   }
 }
 
-// ─── Heuristic Header Detection (Loki fallback) ─────
+// ─── Heuristic Header Detection (Heimdall/Thor fallback) ─────
 
 /**
  * Heuristic: find the first row whose non-empty cell count matches the mode
@@ -351,7 +351,7 @@ export function detectHeaderRowHeuristic(
  *
  * - Mjölnir tier (useMjolnir=true): AI-powered detection with confidence-based
  *   fallback to heuristic. Validates the detected row looks like actual headers.
- * - Freya tier (useMjolnir=false): heuristic only
+ * - Heimdall/Thor tier (useMjolnir=false): heuristic only
  *
  * The detected headerRow is stored in the ParsedFileData result so downstream
  * code (blueprints, subsequent runs) can skip re-detection.
@@ -365,11 +365,6 @@ export async function detectHeaderRow(
   const heuristicResult = detectHeaderRowHeuristic(worksheet, mergeRanges, rawRows);
 
   if (!useMjolnir) {
-    console.log("[Mjolnir-DIAG] Header detection:", {
-      method: "heuristic",
-      headerRowIndex: heuristicResult,
-      detectedHeaders: rawRows.find((r) => r.rowIndex === heuristicResult)?.cells.filter(Boolean) ?? [],
-    });
     return heuristicResult;
   }
 
@@ -378,26 +373,12 @@ export async function detectHeaderRow(
 
   if (aiResult === null) {
     // AI call failed entirely — use heuristic
-    console.log("[Mjolnir-DIAG] Header detection:", {
-      method: "heuristic_fallback",
-      reason: "AI call failed",
-      headerRowIndex: heuristicResult,
-    });
     return heuristicResult;
   }
 
   // Validate the AI-detected row looks like headers
   const aiRowCells = rawRows.find((r) => r.rowIndex === aiResult.headerRowIndex)?.cells ?? [];
   const aiValid = validateHeaderRow(aiRowCells);
-
-  console.log("[Mjolnir-DIAG] Header detection:", {
-    method: "ai",
-    headerRowIndex: aiResult.headerRowIndex,
-    confidence: aiResult.confidence,
-    reasoning: aiResult.reasoning,
-    detectedHeaders: aiRowCells.filter(Boolean),
-    validated: aiValid,
-  });
 
   // If validation fails, the AI picked a data row — fall back to heuristic
   if (!aiValid) {

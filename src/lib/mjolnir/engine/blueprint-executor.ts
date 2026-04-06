@@ -623,8 +623,6 @@ export function executeBlueprint(
   steps: ForgeStep[],
   input: { columns: string[]; rows: Record<string, unknown>[] }
 ): ExecutionResult {
-  console.log("[MJOLNIR-DIAG] executeBlueprint called:", { stepCount: steps.length, inputColumns: input.columns, inputRowCount: input.rows.length });
-
   // Deep-clone input to avoid mutating caller's data
   const state: PipelineState = {
     columns: [...input.columns],
@@ -645,21 +643,16 @@ export function executeBlueprint(
     const columnsIn = state.columns.length;
     const stepStart = performance.now();
 
-    console.log(`[MJOLNIR-DIAG] Executing step ${step.order}: ${step.type}`, { config: step.config, currentColumns: state.columns, currentRowCount: state.rows.length });
-
     const handler = STEP_HANDLERS[step.type];
     if (handler) {
       try {
         handler(state, step.config);
       } catch (err) {
-        console.log(`[MJOLNIR-DIAG] Step ${step.order} (${step.type}) THREW:`, err);
         throw err;
       }
     } else {
       addWarning(state, `Unknown step type: ${step.type}`);
     }
-
-    console.log(`[MJOLNIR-DIAG] Step ${step.order} (${step.type}) complete:`, { resultColumns: state.columns, resultRowCount: state.rows.length });
 
     metrics.push({
       order: step.order,

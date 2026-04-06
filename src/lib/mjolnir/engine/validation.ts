@@ -236,8 +236,6 @@ function validatePattern(
   after: ParsedFileData,
   unsupportedSteps: string[]
 ): ValidationResult {
-  console.log("[MJOLNIR-DIAG] validatePattern called with:", { stepCount: steps.length, stepTypes: steps.map(s => s.type), beforeColumns: before.columns, afterColumns: after.columns, beforeRowCount: before.rowCount, afterRowCount: after.rowCount });
-
   const checks: PatternCheck[] = [];
   let passCount = 0;
   let totalChecks = 0;
@@ -251,7 +249,6 @@ function validatePattern(
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.log("[MJOLNIR-DIAG] Blueprint execution FAILED:", msg);
     return {
       passed: false,
       overallMatchRate: 0,
@@ -267,14 +264,10 @@ function validatePattern(
     };
   }
 
-  console.log("[MJOLNIR-DIAG] Blueprint execution succeeded:", { executedColumns: execution.columns, executedRowCount: execution.rows.length, executedSampleRow: execution.rows[0] ?? null });
-
   const { matchedPairs, unmatchedRefCols, unmatchedExecCols } = pairColumns(
     after.columns,
     execution.columns
   );
-
-  console.log("[MJOLNIR-DIAG] Column pairing:", { matchedPairs: matchedPairs.map(p => `${p.refCol} ↔ ${p.execCol}`), unmatchedRefCols, unmatchedExecCols });
 
   // ─── Check 1: Column Structure ─────────────────────
 
@@ -302,8 +295,6 @@ function validatePattern(
       details: `Missing: ${unmatchedRefCols.join(", ")}`,
     });
   }
-
-  console.log("[MJOLNIR-DIAG] Check 1 (Column Structure):", { structureRate, matchedColCount, afterColCount, status: checks[checks.length - 1]?.status });
 
   // Extra columns not in AFTER (advisory)
   if (unmatchedExecCols.length > 0) {
@@ -591,8 +582,6 @@ function validatePattern(
       matchRate: 0,
     });
   }
-
-  console.log("[MJOLNIR-DIAG] validatePattern FINAL:", { passed, overallMatchRate, structureRate, checksRate, totalChecks, passCount, failedChecks: checks.filter(c => c.status === "fail") });
 
   return {
     overallMatchRate,
