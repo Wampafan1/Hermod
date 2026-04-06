@@ -2,7 +2,7 @@ import { BlueprintStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getTierConfig } from "@/lib/tiers";
 import { getProvider, toConnectionLike } from "@/lib/providers";
-import { sendReportEmail, toEmailConfig } from "@/lib/email";
+import { sendReportEmail, toEmailConfig, resolveEmailTransport } from "@/lib/email";
 import type { EmailConnectionConfig } from "@/lib/email";
 import ExcelJS from "exceljs";
 import { formatInTimeZone } from "date-fns-tz";
@@ -253,10 +253,9 @@ export async function runReport(
     const schedule = report.schedule;
     if (!schedule) throw new Error("Report has no schedule");
 
-    if (!schedule.emailConnection) {
-      throw new Error("No email connection configured for this schedule. Add one in the schedule settings.");
-    }
-    const emailConfig = toEmailConfig(schedule.emailConnection);
+    const emailConfig = schedule.emailConnection
+      ? toEmailConfig(schedule.emailConnection)
+      : null;
 
     notifyConfig = emailConfig;
     reportName = report.name;
@@ -331,14 +330,21 @@ export async function runReport(
     const html = renderEmailTemplate("enduser", emailModel, tier.features.emailBranding);
     const text = renderPlainText(emailModel);
 
-    await sendReportEmail({
-      connection: emailConfig,
-      to: recipients,
+    // Resolve transport: user's own SMTP or shared SES fallback
+    const tenantPlanStr = tenantPlan ?? "heimdall";
+    const { transporter, fromAddress } = resolveEmailTransport(emailConfig, tenantPlanStr);
+
+    await transporter.sendMail({
+      from: fromAddress,
+      to: recipients.join(", "),
       subject,
       text,
       html,
-      attachment: excelBuffer,
-      filename,
+      attachments: [{
+        filename,
+        content: excelBuffer,
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }],
     });
 
     await prisma.runLog.update({

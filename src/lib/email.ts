@@ -1,6 +1,8 @@
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import { decrypt } from "@/lib/crypto";
+import { isSharedSmtpConfigured, getSharedTransport, getSharedFromAddress } from "@/lib/shared-smtp";
+import { getTierConfig } from "@/lib/tiers";
 
 export type EmailAuthType = "NONE" | "PLAIN" | "OAUTH2";
 
@@ -72,6 +74,44 @@ function createTransport(connection: EmailConnectionConfig): Transporter {
 function extractDomain(from: string): string | null {
   const match = from.match(/@([^>\s]+)/);
   return match ? match[1] : null;
+}
+
+/**
+ * Resolve the email transport and from address for a report delivery.
+ * 1. If the user has their own EmailConnection, use it (all tiers).
+ * 2. If no user config AND tier requires customSmtp (Odin), throw error.
+ * 3. If no user config AND tier allows shared SMTP (Heimdall/Thor), use SES.
+ */
+export function resolveEmailTransport(
+  userConfig: EmailConnectionConfig | null,
+  tenantPlan: string
+): { transporter: Transporter; fromAddress: string } {
+  if (userConfig) {
+    return {
+      transporter: createTransport(userConfig),
+      fromAddress: userConfig.fromAddress,
+    };
+  }
+
+  const tier = getTierConfig(tenantPlan);
+  if (tier.features.customSmtp) {
+    throw new Error(
+      `The ${tier.displayName} tier requires your own SMTP connection for email delivery. ` +
+      `Configure one in Settings → Email Connections.`
+    );
+  }
+
+  if (!isSharedSmtpConfigured()) {
+    throw new Error(
+      "Email delivery is not available. Shared SMTP is not configured. " +
+      "Contact support or configure your own SMTP connection."
+    );
+  }
+
+  return {
+    transporter: getSharedTransport(),
+    fromAddress: getSharedFromAddress(),
+  };
 }
 
 interface SendReportEmailOptions {
