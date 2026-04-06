@@ -620,6 +620,14 @@
   color: var(--text);
 }
 
+/* ─── Marketing Nav: keep visible on mobile even after scroll ─── */
+@media (max-width: 767px) {
+  .nav-marketing[data-scrolled="true"] {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+}
+
 /* ─── Landing Page ─── */
 .landing-page {
   background-color: #faf8f5;
