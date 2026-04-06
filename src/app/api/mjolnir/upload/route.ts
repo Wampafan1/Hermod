@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
+import { requireTierFeature } from "@/lib/tier-gate";
 import { parseExcelBuffer } from "@/lib/mjolnir/file-parser";
 import { randomUUID } from "crypto";
 import { writeFile, mkdir } from "fs/promises";
@@ -7,6 +8,9 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 export const POST = withAuth(async (req, session) => {
+  const denied = await requireTierFeature(session.tenantId, "mjolnirAiForge", "Mjölnir AI Forge");
+  if (denied) return denied;
+
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
 

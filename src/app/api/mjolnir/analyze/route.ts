@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
+import { requireTierFeature } from "@/lib/tier-gate";
 import { analyzeSchema } from "@/lib/validations/mjolnir";
 import { readFile } from "fs/promises";
 import { join } from "path";
@@ -11,6 +12,9 @@ import { extractStyleTemplate } from "@/lib/mjolnir/engine/style-extractor";
 
 // POST /api/mjolnir/analyze — run structural diff + AI inference
 export const POST = withAuth(async (req, session) => {
+  const denied = await requireTierFeature(session.tenantId, "mjolnirAiForge", "Mjölnir AI Forge");
+  if (denied) return denied;
+
   const body = await req.json();
   const parsed = analyzeSchema.safeParse(body);
   if (!parsed.success) {

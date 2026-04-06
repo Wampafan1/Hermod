@@ -3,11 +3,15 @@ import { z } from "zod";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { generateRavenApiKey } from "@/lib/raven/api-key";
+import { requireTierFeature } from "@/lib/tier-gate";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/settings/raven-keys — List all Raven API keys for the current tenant
 export const GET = withAuth(async (_req, ctx) => {
+  const denied = await requireTierFeature(ctx.tenantId, "dataAgent", "Data Agent");
+  if (denied) return denied;
+
   const keys = await prisma.ravenApiKey.findMany({
     where: { tenantId: ctx.tenantId },
     select: {
@@ -36,6 +40,9 @@ const CreateKeySchema = z.object({
 
 export const POST = withAuth(
   async (req, ctx) => {
+    const denied = await requireTierFeature(ctx.tenantId, "dataAgent", "Data Agent");
+    if (denied) return denied;
+
     const body = await req.json();
     const parsed = CreateKeySchema.safeParse(body);
     if (!parsed.success) {

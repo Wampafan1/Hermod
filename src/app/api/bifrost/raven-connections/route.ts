@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
+import { requireTierFeature } from "@/lib/tier-gate";
 
 const HEARTBEAT_ONLINE_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -14,6 +15,9 @@ interface SatelliteConnection {
 
 // GET /api/bifrost/raven-connections — List Raven satellite connections for route builder
 export const GET = withAuth(async (_req, ctx) => {
+  const denied = await requireTierFeature(ctx.tenantId, "dataAgent", "Data Agent");
+  if (denied) return denied;
+
   const satellites = await prisma.ravenSatellite.findMany({
     where: {
       tenantId: ctx.tenantId,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { withRavenAuth } from "@/lib/raven/auth";
+import { hasTierFeature } from "@/lib/tiers";
 
 // TODO: rate-limit this endpoint — Ravens poll every 30s, a buggy tight loop could overwhelm the API
 
@@ -31,6 +32,14 @@ const HeartbeatSchema = z.object({
 
 // POST /api/raven/heartbeat — Raven heartbeat
 export const POST = withRavenAuth(async (req, ctx) => {
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: ctx.tenantId },
+    select: { plan: true },
+  });
+  if (!tenant || !hasTierFeature(tenant.plan, "dataAgent")) {
+    return NextResponse.json({ error: "Data Agent requires Thor or Odin tier" }, { status: 403 });
+  }
+
   const body = await req.json();
   const parsed = HeartbeatSchema.safeParse(body);
   if (!parsed.success) {

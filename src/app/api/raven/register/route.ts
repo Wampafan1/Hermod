@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { withRavenAuth } from "@/lib/raven/auth";
+import { hasTierFeature } from "@/lib/tiers";
 
 const RegisterSchema = z.object({
   ravenName: z.string().min(1).max(200),
@@ -20,6 +21,14 @@ const RegisterSchema = z.object({
 
 // POST /api/raven/register — Register or heal a Raven satellite
 export const POST = withRavenAuth(async (req, ctx) => {
+  const tenantForGate = await prisma.tenant.findUnique({
+    where: { id: ctx.tenantId },
+    select: { plan: true },
+  });
+  if (!tenantForGate || !hasTierFeature(tenantForGate.plan, "dataAgent")) {
+    return NextResponse.json({ error: "Data Agent requires Thor or Odin tier" }, { status: 403 });
+  }
+
   const body = await req.json();
   const parsed = RegisterSchema.safeParse(body);
   if (!parsed.success) {

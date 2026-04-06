@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
+import { requireTierFeature } from "@/lib/tier-gate";
 import { discoverInferSchema } from "@/lib/validations/alfheim";
 import { inferSchemaWithAI } from "@/lib/alfheim/discovery/ai-schema-inference";
 
 // POST /api/alfheim/discover/infer — AI schema inference
-export const POST = withAuth(async (req) => {
+export const POST = withAuth(async (req, ctx) => {
+  const denied = await requireTierFeature(ctx.tenantId, "apiDiscovery", "AI API Discovery");
+  if (denied) return denied;
+
   const body = await req.json();
   const parsed = discoverInferSchema.safeParse(body);
 

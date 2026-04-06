@@ -90,7 +90,8 @@ export function parseSqlPreview(sql: string): string {
  */
 export function renderEmailTemplate(
   templateName: EmailTemplateName,
-  model: HermodEmailModel
+  model: HermodEmailModel,
+  branding: "full" | "powered_by" | "none" = "full"
 ): string {
   let html = TEMPLATES[templateName];
   if (!html) {
@@ -135,6 +136,17 @@ export function renderEmailTemplate(
   for (const [key, value] of Object.entries(vars)) {
     html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value);
   }
+
+  // Apply branding level
+  if (branding === "none") {
+    // Odin: remove all Hermod branding
+    html = html.replace(/<!--BRANDING_START-->[\s\S]*?<!--BRANDING_END-->/g, "");
+    html = html.replace(/<!--POWERED_BY_START-->[\s\S]*?<!--POWERED_BY_END-->/g, "");
+  } else if (branding === "powered_by") {
+    // Thor: remove full branding, keep "Powered by Hermod"
+    html = html.replace(/<!--BRANDING_START-->[\s\S]*?<!--BRANDING_END-->/g, "");
+  }
+  // "full" (Heimdall): keep everything as-is
 
   return html;
 }

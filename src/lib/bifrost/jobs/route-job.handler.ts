@@ -8,6 +8,8 @@
 import { BifrostEngine, loadRouteWithRelations } from "../engine";
 import type { RouteJobPayload, RouteJobResult } from "../types";
 import { withTimeout } from "@/lib/async-utils";
+import { prisma } from "@/lib/db";
+import { hasTierFeature } from "@/lib/tiers";
 
 const SCHEDULED_ROUTE_TIMEOUT_MS = 30 * 60_000; // 30 minutes
 
@@ -21,6 +23,25 @@ export async function handleRouteJob(job: {
   );
 
   const route = await loadRouteWithRelations(routeId);
+
+  // Tier gate: webhook triggers require Thor+
+  if (triggeredBy === "webhook") {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: route.tenantId },
+      select: { plan: true },
+    });
+    if (!tenant || !hasTierFeature(tenant.plan, "webhookTriggers")) {
+      console.warn(`[Worker] Webhook trigger blocked for route ${routeId} -- tenant on ${tenant?.plan ?? "unknown"} plan`);
+      return {
+        routeLogId: "",
+        status: "skipped",
+        totalExtracted: 0,
+        totalLoaded: 0,
+        errorCount: 0,
+        duration: 0,
+      };
+    }
+  }
 
   // Skip if route was disabled after job was enqueued
   if (!route.enabled) {

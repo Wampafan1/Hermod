@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
+import { requireTierFeature } from "@/lib/tier-gate";
 import { validateSchema } from "@/lib/validations/mjolnir";
 import { readFile } from "fs/promises";
 import { join } from "path";
@@ -9,6 +10,9 @@ import { validateBlueprint } from "@/lib/mjolnir/engine/validation";
 
 // POST /api/mjolnir/validate — validate a blueprint against BEFORE/AFTER data
 export const POST = withAuth(async (req, session) => {
+  const denied = await requireTierFeature(session.tenantId, "mjolnirAiForge", "Mjölnir AI Forge");
+  if (denied) return denied;
+
   const body = await req.json();
   const parsed = validateSchema.safeParse(body);
   if (!parsed.success) {

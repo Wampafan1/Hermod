@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
+import { requireTierFeature } from "@/lib/tier-gate";
 import { cleanupStaleJobs } from "@/lib/raven/cleanup";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,9 @@ function computeStatusDisplay(
 
 // GET /api/settings/ravens — List all Ravens for the current tenant
 export const GET = withAuth(async (_req, ctx) => {
+  const denied = await requireTierFeature(ctx.tenantId, "dataAgent", "Data Agent");
+  if (denied) return denied;
+
   try {
     const cleaned = await cleanupStaleJobs(ctx.tenantId);
     if (cleaned > 0) {

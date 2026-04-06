@@ -1,5 +1,6 @@
 import { BlueprintStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { getTierConfig } from "@/lib/tiers";
 import { getProvider, toConnectionLike } from "@/lib/providers";
 import { sendReportEmail, toEmailConfig } from "@/lib/email";
 import type { EmailConnectionConfig } from "@/lib/email";
@@ -278,6 +279,20 @@ export async function runReport(
     const excelBuffer = pipeline.excelBuffer;
     const runTime = `${(pipeline.runTimeMs / 1000).toFixed(1)}s`;
 
+    // Tier-based attachment size limit
+    const tenantPlan = report.tenantId
+      ? (await prisma.tenant.findUnique({ where: { id: report.tenantId }, select: { plan: true } }))?.plan
+      : null;
+    const tier = getTierConfig(tenantPlan ?? "heimdall");
+    const maxBytes = tier.features.maxAttachmentMb * 1024 * 1024;
+    if (excelBuffer.length > maxBytes) {
+      throw new Error(
+        `Report attachment (${(excelBuffer.length / 1024 / 1024).toFixed(1)}MB) exceeds ` +
+        `the ${tier.features.maxAttachmentMb}MB limit for the ${tier.displayName} tier. ` +
+        `Upgrade to increase your limit.`
+      );
+    }
+
     // Build email model and render template
     const now = new Date();
     const tz = schedule.timezone || "America/Chicago";
@@ -313,7 +328,7 @@ export async function runReport(
     };
 
     const subject = buildSubject(report.name, reportDate);
-    const html = renderEmailTemplate("enduser", emailModel);
+    const html = renderEmailTemplate("enduser", emailModel, tier.features.emailBranding);
     const text = renderPlainText(emailModel);
 
     await sendReportEmail({

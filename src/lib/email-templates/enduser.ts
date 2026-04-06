@@ -49,7 +49,7 @@ export const ENDUSER_TEMPLATE = `<!DOCTYPE html>
 
   <!-- HEADER -->
   <tr><td style="padding: 40px 44px 28px 44px; text-align: center;" class="mobile-padding">
-    <p style="margin: 0 0 24px 0; font-family: 'Cinzel', Georgia, 'Times New Roman', serif; font-size: 12px; font-weight: 600; letter-spacing: 6px; text-transform: uppercase; color: #5c4a20;">\u27E1 HERMOD</p>
+    <!--BRANDING_START--><p style="margin: 0 0 24px 0; font-family: 'Cinzel', Georgia, 'Times New Roman', serif; font-size: 12px; font-weight: 600; letter-spacing: 6px; text-transform: uppercase; color: #5c4a20;">\u27E1 HERMOD</p><!--BRANDING_END-->
     <h1 class="light-text mobile-title" style="margin: 0 0 12px 0; font-family: 'Cinzel', Georgia, 'Times New Roman', serif; font-size: 32px; font-weight: 600; letter-spacing: 8px; color: #2a2520; line-height: 1.2;">YOUR REPORT<br>IS READY</h1>
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin: 16px auto 20px;">
     <tr>
@@ -116,9 +116,9 @@ export const ENDUSER_TEMPLATE = `<!DOCTYPE html>
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 20px;">
     <tr><td class="divider-line" style="height: 1px; background: linear-gradient(90deg, transparent, #a89060, transparent);"></td></tr>
     </table>
-    <p style="margin: 0 0 4px 0; font-family: 'Cinzel', Georgia, serif; font-size: 10px; font-weight: 500; letter-spacing: 5px; color: #c9bca6;">\u27E1 HERMOD</p>
-    <p style="margin: 0 0 12px 0; font-family: 'EB Garamond', Georgia, serif; font-size: 12px; font-style: italic; color: #cdc3b3;">Automated Report Delivery</p>
-    <p style="margin: 0; font-family: 'DM Sans', 'Helvetica Neue', Arial, sans-serif; font-size: 11px; color: #d5cdbf;">This report was automatically generated</p>
+    <!--BRANDING_START--><p style="margin: 0 0 4px 0; font-family: 'Cinzel', Georgia, serif; font-size: 10px; font-weight: 500; letter-spacing: 5px; color: #c9bca6;">\u27E1 HERMOD</p>
+    <p style="margin: 0 0 12px 0; font-family: 'EB Garamond', Georgia, serif; font-size: 12px; font-style: italic; color: #cdc3b3;">Automated Report Delivery</p><!--BRANDING_END-->
+    <!--POWERED_BY_START--><p style="margin: 0; font-family: 'DM Sans', 'Helvetica Neue', Arial, sans-serif; font-size: 11px; color: #d5cdbf;">Powered by Hermod</p><!--POWERED_BY_END-->
   </td></tr>
 
 </table>
