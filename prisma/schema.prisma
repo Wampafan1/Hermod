@@ -90,9 +90,13 @@ model Tenant {
   domain           String?            @unique
   logoUrl          String?
 
-  // Subscription placeholder
-  plan             String             @default("heimdall")
-  planExpiresAt    DateTime?
+  // Subscription
+  plan                     String             @default("heimdall")
+  planExpiresAt            DateTime?
+  stripeCustomerId         String?            @unique
+  stripeSubscriptionId     String?            @unique
+  stripePriceId            String?
+  stripeCurrentPeriodEnd   DateTime?
 
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
