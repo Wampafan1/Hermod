@@ -7,7 +7,7 @@ import { RealmBanner } from "@/components/realm-banner";
 export default async function ConnectionsPage() {
   const session = await requireAuth();
 
-  const [connections, emailConnections, folders] = await Promise.all([
+  const [connections, emailConnections, folders, ravenCount] = await Promise.all([
     prisma.connection.findMany({
       where: {
         OR: [
@@ -44,6 +44,9 @@ export default async function ConnectionsPage() {
       where: { tenantId: session.user.tenantId ?? undefined },
       orderBy: { sortOrder: "asc" },
       include: { _count: { select: { connections: true } } },
+    }),
+    prisma.ravenSatellite.count({
+      where: { tenantId: session.user.tenantId ?? undefined },
     }),
   ]);
 
@@ -86,6 +89,7 @@ export default async function ConnectionsPage() {
         connections={serializedConnections}
         emailConnections={emailConnections}
         folders={serializedFolders}
+        ravenCount={ravenCount}
       />
     </div>
   );

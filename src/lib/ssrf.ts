@@ -55,6 +55,8 @@ function isPrivateIPv6(ip: string): boolean {
  * Returns an error message if the host is private, or null if it's safe.
  */
 export async function checkSsrf(host: string): Promise<string | null> {
+  if (process.env.ALLOW_PRIVATE_IPS === "true") return null;
+
   // Direct IP address check
   if (isIP(host) === 4) {
     if (isPrivateIPv4(host)) {

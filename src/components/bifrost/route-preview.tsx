@@ -7,6 +7,7 @@ interface RoutePreviewProps {
   sourceName: string;
   destName: string;
   forgeEnabled: boolean;
+  viaRaven?: boolean;
 }
 
 const REALMS = {
@@ -90,9 +91,13 @@ export const RoutePreview = memo(function RoutePreview({
   sourceName,
   destName,
   forgeEnabled,
+  viaRaven,
 }: RoutePreviewProps) {
-  const sourceLabel =
-    sourceType === "NETSUITE" ? "NetSuite" : "BigQuery";
+  const sourceLabel = viaRaven
+    ? "Data Agent"
+    : sourceType === "NETSUITE"
+      ? "NetSuite"
+      : "BigQuery";
 
   return (
     <div className="border border-border bg-deep px-6 py-4">
@@ -129,6 +134,7 @@ export const RoutePreview = memo(function RoutePreview({
       <div className="text-center mt-3">
         <span className="text-[0.55rem] tracking-[0.2em] uppercase text-text-dim">
           {sourceLabel}
+          {viaRaven && " (via agent)"}
           {forgeEnabled ? " → Forge → " : " → "}
           BigQuery
         </span>

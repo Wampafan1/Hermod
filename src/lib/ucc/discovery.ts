@@ -109,7 +109,8 @@ interface ProfileData {
 export async function discoverUCCs(
   session: AnalyticsSession,
   tableName: string,
-  profile: ProfileData
+  profile: ProfileData,
+  options?: { skipPruning?: boolean }
 ): Promise<UCCResult> {
   const totalStart = Date.now();
   const TIMEOUT_MS = 30_000;
@@ -161,17 +162,26 @@ export async function discoverUCCs(
     samples: c.sampleValues.slice(0, 3),
   }));
 
-  // Run AI pruning
+  // Run AI pruning (unless skipPruning is set)
   const pruneStart = Date.now();
-  const pruning = await pruneColumns(columnSummaries);
-  const pruningDurationMs = Date.now() - pruneStart;
+  let candidates: string[];
+  let excludedColumns: string[];
+  let pruningDurationMs: number;
 
-  const candidates = pruning.candidateColumns;
-  const excludedColumns = pruning.excludedColumns;
+  if (options?.skipPruning) {
+    candidates = profile.columns.map((c) => c.name);
+    excludedColumns = [];
+    pruningDurationMs = 0;
+  } else {
+    const pruning = await pruneColumns(columnSummaries);
+    pruningDurationMs = Date.now() - pruneStart;
+    candidates = pruning.candidateColumns;
+    excludedColumns = pruning.excludedColumns;
+  }
 
-  // Reduce max depth for huge datasets
+  // Cap max depth: 2 for huge datasets, 3 otherwise (down from 4)
   const maxDepth =
-    profile.columns.length > 500 || rowCount > 1_000_000 ? 3 : 4;
+    profile.columns.length > 500 || rowCount > 1_000_000 ? 2 : 3;
 
   // Build cardinality map for pigeonhole pruning
   const cardMap = new Map<string, number>();

@@ -2,16 +2,16 @@
  * POST /api/duckdb/profile — Profile a dataset via DuckDB.
  *
  * Accepts either:
- *   A) Multipart form with `file` + `type` ("csv" | "excel")
- *   B) JSON body with `{ rows, columns }`
+ *   A) Multipart form with `file` (auto-detects type from filename)
+ *   B) JSON body with `{ rows }` (pre-parsed data, no UCC)
  *
- * Returns full column-level profiling: cardinality, nulls, min/max,
- * sample values — computed against the FULL dataset, not a sample.
+ * Returns full column-level profiling + UCC primary key detection.
  */
 
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
-import { analyzeCSV, analyzeExcel, analyzeRows } from "@/lib/duckdb/file-analyzer";
+import { analyzeFile, FileAnalysisError } from "@/lib/duckdb/file-analyzer";
+import { analyzeRows } from "@/lib/duckdb/file-analyzer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +25,6 @@ export const POST = withAuth(async (req) => {
   if (contentType.includes("multipart/form-data")) {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
-    const fileType = (formData.get("type") as string | null) ?? "csv";
 
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
@@ -39,29 +38,28 @@ export const POST = withAuth(async (req) => {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    let analysis;
 
-    if (fileType === "excel") {
-      const sheetName = formData.get("sheetName") as string | null;
-      analysis = await analyzeExcel(buffer, {
+    // Optional overrides from form data
+    const sheetName = formData.get("sheetName") as string | null;
+    const delimiter = formData.get("delimiter") as string | null;
+
+    try {
+      const result = await analyzeFile(buffer, file.name, {
         sheetName: sheetName || undefined,
-      });
-    } else {
-      const delimiter = formData.get("delimiter") as string | null;
-      analysis = await analyzeCSV(buffer, {
         delimiter: delimiter || undefined,
       });
-    }
 
-    return NextResponse.json({
-      rowCount: analysis.rowCount,
-      columns: analysis.columns,
-      profile: analysis.profile,
-      previewRows: analysis.previewRows,
-    });
+      return NextResponse.json(result);
+    } catch (err) {
+      if (err instanceof FileAnalysisError) {
+        const status = err.code === "FILE_TOO_LARGE" ? 413 : 422;
+        return NextResponse.json({ error: err.message, code: err.code }, { status });
+      }
+      throw err;
+    }
   }
 
-  // ── Option B: JSON body with pre-parsed rows ────────
+  // ── Option B: JSON body with pre-parsed rows (no UCC) ──
   const body = await req.json();
   const { rows } = body as { rows?: Record<string, unknown>[] };
 

@@ -4,6 +4,7 @@ import { runReport } from "./report-runner";
 import { advanceNextRun } from "./schedule-utils";
 import { startSftpWatcher } from "./sftp-watcher";
 import { handleRouteJob } from "./bifrost/jobs/route-job.handler";
+import { handleRavenResume } from "./bifrost/jobs/raven-resume.handler";
 import { advanceRouteNextRun } from "./bifrost/engine";
 import {
   getDueRetries,
@@ -65,6 +66,9 @@ async function main() {
 
   // Register Bifrost route handler
   await boss.work("run-route", { teamSize: 2, teamConcurrency: 1 }, handleRouteJob as any);
+
+  // Register Raven pipeline resumption handler
+  await boss.work("resume-raven-route", { teamSize: 2, teamConcurrency: 1 }, handleRavenResume as any);
 
   // Blueprint version pruning — runs asynchronously after new versions are created
   await boss.work("prune-blueprint-versions", async (job: { data: { blueprintId: string } }) => {

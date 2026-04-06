@@ -84,6 +84,11 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
   const sheetExtractRef = useRef<(() => SheetTemplate | null) | null>(null);
   const baselinePixelWidthsRef = useRef<Map<string, number>>(new Map());
 
+  // Preload the heavy Univer spreadsheet chunk (~40MB) in the background
+  // so it's ready by the time the user runs a query and needs the preview.
+  useEffect(() => {
+    import("./univer-sheet");
+  }, []);
   // Keep refs in sync
   useEffect(() => {
     columnConfigRef.current = columnConfig;

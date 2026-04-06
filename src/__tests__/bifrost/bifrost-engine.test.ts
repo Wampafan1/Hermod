@@ -116,12 +116,14 @@ import { enqueueDeadLetter } from "@/lib/bifrost/helheim/dead-letter";
 // ─── Test Route ──────────────────────────────────────
 
 function makeRoute(overrides?: Partial<LoadedRoute>): LoadedRoute {
-  return {
+  return ({
     id: "route_1",
     name: "Test Route",
     enabled: true,
     sourceId: "src_1",
     source: { id: "src_1", type: "BIGQUERY", config: {}, credentials: null },
+    ravenSatelliteId: null,
+    ravenSatellite: null,
     destId: "dest_1",
     dest: { id: "dest_1", type: "BIGQUERY", config: {}, credentials: null },
     sourceConfig: { query: "SELECT * FROM test" },
@@ -143,7 +145,7 @@ function makeRoute(overrides?: Partial<LoadedRoute>): LoadedRoute {
     timeMinute: 0,
     timezone: "America/Chicago",
     ...overrides,
-  };
+  }) as LoadedRoute;
 }
 
 // ─── Helpers ─────────────────────────────────────────

@@ -1,15 +1,16 @@
 /**
  * POST /api/file-entries/upload — Upload a file to a File Source connection.
  *
- * Parses the file in memory, detects schema, checks against baseline.
- * File bytes are NEVER retained — only the FileEntry metadata persists.
+ * Parses the file via DuckDB (full-dataset profiling), detects schema,
+ * checks against baseline. File bytes are NEVER retained — only metadata persists.
  */
 
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
-import { parseFile, compareSchemas, executeFileRoute } from "@/lib/file-processor";
-import type { DetectedSchema } from "@/lib/file-processor";
+import { analyzeFile, FileAnalysisError } from "@/lib/duckdb/file-analyzer";
+import { computeSchemaDiff } from "@/lib/duckdb/schema-diff";
+import type { SavedColumn } from "@/lib/duckdb/schema-diff";
 
 export const runtime = "nodejs";
 
@@ -53,24 +54,58 @@ export const POST = withAuth(async (req, ctx) => {
     );
   }
 
-  // Parse file in memory
+  // Parse file via unified DuckDB pipeline (full-dataset profiling + UCC)
   const buffer = Buffer.from(await file.arrayBuffer());
-  const parsed = await parseFile(buffer, file.name, file.type);
+  let analysis;
+  try {
+    analysis = await analyzeFile(buffer, file.name, { skipUCC: true });
+  } catch (err) {
+    if (err instanceof FileAnalysisError) {
+      const status = err.code === "FILE_TOO_LARGE" ? 413 : 422;
+      return NextResponse.json({ error: err.message, code: err.code }, { status });
+    }
+    throw err;
+  }
 
-  // Check baseline schema
+  // Check baseline schema (stored as DuckDB-compatible SavedColumn[])
   const config = connection.config as Record<string, unknown>;
-  const baseline = config?.baselineSchema as DetectedSchema | undefined;
+  const baseline = config?.baselineSchema as SavedColumn[] | undefined;
+
+  // Convert legacy DetectedSchema baseline if present
+  const baselineColumns: SavedColumn[] | undefined = baseline
+    ? Array.isArray(baseline) && baseline[0] && "duckdbType" in baseline[0]
+      ? baseline // already in new format
+      : (baseline as unknown as { columns?: Array<{ name: string; inferredType: string; nullable: boolean }> })?.columns?.map((c) => ({
+          name: c.name,
+          duckdbType: c.inferredType === "number" ? "DOUBLE" : c.inferredType === "date" ? "TIMESTAMP" : c.inferredType === "boolean" ? "BOOLEAN" : "VARCHAR",
+          inferredType: c.inferredType,
+          nullable: c.nullable,
+        }))
+    : undefined;
 
   let schemaDrift = null;
   let needsConfirmation = false;
 
-  if (!baseline) {
+  if (!baselineColumns) {
     // First upload — needs confirmation before locking schema
     needsConfirmation = true;
   } else {
-    // Compare against baseline
-    schemaDrift = compareSchemas(baseline, parsed.detectedSchema);
+    // Compare against baseline using unified schema diff
+    const result = computeSchemaDiff(baselineColumns, analysis.columns);
+    if (result.hasDrift) {
+      schemaDrift = result.diff;
+    }
   }
+
+  // Build legacy-compatible detectedSchema for existing UI
+  const detectedSchema = {
+    columns: analysis.columns.map((c) => ({
+      name: c.name,
+      inferredType: c.inferredType as "string" | "number" | "date" | "boolean",
+      nullable: c.nullable,
+      sampleValues: c.sampleValues.slice(0, 3),
+    })),
+  };
 
   // Create FileEntry record
   const fileEntry = await prisma.fileEntry.create({
@@ -79,9 +114,9 @@ export const POST = withAuth(async (req, ctx) => {
       fileName: file.name,
       fileSize: file.size,
       mimeType: file.type || null,
-      rowCount: parsed.rowCount,
-      columnCount: parsed.columns.length,
-      schema: JSON.parse(JSON.stringify(parsed.detectedSchema)),
+      rowCount: analysis.rowCount,
+      columnCount: analysis.columns.length,
+      schema: JSON.parse(JSON.stringify(detectedSchema)),
       schemaDrift: schemaDrift ? JSON.parse(JSON.stringify(schemaDrift)) : undefined,
       status: schemaDrift ? "SCHEMA_DRIFT" : "PENDING",
       loadMode,
@@ -99,7 +134,7 @@ export const POST = withAuth(async (req, ctx) => {
         processedAt: null,
       },
       needsConfirmation: true,
-      detectedSchema: parsed.detectedSchema,
+      detectedSchema,
     });
   }
 
@@ -113,71 +148,20 @@ export const POST = withAuth(async (req, ctx) => {
       },
       needsConfirmation: false,
       schemaDrift,
-      detectedSchema: parsed.detectedSchema,
+      detectedSchema,
     });
   }
 
-  // Schema matches baseline — process immediately
-  const startTime = Date.now();
-  try {
-    await prisma.fileEntry.update({
-      where: { id: fileEntry.id },
-      data: { status: "PROCESSING" },
-    });
+  // Schema matches baseline — mark as loaded
+  // (executeFileRoute was a stub — route execution is handled by Bifrost/Gates, not here)
+  await prisma.fileEntry.update({
+    where: { id: fileEntry.id },
+    data: {
+      status: "LOADED",
+      processedAt: new Date(),
+    },
+  });
 
-    // Check if there's a Bifrost route for this connection
-    const route = connection.routesAsSource[0];
-    if (route) {
-      const result = await executeFileRoute({
-        connectionId,
-        routeId: route.id,
-        rows: parsed.rows,
-        columns: parsed.columns,
-        fileEntryId: fileEntry.id,
-        tenantId: ctx.tenantId,
-      });
-
-      if (result.success) {
-        await prisma.fileEntry.update({
-          where: { id: fileEntry.id },
-          data: {
-            status: "LOADED",
-            rowCount: result.rowsLoaded,
-            processedAt: new Date(),
-          },
-        });
-      } else {
-        await prisma.fileEntry.update({
-          where: { id: fileEntry.id },
-          data: {
-            status: "FAILED",
-            error: result.error ?? "Unknown error",
-            processedAt: new Date(),
-          },
-        });
-      }
-    } else {
-      // No route — just mark as loaded
-      await prisma.fileEntry.update({
-        where: { id: fileEntry.id },
-        data: {
-          status: "LOADED",
-          processedAt: new Date(),
-        },
-      });
-    }
-  } catch (err) {
-    await prisma.fileEntry.update({
-      where: { id: fileEntry.id },
-      data: {
-        status: "FAILED",
-        error: err instanceof Error ? err.message : "Processing failed",
-        processedAt: new Date(),
-      },
-    });
-  }
-
-  // Reload to get final state
   const final = await prisma.fileEntry.findUnique({ where: { id: fileEntry.id } });
 
   return NextResponse.json({
@@ -189,6 +173,5 @@ export const POST = withAuth(async (req, ctx) => {
         }
       : fileEntry,
     needsConfirmation: false,
-    durationMs: Date.now() - startTime,
   });
 });

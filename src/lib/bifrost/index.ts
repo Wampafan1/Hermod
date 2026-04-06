@@ -4,6 +4,7 @@
 
 export { BifrostEngine, loadRouteWithRelations, advanceRouteNextRun } from "./engine";
 export { handleRouteJob } from "./jobs/route-job.handler";
+export { handleRavenResume } from "./jobs/raven-resume.handler";
 export { validateBlueprintForStreaming } from "./forge/forge-validator";
 export {
   enqueueDeadLetter,

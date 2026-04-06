@@ -42,9 +42,15 @@ export async function handleRouteJob(job: {
     `Route ${routeId} execution`
   );
 
-  console.log(
-    `[Bifrost] Route ${routeId} ${result.status}: ${result.totalLoaded}/${result.totalExtracted} rows`
-  );
+  if (result.status === "waiting_for_agent") {
+    console.log(
+      `[Bifrost] Route ${routeId} waiting_for_agent: RavenJob ${result.ravenJobId} queued`
+    );
+  } else {
+    console.log(
+      `[Bifrost] Route ${routeId} ${result.status}: ${result.totalLoaded}/${result.totalExtracted} rows`
+    );
+  }
 
   return result;
 }

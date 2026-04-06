@@ -3,9 +3,9 @@ import type { ConnectionType, ProviderCapabilities } from "./types";
 export type { ConnectionType } from "./types";
 
 export const PROVIDER_CAPABILITIES: Record<ConnectionType, ProviderCapabilities> = {
-  POSTGRES:  { canBeSource: true,  canBeDestination: false, canQuery: true,  canStream: true,  canBulkLoad: false, canListTables: true  },
-  MSSQL:     { canBeSource: true,  canBeDestination: false, canQuery: true,  canStream: true,  canBulkLoad: false, canListTables: true  },
-  MYSQL:     { canBeSource: true,  canBeDestination: false, canQuery: true,  canStream: true,  canBulkLoad: false, canListTables: true  },
+  POSTGRES:  { canBeSource: true,  canBeDestination: true,  canQuery: true,  canStream: true,  canBulkLoad: true,  canListTables: true  },
+  MSSQL:     { canBeSource: true,  canBeDestination: true,  canQuery: true,  canStream: true,  canBulkLoad: true,  canListTables: true  },
+  MYSQL:     { canBeSource: true,  canBeDestination: true,  canQuery: true,  canStream: true,  canBulkLoad: true,  canListTables: true  },
   BIGQUERY:  { canBeSource: true,  canBeDestination: true,  canQuery: true,  canStream: true,  canBulkLoad: true,  canListTables: true  },
   NETSUITE:  { canBeSource: true,  canBeDestination: false, canQuery: true,  canStream: true,  canBulkLoad: false, canListTables: true  },
   SFTP:      { canBeSource: true,  canBeDestination: true,  canQuery: false, canStream: true,  canBulkLoad: true,  canListTables: false, fileFormats: ["CSV", "TSV", "XLSX"] },

@@ -2,13 +2,21 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 
 export default function LoginPage() {
-  const [signingIn, setSigningIn] = useState(false);
+  const [signingIn, setSigningIn] = useState<"google" | "azure-ad" | null>(null);
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
 
   function handleGoogleSignIn() {
-    setSigningIn(true);
-    signIn("google", { callbackUrl: "/dashboard" });
+    setSigningIn("google");
+    signIn("google", { callbackUrl });
+  }
+
+  function handleMicrosoftSignIn() {
+    setSigningIn("azure-ad");
+    signIn("azure-ad", { callbackUrl });
   }
 
   return (
@@ -87,18 +95,18 @@ export default function LoginPage() {
       >
         <button
           onClick={handleGoogleSignIn}
-          disabled={signingIn}
+          disabled={signingIn !== null}
           className="btn-primary w-full justify-center"
           style={{
             padding: "0.9rem 1.5rem",
             fontSize: 11,
             letterSpacing: "0.25em",
             textTransform: "uppercase",
-            opacity: signingIn ? 0.7 : 1,
+            opacity: signingIn && signingIn !== "google" ? 0.5 : signingIn === "google" ? 0.7 : 1,
           }}
         >
           <span className="flex items-center gap-3">
-            {signingIn ? (
+            {signingIn === "google" ? (
               <div className="spinner-norse" style={{ width: 16, height: 16 }} />
             ) : (
               <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
@@ -108,29 +116,59 @@ export default function LoginPage() {
                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
               </svg>
             )}
-            {signingIn ? "Summoning the Bifrost…" : "Sign in with Google"}
+            {signingIn === "google" ? "Summoning the Bifrost..." : "Sign in with Google"}
           </span>
         </button>
 
         <button
-          disabled
+          onClick={handleMicrosoftSignIn}
+          disabled={signingIn !== null}
           className="btn-ghost w-full justify-center"
           style={{
             padding: "0.9rem 1.5rem",
             fontSize: 11,
             letterSpacing: "0.25em",
             textTransform: "uppercase",
+            opacity: signingIn && signingIn !== "azure-ad" ? 0.5 : signingIn === "azure-ad" ? 0.7 : 1,
           }}
-          title="Coming soon"
         >
           <span className="flex items-center gap-3">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-              <path d="M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zM24 11.4H12.6V0H24v11.4z" />
-            </svg>
-            Microsoft — Soon
+            {signingIn === "azure-ad" ? (
+              <div className="spinner-norse" style={{ width: 16, height: 16 }} />
+            ) : (
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zM24 11.4H12.6V0H24v11.4z" />
+              </svg>
+            )}
+            {signingIn === "azure-ad" ? "Summoning the Bifrost..." : "Sign in with Microsoft"}
           </span>
         </button>
       </div>
+
+      {/* Terms */}
+      <p
+        className="animate-fade-up text-center"
+        style={{
+          animationDelay: "0.3s",
+          fontFamily: "var(--font-inconsolata), 'Inconsolata', monospace",
+          fontSize: 9,
+          letterSpacing: "0.15em",
+          color: "var(--text-dim)",
+          marginTop: "2rem",
+          opacity: 0.5,
+          maxWidth: "20rem",
+          lineHeight: 1.8,
+        }}
+      >
+        By signing in, you agree to our{" "}
+        <a href="/terms" className="text-gold hover:text-gold-bright" style={{ textDecoration: "underline" }}>
+          Terms of Service
+        </a>{" "}
+        and{" "}
+        <a href="/privacy" className="text-gold hover:text-gold-bright" style={{ textDecoration: "underline" }}>
+          Privacy Policy
+        </a>
+      </p>
 
       {/* Footer */}
       <p
@@ -142,7 +180,7 @@ export default function LoginPage() {
           letterSpacing: "0.3em",
           textTransform: "uppercase",
           color: "var(--text-dim)",
-          marginTop: "3rem",
+          marginTop: "2rem",
           opacity: 0.4,
         }}
       >

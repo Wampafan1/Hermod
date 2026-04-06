@@ -3,7 +3,21 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
-import type { DetectedSchema, SchemaDiff } from "@/lib/file-processor";
+// Legacy type aliases — data shape hasn't changed, only the source
+interface DetectedSchema {
+  columns: Array<{
+    name: string;
+    inferredType: "string" | "number" | "date" | "boolean";
+    nullable: boolean;
+    sampleValues: string[];
+  }>;
+}
+
+interface SchemaDiff {
+  added: string[];
+  removed: string[];
+  typeChanges: Array<{ column: string; was: string; now: string }>;
+}
 
 // ─── Types ──────────────────────────────────────────
 

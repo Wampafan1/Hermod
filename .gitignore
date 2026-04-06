@@ -8,3 +8,15 @@ next-env.d.ts
 # DuckDB (belt and suspenders — should never be created in :memory: mode)
 *.duckdb
 *.duckdb.wal
+ 
+# IDE and tool artifacts 
+.agents/ 
+.claude/ 
+.factory/ 
+.windsurf/ 
+.playwright-mcp/ 
+skills-lock.json 
+uploads/ 
+sftp-data/ 
+nul 
+*.png 

@@ -13,6 +13,7 @@ export const GET = withAuth(async (req, session) => {
     include: {
       source: { select: { id: true, name: true, type: true } },
       dest: { select: { id: true, name: true, type: true } },
+      ravenSatellite: { select: { id: true, name: true, status: true, lastHeartbeatAt: true, connections: true } },
       routeLogs: {
         take: 1,
         orderBy: { startedAt: "desc" },
@@ -37,12 +38,23 @@ export const POST = withAuth(async (req, session) => {
   }
   const data = parsed.data;
 
-  // Validate source Connection belongs to user
-  const source = await prisma.connection.findFirst({
-    where: { id: data.sourceId, userId: session.user.id },
-  });
-  if (!source) {
-    return NextResponse.json({ error: "Source connection not found" }, { status: 404 });
+  // Validate source — either direct connection or Raven satellite
+  if (data.ravenSatelliteId) {
+    // Raven source — verify satellite belongs to current tenant
+    const satellite = await prisma.ravenSatellite.findFirst({
+      where: { id: data.ravenSatelliteId, tenantId: session.tenantId },
+    });
+    if (!satellite) {
+      return NextResponse.json({ error: "Data Agent connection not found" }, { status: 404 });
+    }
+  } else if (data.sourceId) {
+    // Direct connection source
+    const source = await prisma.connection.findFirst({
+      where: { id: data.sourceId, userId: session.user.id },
+    });
+    if (!source) {
+      return NextResponse.json({ error: "Source connection not found" }, { status: 404 });
+    }
   }
 
   const dest = await prisma.connection.findFirst({
@@ -94,7 +106,8 @@ export const POST = withAuth(async (req, session) => {
   const route = await prisma.bifrostRoute.create({
     data: {
       name: data.name,
-      sourceId: data.sourceId,
+      sourceId: data.ravenSatelliteId ? null : (data.sourceId ?? null),
+      ravenSatelliteId: data.ravenSatelliteId ?? null,
       sourceConfig: data.sourceConfig as Prisma.InputJsonValue,
       destId: data.destId,
       destConfig: data.destConfig as Prisma.InputJsonValue,

@@ -30,6 +30,7 @@
     "@univerjs/preset-sheets-core": "^0.15.5",
     "@univerjs/presets": "^0.15.5",
     "autoprefixer": "^10.4.0",
+    "bcryptjs": "^3.0.3",
     "csv-parse": "^6.1.0",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
@@ -48,9 +49,10 @@
     "react-resizable-panels": "^4.6.4",
     "tailwindcss": "^3.4.0",
     "yaml": "^2.8.3",
-    "zod": "^3.23.0"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/mssql": "^9.1.9",
     "@types/node": "^20.0.0",
     "@types/nodemailer": "^7.0.11",

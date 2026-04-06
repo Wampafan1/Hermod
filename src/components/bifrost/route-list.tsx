@@ -13,8 +13,15 @@ interface RouteListItem {
   name: string;
   enabled: boolean;
   nextRunAt: string | null;
-  source: { name: string; type: string };
+  source: { name: string; type: string } | null;
   dest: { name: string; type: string };
+  ravenSatellite?: {
+    id: string;
+    name: string;
+    status: string;
+    lastHeartbeatAt: string | null;
+    connections: Array<{ name: string; driver: string }> | null;
+  } | null;
   routeLogs: Array<{
     status: string;
     startedAt: string;
@@ -28,6 +35,7 @@ const STATUS_DOT: Record<string, string> = {
   partial: "bg-warning status-pulse-amber",
   failed: "bg-error status-pulse-red",
   running: "bg-warning animate-pip-pulse",
+  waiting_for_agent: "bg-amber-400 status-pulse-amber",
 };
 
 const REALM_TYPE_COLOR: Record<string, string> = {
@@ -84,11 +92,15 @@ export function RouteList() {
       const res = await fetch(`/api/bifrost/routes/${id}/run`, { method: "POST" });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Run failed");
-      const msg = `${name}: ${result.status} — ${result.totalLoaded}/${result.totalExtracted} rows`;
-      if (result.status === "completed") {
-        toast.success(msg);
+      if (result.status === "waiting_for_agent") {
+        toast.success(`${name}: Queued for Data Agent — waiting for execution`);
       } else {
-        toast.error(msg);
+        const msg = `${name}: ${result.status} — ${result.totalLoaded}/${result.totalExtracted} rows`;
+        if (result.status === "completed") {
+          toast.success(msg);
+        } else {
+          toast.error(msg);
+        }
       }
       fetchRoutes();
     } catch (err) {
@@ -254,13 +266,31 @@ export function RouteList() {
                       </Link>
                     </td>
                     <td className="px-4 py-3 tracking-wider">
-                      <span className="text-text-dim">{route.source.name}</span>
-                      <span
-                        className="ml-1.5 text-[0.55rem] font-space-grotesk uppercase tracking-widest"
-                        style={{ color: REALM_TYPE_COLOR[route.source.type] ?? "var(--text-muted)" }}
-                      >
-                        {route.source.type}
-                      </span>
+                      {route.source ? (
+                        <>
+                          <span className="text-text-dim">{route.source.name}</span>
+                          <span
+                            className="ml-1.5 text-[0.55rem] font-space-grotesk uppercase tracking-widest"
+                            style={{ color: REALM_TYPE_COLOR[route.source.type] ?? "var(--text-muted)" }}
+                          >
+                            {route.source.type}
+                          </span>
+                        </>
+                      ) : route.ravenSatellite ? (
+                        <>
+                          <span className="text-text-dim">
+                            {route.ravenSatellite.connections?.[0]?.name ?? route.ravenSatellite.name}
+                          </span>
+                          <span className="ml-1.5 text-[0.55rem] font-space-grotesk uppercase tracking-widest text-frost">
+                            {route.ravenSatellite.connections?.[0]?.driver?.toUpperCase() ?? "AGENT"}
+                          </span>
+                          <span className="block text-[0.5rem] text-text-dim/60 tracking-wider">
+                            via {route.ravenSatellite.name}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-text-dim/50">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 tracking-wider">
                       <span className="text-text-dim">{route.dest.name}</span>
@@ -273,12 +303,16 @@ export function RouteList() {
                     </td>
                     <td className="px-4 py-3 text-text-dim tracking-wider">
                       {lastLog ? (
-                        <span>
-                          {lastLog.status}{" "}
-                          <span className="text-[0.6rem]">
-                            ({lastLog.rowsLoaded ?? 0} rows)
+                        lastLog.status === "waiting_for_agent" ? (
+                          <span className="text-amber-400">Waiting for Agent</span>
+                        ) : (
+                          <span>
+                            {lastLog.status}{" "}
+                            <span className="text-[0.6rem]">
+                              ({lastLog.rowsLoaded ?? 0} rows)
+                            </span>
                           </span>
-                        </span>
+                        )
                       ) : (
                         <span className="text-text-dim/70">Never</span>
                       )}

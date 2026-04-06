@@ -12,8 +12,8 @@ export type {
   ExcelLoadOptions,
 } from "./engine";
 
-export { analyzeCSV, analyzeExcel, analyzeRows } from "./file-analyzer";
-export type { FileAnalysisResult, AnalyzedColumn } from "./file-analyzer";
+export { analyzeCSV, analyzeExcel, analyzeRows, analyzeFile, FileAnalysisError } from "./file-analyzer";
+export type { FileAnalysisResult, AnalyzedColumn, FullAnalysisResult } from "./file-analyzer";
 
 export {
   toHermodType,

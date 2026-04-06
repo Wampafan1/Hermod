@@ -31,8 +31,17 @@ export interface LoadedRoute {
   id: string;
   name: string;
   enabled: boolean;
-  sourceId: string;
-  source: { id: string; type: string; config: unknown; credentials: string | null };
+  sourceId: string | null;
+  source: { id: string; type: string; config: unknown; credentials: string | null } | null;
+  ravenSatelliteId: string | null;
+  ravenSatellite: {
+    id: string;
+    name: string;
+    tenantId: string;
+    connections: unknown;
+    lastHeartbeatAt: Date | null;
+    ravenId?: string;
+  } | null;
   destId: string;
   dest: { id: string; type: string; config: unknown; credentials: string | null };
   sourceConfig: SourceConfig;
@@ -56,6 +65,9 @@ export async function loadRouteWithRelations(routeId: string): Promise<LoadedRou
     include: {
       source: { select: { id: true, type: true, config: true, credentials: true } },
       dest: { select: { id: true, type: true, config: true, credentials: true } },
+      ravenSatellite: {
+        select: { id: true, name: true, tenantId: true, connections: true, lastHeartbeatAt: true },
+      },
     },
   });
 
@@ -234,17 +246,27 @@ export function formatForSuiteQL(isoTimestamp: string): string {
 export class BifrostEngine {
   /**
    * Execute a Bifrost route: extract → (transform) → load.
+   * Routes with a ravenSatelliteId branch to async agent execution.
    */
   async execute(
     route: LoadedRoute,
     triggeredBy: "schedule" | "manual" | "webhook",
     existingRouteLogId?: string
   ): Promise<RouteJobResult> {
+    // Branch: Raven (on-prem agent) source — create job and return immediately
+    if (route.ravenSatelliteId && route.ravenSatellite) {
+      return this.executeViaRaven(route, triggeredBy);
+    }
+
+    if (!route.source) {
+      throw new Error(`Route "${route.name}" has no source connection and no Data Agent configured`);
+    }
+
     const startTime = Date.now();
-    const sourceProvider = getProvider(route.source.type);
+    const sourceProvider = getProvider(route.source!.type);
     const destProvider = getProvider(route.dest.type);
 
-    const sourceConnLike = toConnectionLike(route.source);
+    const sourceConnLike = toConnectionLike(route.source!);
     const destConnLike = toConnectionLike(route.dest);
     const sourceConn = await sourceProvider.connect(sourceConnLike);
     const destConn = await destProvider.connect(destConnLike);
@@ -916,6 +938,87 @@ export class BifrostEngine {
       await sourceConn.close();
       await destConn.close();
     }
+  }
+
+  // ─── Raven (Data Agent) Execution ───────────────────
+
+  /**
+   * Create a RavenJob for agent-based extraction instead of direct SQL.
+   * The engine does NOT poll or wait — it creates the job and returns.
+   * Pipeline resumes asynchronously when the agent calls /api/raven/ingest/{id}/complete.
+   */
+  private async executeViaRaven(
+    route: LoadedRoute,
+    triggeredBy: "schedule" | "manual" | "webhook"
+  ): Promise<RouteJobResult> {
+    const startTime = Date.now();
+    const satellite = route.ravenSatellite!;
+
+    // Check agent online status (informational only — job is created regardless)
+    const isOnline =
+      satellite.lastHeartbeatAt != null &&
+      Date.now() - new Date(satellite.lastHeartbeatAt).getTime() < 5 * 60 * 1000;
+
+    if (!isOnline) {
+      console.warn(
+        `[Bifrost] Data Agent "${satellite.name}" is offline — job will queue until agent reconnects`
+      );
+    }
+
+    // Resolve the agent-side connection ID from sourceConfig or satellite connections
+    const connections = (satellite.connections as Array<{ id: string; name: string }>) ?? [];
+    const sourceConnId = (route.sourceConfig as any).connectionId as string | undefined;
+    const agentConnection = sourceConnId
+      ? connections.find((c) => c.id === sourceConnId)
+      : connections[0]; // fallback to first connection
+
+    if (!agentConnection) {
+      throw new Error(
+        `No matching connection found on Data Agent "${satellite.name}" for route "${route.name}"`
+      );
+    }
+
+    // Create route log
+    const routeLog = await prisma.routeLog.create({
+      data: {
+        routeId: route.id,
+        status: "waiting_for_agent",
+        triggeredBy,
+      },
+    });
+
+    // Create RavenJob for the agent to pick up
+    const job = await prisma.ravenJob.create({
+      data: {
+        ravenId: satellite.id,
+        routeId: route.id,
+        routeLogId: routeLog.id,
+        connectionId: agentConnection.id,
+        query: route.sourceConfig.query,
+        queryParams: (route.sourceConfig.params ?? {}) as any,
+        destination: { type: "hermod_cloud" } as any,
+        timeout: 120,
+        maxRows: route.sourceConfig.chunkSize ? route.sourceConfig.chunkSize * 100 : undefined,
+        status: "pending",
+        priority: 3,
+      },
+    });
+
+    const duration = Date.now() - startTime;
+    console.log(
+      `[Bifrost] ${route.name}: RavenJob ${job.id} created for Data Agent "${satellite.name}" ` +
+      `(connection="${agentConnection.name}", online=${isOnline}) — waiting for agent`
+    );
+
+    return {
+      routeLogId: routeLog.id,
+      status: "waiting_for_agent",
+      ravenJobId: job.id,
+      totalExtracted: 0,
+      totalLoaded: 0,
+      errorCount: 0,
+      duration,
+    };
   }
 
   // ─── Load with Rate-Limit Retry ─────────────────────

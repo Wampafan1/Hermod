@@ -29,7 +29,7 @@ export interface AIResponse {
 
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://192.168.1.181:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gemma4:31b";
-const OLLAMA_TIMEOUT = 30_000;
+const OLLAMA_TIMEOUT = 0; // 0 = no timeout (model runs to completion)
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
@@ -40,7 +40,7 @@ const ANTHROPIC_TIMEOUT = 60_000;
 async function callOllama(request: AIRequest): Promise<AIResponse> {
   const timeout = request.timeout ?? OLLAMA_TIMEOUT;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const timer = timeout > 0 ? setTimeout(() => controller.abort(), timeout) : null;
   const start = Date.now();
 
   // Append JSON instruction to last user message if needed
@@ -50,7 +50,7 @@ async function callOllama(request: AIRequest): Promise<AIResponse> {
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
+      signal: timeout > 0 ? controller.signal : undefined,
       body: JSON.stringify({
         model: OLLAMA_MODEL,
         messages,
@@ -80,7 +80,7 @@ async function callOllama(request: AIRequest): Promise<AIResponse> {
       durationMs: Date.now() - start,
     };
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
 }
 

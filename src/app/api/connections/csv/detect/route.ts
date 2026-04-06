@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { writeFile, mkdir, unlink } from "fs/promises";
+import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { withAuth } from "@/lib/api";
-import { analyzeCSVCompat } from "@/lib/duckdb/file-analyzer";
+import { analyzeFile, FileAnalysisError } from "@/lib/duckdb/file-analyzer";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads");
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
@@ -41,20 +41,33 @@ export const POST = withAuth(async (req, session) => {
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(filePath, buffer);
 
-  // Detect schema via DuckDB (full dataset analysis, not sampled)
+  // Unified analysis: profiling + UCC discovery in one pass
   const delimiter = formData.get("delimiter") as string | null;
   const hasHeaders = formData.get("hasHeaders");
 
-  const result = await analyzeCSVCompat(buffer, {
-    delimiter: delimiter || undefined,
-    hasHeaders: hasHeaders !== null ? hasHeaders === "true" : undefined,
-  });
+  try {
+    const result = await analyzeFile(buffer, file.name, {
+      delimiter: delimiter || undefined,
+      hasHeaders: hasHeaders !== null ? hasHeaders === "true" : undefined,
+    });
 
-  return NextResponse.json({
-    fileId,
-    filePath, // server path — stored in connection config for provider access
-    originalFilename: file.name,
-    fileSize: file.size,
-    ...result,
-  });
+    return NextResponse.json({
+      fileId,
+      filePath,
+      originalFilename: file.name,
+      fileSize: file.size,
+      ...result,
+      // Backward compat fields
+      sampleRows: result.previewRows,
+      delimiter: delimiter || ",",
+      hasHeaders: hasHeaders !== null ? hasHeaders === "true" : true,
+      encoding: "utf-8",
+    });
+  } catch (err) {
+    if (err instanceof FileAnalysisError) {
+      const status = err.code === "FILE_TOO_LARGE" ? 413 : 422;
+      return NextResponse.json({ error: err.message, code: err.code }, { status });
+    }
+    throw err;
+  }
 });

@@ -180,7 +180,6 @@ export async function pruneColumns(
     const result = await runAI({
       messages: [{ role: "user", content: buildPruningPrompt(columns) }],
       responseFormat: "json",
-      timeout: 5000,
     });
 
     const candidates = parseAIResponse(result.content, allNames);

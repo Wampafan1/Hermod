@@ -17,6 +17,9 @@ export const POST = withAuth(async (req, session) => {
     include: {
       source: { select: { id: true, type: true, config: true, credentials: true } },
       dest: { select: { id: true, type: true, config: true, credentials: true } },
+      ravenSatellite: {
+        select: { id: true, name: true, tenantId: true, connections: true, lastHeartbeatAt: true },
+      },
     },
   });
   if (!route) {

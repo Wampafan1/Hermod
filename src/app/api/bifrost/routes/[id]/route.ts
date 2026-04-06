@@ -69,6 +69,10 @@ export const PUT = withAuth(async (req, session) => {
       ...(data.name !== undefined && { name: data.name }),
       ...(data.enabled !== undefined && { enabled: data.enabled }),
       ...(data.sourceId !== undefined && { sourceId: data.sourceId }),
+      ...(data.ravenSatelliteId !== undefined && { ravenSatelliteId: data.ravenSatelliteId }),
+      // Clear the other source when switching between direct and Raven
+      ...(data.ravenSatelliteId && { sourceId: null }),
+      ...(data.sourceId && { ravenSatelliteId: null }),
       ...(data.sourceConfig !== undefined && { sourceConfig: data.sourceConfig as Prisma.InputJsonValue }),
       ...(data.destId !== undefined && { destId: data.destId }),
       ...(data.destConfig !== undefined && { destConfig: data.destConfig as Prisma.InputJsonValue }),

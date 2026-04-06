@@ -33,6 +33,14 @@ interface ConnectionRow {
   name: string;
   type: ConnectionType;
   status: string;
+  folderId?: string | null;
+}
+
+interface FolderOption {
+  id: string;
+  name: string;
+  color: string;
+  connectionCount: number;
 }
 
 /* ────────────────── Destination-capable types ──────────── */
@@ -51,7 +59,9 @@ export function WizardDestination({
   onBack,
 }: WizardDestinationProps) {
   /* ── Connection fetch state ── */
-  const [connections, setConnections] = useState<ConnectionRow[]>([]);
+  const [allConnections, setAllConnections] = useState<ConnectionRow[]>([]);
+  const [folders, setFolders] = useState<FolderOption[]>([]);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | "">("");
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
@@ -64,19 +74,26 @@ export function WizardDestination({
   >("WRITE_TRUNCATE");
   const [incrementalSync, setIncrementalSync] = useState(false);
 
-  /* ── Fetch connections on mount ── */
+  /* ── Fetch connections + folders on mount ── */
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        const res = await fetch("/api/connections");
-        if (!res.ok) {
-          throw new Error(`Failed to fetch connections (${res.status})`);
+        const [connRes, folderRes] = await Promise.all([
+          fetch("/api/connections"),
+          fetch("/api/connection-folders").catch(() => null),
+        ]);
+        if (!connRes.ok) {
+          throw new Error(`Failed to fetch connections (${connRes.status})`);
         }
-        const data: ConnectionRow[] = await res.json();
+        const data: ConnectionRow[] = await connRes.json();
+        const folderData: FolderOption[] = folderRes?.ok
+          ? await folderRes.json()
+          : [];
         if (!cancelled) {
-          setConnections(data.filter((c) => DESTINATION_TYPES.has(c.type)));
+          setAllConnections(data.filter((c) => DESTINATION_TYPES.has(c.type)));
+          setFolders(folderData);
           setLoading(false);
         }
       } catch (err) {
@@ -94,6 +111,15 @@ export function WizardDestination({
       cancelled = true;
     };
   }, []);
+
+  /* ── Folder-filtered connections ── */
+  const connections = useMemo(
+    () =>
+      selectedFolderId
+        ? allConnections.filter((c) => c.folderId === selectedFolderId)
+        : allConnections,
+    [allConnections, selectedFolderId],
+  );
 
   /* ── Derived values ── */
   const selectedConnection = useMemo(
@@ -158,6 +184,28 @@ export function WizardDestination({
       <p className="text-text-dim text-xs tracking-wide mt-1">
         Where should the data be delivered?
       </p>
+
+      {/* Folder filter */}
+      {!loading && folders.length > 0 && (
+        <div className="mt-6">
+          <span className="label-norse block mb-2">Folder</span>
+          <select
+            value={selectedFolderId}
+            onChange={(e) => {
+              setSelectedFolderId(e.target.value);
+              setSelectedId(null);
+            }}
+            className="select-norse"
+          >
+            <option value="">All folders</option>
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name} ({f.connectionCount})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Connection picker */}
       <div className="mt-6">

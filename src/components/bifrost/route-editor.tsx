@@ -13,6 +13,14 @@ interface DataSourceOption {
   id: string;
   name: string;
   type: string;
+  folderId?: string | null;
+}
+
+interface FolderOption {
+  id: string;
+  name: string;
+  color: string;
+  connectionCount: number;
 }
 
 interface BlueprintOption {
@@ -111,6 +119,8 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
 
   // Reference data
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
+  const [folders, setFolders] = useState<FolderOption[]>([]);
+  const [destFolderId, setDestFolderId] = useState<string | "">("");
   const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEdit);
@@ -196,6 +206,11 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
       .then((r) => r.json())
       .then((data) => setDataSources(data))
       .catch(() => toast.error("Failed to load connections"));
+
+    fetch("/api/connection-folders")
+      .then((r) => r.json())
+      .then((data) => setFolders(data))
+      .catch(() => {/* folders are optional */});
 
     fetch("/api/mjolnir/blueprints")
       .then((r) => r.json())
@@ -367,7 +382,10 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
   }
 
   const sourceSources = dataSources.filter((ds) => canBeSource(ds.type as ConnectionType));
-  const destSources = dataSources.filter((ds) => canBeDestination(ds.type as ConnectionType));
+  const allDestSources = dataSources.filter((ds) => canBeDestination(ds.type as ConnectionType));
+  const destSources = destFolderId
+    ? allDestSources.filter((ds) => ds.folderId === destFolderId)
+    : allDestSources;
 
   // Filtered record types for search
   const filteredRecordTypes = nsRecordSearch
@@ -642,6 +660,26 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
 
       {/* Section 3: Destination */}
       <Section title="Destination Configuration">
+        {folders.length > 0 && (
+          <Label text="Folder">
+            <select
+              value={destFolderId}
+              onChange={(e) => {
+                setDestFolderId(e.target.value);
+                setDestId(""); // reset connection when folder changes
+              }}
+              className="select-norse"
+            >
+              <option value="">All folders</option>
+              {folders.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name} ({f.connectionCount})
+                </option>
+              ))}
+            </select>
+          </Label>
+        )}
+
         <Label text="Connection">
           <select
             value={destId}

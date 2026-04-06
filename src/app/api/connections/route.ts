@@ -15,6 +15,7 @@ export const GET = withAuth(async (_req, session) => {
       config: true,
       status: true,
       lastTestedAt: true,
+      folderId: true,
       createdAt: true,
       updatedAt: true,
       // NEVER return credentials

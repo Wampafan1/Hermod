@@ -21,6 +21,14 @@ interface DataSourceOption {
   id: string;
   name: string;
   type: string;
+  folderId?: string | null;
+}
+
+interface FolderOption {
+  id: string;
+  name: string;
+  color: string;
+  connectionCount: number;
 }
 
 interface BlueprintOption {
@@ -42,6 +50,23 @@ interface NetSuiteField {
   mandatory?: boolean;
   isCustom?: boolean;
   isReference?: boolean;
+}
+
+interface RavenConnection {
+  satelliteId: string;
+  connectionId: string;
+  name: string;
+  driver: string;
+  database: string;
+  status: string;
+}
+
+interface RavenAgent {
+  ravenId: string;
+  ravenName: string;
+  status: "online" | "offline";
+  lastHeartbeat: string | null;
+  connections: RavenConnection[];
 }
 
 // ─── Constants ──────────────────────────────────────────
@@ -83,6 +108,8 @@ export function SyncBuilder() {
 
   // ── Source state ──
   const [sourceId, setSourceId] = useState("");
+  const [ravenSatelliteId, setRavenSatelliteId] = useState<string | null>(null);
+  const [ravenConnectionId, setRavenConnectionId] = useState<string | null>(null);
   const [query, setQuery] = useState(""); // BigQuery SQL
   const [incrementalKey, setIncrementalKey] = useState("");
 
@@ -124,6 +151,9 @@ export function SyncBuilder() {
 
   // ── Reference data ──
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
+  const [ravenAgents, setRavenAgents] = useState<RavenAgent[]>([]);
+  const [folders, setFolders] = useState<FolderOption[]>([]);
+  const [destFolderId, setDestFolderId] = useState<string | "">("");
   const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
@@ -131,7 +161,20 @@ export function SyncBuilder() {
   // ── Derived ──
   const selectedSource = dataSources.find((ds) => ds.id === sourceId);
   const isNetSuiteSource = selectedSource?.type === "NETSUITE";
+  const isRavenSource = !!ravenSatelliteId;
   const selectedDest = dataSources.find((ds) => ds.id === destId);
+
+  // Find selected Raven connection details for display
+  const selectedRavenConn = useMemo(() => {
+    if (!ravenSatelliteId || !ravenConnectionId) return null;
+    for (const agent of ravenAgents) {
+      const conn = agent.connections.find(
+        (c) => c.satelliteId === ravenSatelliteId && c.connectionId === ravenConnectionId
+      );
+      if (conn) return { ...conn, agentName: agent.ravenName, agentStatus: agent.status };
+    }
+    return null;
+  }, [ravenSatelliteId, ravenConnectionId, ravenAgents]);
 
   const { sourceSources, destSources } = useMemo(() => {
     const src: DataSourceOption[] = [];
@@ -140,8 +183,11 @@ export function SyncBuilder() {
       if (canBeSource(ds.type as ConnectionType)) src.push(ds);
       if (canBeDestination(ds.type as ConnectionType)) dest.push(ds);
     }
-    return { sourceSources: src, destSources: dest };
-  }, [dataSources]);
+    const filteredDest = destFolderId
+      ? dest.filter((ds) => ds.folderId === destFolderId)
+      : dest;
+    return { sourceSources: src, destSources: filteredDest };
+  }, [dataSources, destFolderId]);
 
   const filteredRecordTypes = useMemo(() => {
     if (!nsRecordSearch) return nsRecordTypes;
@@ -169,9 +215,11 @@ export function SyncBuilder() {
     });
   }, [isNetSuiteSource, nsRecordType, nsFields, nsFilter]);
 
-  const hasValidSource = isNetSuiteSource
-    ? !!nsRecordType && nsFields.length > 0
-    : !!query;
+  const hasValidSource = isRavenSource
+    ? !!query
+    : isNetSuiteSource
+      ? !!nsRecordType && nsFields.length > 0
+      : !!query;
 
   // ── Derive field mappings from NS fields, merging user dest column overrides ──
   const derivedFieldMappings = useMemo(() => {
@@ -219,14 +267,22 @@ export function SyncBuilder() {
       fetch("/api/mjolnir/blueprints")
         .then((r) => r.json())
         .catch(() => []),
+      fetch("/api/connection-folders")
+        .then((r) => r.json())
+        .catch(() => []),
+      fetch("/api/bifrost/raven-connections")
+        .then((r) => r.json())
+        .catch(() => []),
     ])
-      .then(([connections, bps]) => {
+      .then(([connections, bps, flds, ravens]) => {
         setDataSources(connections);
         setBlueprints(
           (bps as BlueprintOption[]).filter(
             (b) => b.status === "VALIDATED" || b.status === "ACTIVE"
           )
         );
+        setFolders(flds as FolderOption[]);
+        setRavenAgents(Array.isArray(ravens) ? ravens : []);
       })
       .catch(() => toast.error("Failed to load connections"))
       .finally(() => setLoadingData(false));
@@ -288,22 +344,29 @@ export function SyncBuilder() {
         fieldMap[m.sourceField] = m.destColumn;
       }
 
-      const sourceConfig: Record<string, unknown> = isNetSuiteSource
+      const sourceConfig: Record<string, unknown> = isRavenSource
         ? {
-            query: generatedSuiteQL,
-            recordType: nsRecordType,
-            fields: nsFields,
-            ...(nsFilter.trim() && { filter: nsFilter.trim() }),
-            ...(incrementalKey && { incrementalKey }),
-          }
-        : {
             query,
-            ...(incrementalKey && { incrementalKey }),
-          };
+            ...(ravenConnectionId && { connectionId: ravenConnectionId }),
+          }
+        : isNetSuiteSource
+          ? {
+              query: generatedSuiteQL,
+              recordType: nsRecordType,
+              fields: nsFields,
+              ...(nsFilter.trim() && { filter: nsFilter.trim() }),
+              ...(incrementalKey && { incrementalKey }),
+            }
+          : {
+              query,
+              ...(incrementalKey && { incrementalKey }),
+            };
 
       const payload = {
         name,
-        sourceId,
+        ...(ravenSatelliteId
+          ? { ravenSatelliteId }
+          : { sourceId }),
         sourceConfig,
         destId,
         destConfig: {
@@ -369,6 +432,8 @@ export function SyncBuilder() {
     setQuery("");
     setFieldMappings([]);
     setCursorConfig(null);
+    setRavenSatelliteId(null);
+    setRavenConnectionId(null);
   }
 
   // ─── Render ───────────────────────────────────────────
@@ -440,24 +505,98 @@ export function SyncBuilder() {
             <div>
               <label className="label-norse">Connection</label>
               <select
-                value={sourceId}
+                value={ravenSatelliteId ? `raven:${ravenSatelliteId}:${ravenConnectionId}` : sourceId}
                 onChange={(e) => {
-                  setSourceId(e.target.value);
+                  const val = e.target.value;
                   resetSourceState();
+                  if (val.startsWith("raven:")) {
+                    const [, satId, connId] = val.split(":");
+                    setRavenSatelliteId(satId);
+                    setRavenConnectionId(connId);
+                    setSourceId("");
+                  } else {
+                    setSourceId(val);
+                    setRavenSatelliteId(null);
+                    setRavenConnectionId(null);
+                  }
                 }}
                 className="select-norse"
               >
                 <option value="">Select source...</option>
-                {sourceSources.map((ds) => (
-                  <option key={ds.id} value={ds.id}>
-                    {ds.name} ({ds.type})
-                  </option>
-                ))}
+                {sourceSources.length > 0 && (
+                  <optgroup label="Direct Connections">
+                    {sourceSources.map((ds) => (
+                      <option key={ds.id} value={ds.id}>
+                        {ds.name} ({ds.type})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {ravenAgents.length > 0 && (
+                  <optgroup label="Via Data Agent">
+                    {ravenAgents.flatMap((agent) =>
+                      agent.connections.map((conn) => (
+                        <option
+                          key={`${conn.satelliteId}:${conn.connectionId}`}
+                          value={`raven:${conn.satelliteId}:${conn.connectionId}`}
+                        >
+                          {conn.name} ({conn.driver.toUpperCase()}) — via {agent.ravenName} [{agent.status}]
+                        </option>
+                      ))
+                    )}
+                  </optgroup>
+                )}
               </select>
             </div>
 
+            {/* Raven source info badge */}
+            {isRavenSource && selectedRavenConn && (
+              <div className="border border-border bg-void/50 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      selectedRavenConn.agentStatus === "online"
+                        ? "bg-success status-pulse-green"
+                        : "bg-text-dim/40"
+                    }`}
+                  />
+                  <span className="text-xs tracking-wider text-text">
+                    {selectedRavenConn.name}
+                  </span>
+                  <span className="text-[0.5rem] tracking-widest uppercase text-text-dim border border-border/40 px-1 py-px">
+                    {selectedRavenConn.driver}
+                  </span>
+                </div>
+                <p className="text-[0.55rem] tracking-wider text-text-dim mt-1">
+                  via Data Agent &ldquo;{selectedRavenConn.agentName}&rdquo;
+                  {selectedRavenConn.agentStatus === "offline" && (
+                    <span className="text-ember ml-1">(offline — jobs will queue)</span>
+                  )}
+                </p>
+              </div>
+            )}
+
+            {/* Raven source: SQL textarea */}
+            {isRavenSource && (
+              <>
+                <div>
+                  <label className="label-norse">SQL Query</label>
+                  <textarea
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="SELECT TOP 100 * FROM Customers"
+                    rows={8}
+                    className="input-norse font-mono text-xs"
+                  />
+                  <p className="text-text-dim text-[0.55rem] tracking-wider mt-1">
+                    This query will be executed by the Data Agent against the on-prem database
+                  </p>
+                </div>
+              </>
+            )}
+
             {/* BigQuery: SQL textarea */}
-            {selectedSource && !isNetSuiteSource && (
+            {selectedSource && !isNetSuiteSource && !isRavenSource && (
               <>
                 <div>
                   <label className="label-norse">SQL Query</label>
@@ -811,6 +950,27 @@ export function SyncBuilder() {
           rune="ᚷ"
         >
           <div className="space-y-3">
+            {folders.length > 0 && (
+              <div>
+                <label className="label-norse">Folder</label>
+                <select
+                  value={destFolderId}
+                  onChange={(e) => {
+                    setDestFolderId(e.target.value);
+                    setDestId(""); // reset connection when folder changes
+                  }}
+                  className="select-norse"
+                >
+                  <option value="">All folders</option>
+                  {folders.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name} ({f.connectionCount})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div>
               <label className="label-norse">Connection</label>
               <select
@@ -899,9 +1059,10 @@ export function SyncBuilder() {
       {/* ═══ Route Preview ═══ */}
       <RoutePreview
         sourceType={isNetSuiteSource ? "NETSUITE" : "BIGQUERY"}
-        sourceName={selectedSource?.name ?? ""}
+        sourceName={isRavenSource ? (selectedRavenConn?.name ?? "Data Agent") : (selectedSource?.name ?? "")}
         destName={selectedDest?.name ?? ""}
         forgeEnabled={transformEnabled}
+        viaRaven={isRavenSource}
       />
 
       {/* ═══ Schedule ═══ */}
@@ -1032,7 +1193,7 @@ export function SyncBuilder() {
           disabled={
             saving ||
             !name ||
-            !sourceId ||
+            (!sourceId && !ravenSatelliteId) ||
             !hasValidSource ||
             !destId ||
             !destDataset ||

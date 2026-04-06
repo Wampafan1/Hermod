@@ -58,11 +58,12 @@ export interface LoadResult {
 
 export interface RouteJobResult {
   routeLogId: string;
-  status: "completed" | "partial" | "failed" | "skipped";
+  status: "completed" | "partial" | "failed" | "skipped" | "waiting_for_agent";
   totalExtracted: number;
   totalLoaded: number;
   errorCount: number;
   duration: number; // milliseconds
+  ravenJobId?: string;
 }
 
 export interface RouteJobPayload {

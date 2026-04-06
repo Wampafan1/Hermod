@@ -330,16 +330,23 @@ class DuckDBAnalyticsSession implements AnalyticsSession {
     const profileRows = await this.query(profileSql);
     const stats = profileRows[0] ?? {};
 
-    // Fetch sample values per column (5 distinct non-null values each)
+    // Fetch sample values for ALL columns in a single batched query (UNION ALL)
     const sampleMap = new Map<string, string[]>();
-    for (const col of tableInfo.columns) {
-      const sampleRows = await this.query<{ val: string }>(
-        `SELECT DISTINCT ${quoteIdent(col.name)}::VARCHAR AS val
-         FROM ${quoteIdent(tableName)}
-         WHERE ${quoteIdent(col.name)} IS NOT NULL
-         LIMIT 5`
-      );
-      sampleMap.set(col.name, sampleRows.map((r) => r.val));
+    if (tableInfo.columns.length > 0) {
+      const sampleUnions = tableInfo.columns.map((col, idx) => {
+        const q = quoteIdent(col.name);
+        const tbl = quoteIdent(tableName);
+        return `SELECT ${idx} AS col_idx, ${q}::VARCHAR AS val FROM (SELECT DISTINCT ${q} FROM ${tbl} WHERE ${q} IS NOT NULL LIMIT 5)`;
+      });
+      const sampleSql = sampleUnions.join(" UNION ALL ");
+      const sampleRows = await this.query<{ col_idx: number; val: string }>(sampleSql);
+      for (const row of sampleRows) {
+        const col = tableInfo.columns[row.col_idx];
+        if (!col) continue;
+        const existing = sampleMap.get(col.name) ?? [];
+        existing.push(row.val);
+        sampleMap.set(col.name, existing);
+      }
     }
 
     const columns: ColumnProfile[] = tableInfo.columns.map((col, idx) => {

@@ -48,6 +48,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
   const [database, setDatabase] = useState<string>(extractFromConfig(initialConfig, "database", ""));
   const [username, setUsername] = useState<string>(extractFromConfig(initialConfig, "username", ""));
   const [password, setPassword] = useState("");
+  const [ssl, setSsl] = useState<boolean>(extractFromConfig(initialConfig, "ssl", true));
 
   // BigQuery
   const [bqProjectId, setBqProjectId] = useState<string>(extractFromConfig(initialConfig, "projectId", ""));
@@ -147,7 +148,7 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
     return {
       name,
       type,
-      config: { host, port, database, username, ssl: false },
+      config: { host, port, database, username, ssl },
       ...(password ? { credentials: { password } } : {}),
     };
   }
@@ -415,6 +416,15 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
                   />
                 </div>
               </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={ssl}
+                  onChange={(e) => setSsl(e.target.checked)}
+                  className="accent-gold"
+                />
+                <span className="text-text-dim text-xs tracking-wide">Use SSL</span>
+              </label>
             </>
           )}
 

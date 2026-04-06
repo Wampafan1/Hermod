@@ -3,7 +3,7 @@ import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { withAuth } from "@/lib/api";
-import { analyzeExcelCompat } from "@/lib/duckdb/file-analyzer";
+import { analyzeFile, FileAnalysisError } from "@/lib/duckdb/file-analyzer";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads");
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
@@ -41,22 +41,33 @@ export const POST = withAuth(async (req, session) => {
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(filePath, buffer);
 
-  // Detect schema via DuckDB (full dataset analysis, not sampled)
+  // Unified analysis: profiling + UCC discovery in one pass
   const sheetName = formData.get("sheetName") as string | null;
   const headerRow = formData.get("headerRow");
   const dataStartRow = formData.get("dataStartRow");
 
-  const result = await analyzeExcelCompat(buffer, {
-    sheetName: sheetName || undefined,
-    headerRow: headerRow ? Number(headerRow) : undefined,
-    dataStartRow: dataStartRow ? Number(dataStartRow) : undefined,
-  });
+  try {
+    const result = await analyzeFile(buffer, file.name, {
+      sheetName: sheetName || undefined,
+      headerRow: headerRow ? Number(headerRow) : undefined,
+      dataStartRow: dataStartRow ? Number(dataStartRow) : undefined,
+    });
 
-  return NextResponse.json({
-    fileId,
-    filePath, // server path — stored in connection config for provider access
-    originalFilename: file.name,
-    fileSize: file.size,
-    ...result,
-  });
+    return NextResponse.json({
+      fileId,
+      filePath,
+      originalFilename: file.name,
+      fileSize: file.size,
+      ...result,
+      // Backward compat fields that existing UI expects
+      sampleRows: result.previewRows,
+      sheetName: result.selectedSheet,
+    });
+  } catch (err) {
+    if (err instanceof FileAnalysisError) {
+      const status = err.code === "FILE_TOO_LARGE" ? 413 : 422;
+      return NextResponse.json({ error: err.message, code: err.code }, { status });
+    }
+    throw err;
+  }
 });

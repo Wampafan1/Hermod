@@ -42,6 +42,7 @@ interface ConnectionListProps {
   connections: ConnectionWithFolder[];
   emailConnections: EmailConnection[];
   folders: FolderInfo[];
+  ravenCount: number;
 }
 
 const FILE_TYPES = new Set(["CSV_FILE", "EXCEL_FILE"]);
@@ -59,10 +60,13 @@ const FOLDER_COLORS = [
   "#4dd0e1", // Vanaheim teal
 ];
 
+const AGENT_BANNER_KEY = "hermod:dismiss-agent-banner";
+
 export function ConnectionList({
   connections: initialConnections,
   emailConnections: initialEmail,
   folders: initialFolders,
+  ravenCount,
 }: ConnectionListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -75,6 +79,17 @@ export function ConnectionList({
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [editingEmail, setEditingEmail] = useState<EmailConnection | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{ id: string; type: "connection" | "email" | "folder" } | null>(null);
+
+  // Data Agent banner dismiss
+  const [agentBannerDismissed, setAgentBannerDismissed] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem(AGENT_BANNER_KEY) === "1";
+  });
+
+  function dismissAgentBanner() {
+    localStorage.setItem(AGENT_BANNER_KEY, "1");
+    setAgentBannerDismissed(true);
+  }
 
   // Folder creation modal
   const [showFolderModal, setShowFolderModal] = useState(false);
@@ -312,6 +327,36 @@ export function ConnectionList({
 
   return (
     <>
+      {/* Data Agent awareness banner */}
+      {ravenCount === 0 && !agentBannerDismissed && (
+        <div className="mb-4 p-4 bg-amber-50 border border-amber-200/50 flex items-start gap-3">
+          <span className="text-amber-700 text-lg leading-none mt-0.5 font-cinzel" aria-hidden="true">&#x16BA;</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-amber-900 font-medium">
+              Have on-premises databases?
+              <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-mono font-bold tracking-wider uppercase align-middle">Thor</span>
+            </p>
+            <p className="text-xs text-amber-800/70 mt-0.5">
+              The Hermod Data Agent bridges your local SQL Server, PostgreSQL, or MySQL to the cloud &mdash; no VPN needed.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Link
+              href="/settings/ravens"
+              className="text-xs font-inconsolata font-bold text-amber-800 hover:text-amber-950 tracking-wide transition-colors"
+            >
+              Set Up Data Agent &rarr;
+            </Link>
+            <button
+              onClick={dismissAgentBanner}
+              className="text-xs text-amber-600/60 hover:text-amber-800 transition-colors ml-2"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* New Folder button */}
       <div className="flex justify-end mb-2">
         <button onClick={() => setShowFolderModal(true)} className="btn-ghost text-xs">
@@ -398,6 +443,34 @@ export function ConnectionList({
               </div>
             </div>
           )}
+
+          {/* Data Agent card — permanent entry point */}
+          <div>
+            <RuneDivider rune="ᚺ" color="#d4af37" className="mb-4" />
+            <h2 className="heading-norse text-sm mb-3" style={{ color: "#d4af37" }}>On-Premises</h2>
+            <Link
+              href="/settings/ravens"
+              className="block bg-deep border border-amber-700/20 hover:border-gold-dim p-5 transition-all group"
+            >
+              <div className="flex items-start gap-4">
+                <span className="text-2xl font-cinzel text-gold shrink-0 mt-0.5" aria-hidden="true">&#x16BA;</span>
+                <div className="min-w-0">
+                  <h3 className="font-cinzel text-sm text-text group-hover:text-gold-bright transition-colors">
+                    On-Premises via Data Agent
+                    <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-mono font-bold tracking-wider uppercase align-middle">Thor</span>
+                  </h3>
+                  <p className="text-[10px] font-inconsolata text-text-muted tracking-wider mt-1">
+                    SQL Server &middot; PostgreSQL &middot; MySQL &mdash; through a local agent
+                  </p>
+                  {ravenCount > 0 && (
+                    <p className="text-[10px] font-inconsolata text-gold tracking-wider mt-2">
+                      {ravenCount} agent{ravenCount !== 1 ? "s" : ""} connected
+                    </p>
+                  )}
+                </div>
+              </div>
+            </Link>
+          </div>
         </div>
       )}
 

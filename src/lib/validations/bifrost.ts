@@ -74,7 +74,8 @@ export const detectCursorSchema = z.object({
 
 export const createRouteSchema = z.object({
   name: z.string().min(1, "Route name is required").max(200),
-  sourceId: z.string().min(1, "Source connection is required"),
+  sourceId: z.string().min(1).optional(),          // Direct connection source
+  ravenSatelliteId: z.string().min(1).optional(),   // Raven agent source (mutually exclusive with sourceId)
   sourceConfig: sourceConfigSchema,
   destId: z.string().min(1, "Destination connection is required"),
   destConfig: destConfigSchema,
@@ -87,14 +88,18 @@ export const createRouteSchema = z.object({
   timeMinute: z.number().int().min(0).max(59).default(0),
   timezone: z.string().default("America/Chicago"),
   cursorConfig: cursorConfigSchema,
-});
+}).refine(
+  (data) => data.sourceId || data.ravenSatelliteId,
+  { message: "Either sourceId or ravenSatelliteId is required", path: ["sourceId"] }
+);
 
 // ─── Update Route ────────────────────────────────────
 
 export const updateRouteSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   enabled: z.boolean().optional(),
-  sourceId: z.string().min(1).optional(),
+  sourceId: z.string().min(1).nullable().optional(),
+  ravenSatelliteId: z.string().min(1).nullable().optional(),
   sourceConfig: sourceConfigSchema.optional(),
   destId: z.string().min(1).optional(),
   destConfig: destConfigSchema.optional(),

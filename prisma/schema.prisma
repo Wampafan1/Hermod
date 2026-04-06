@@ -110,6 +110,14 @@ model Tenant {
   forgeBlueprints   ForgeBlueprint[]
   sftpConnections   SftpConnection[]
   emailConnections  EmailConnection[]
+
+  // Realm Gates
+  realmGates        RealmGate[]
+  gatePushes        GatePush[]
+
+  // Raven (on-prem agents)
+  ravenApiKeys      RavenApiKey[]
+  ravenSatellites   RavenSatellite[]
 }
 
 model TenantMembership {
@@ -377,6 +385,7 @@ model ForgeBlueprint {
 
   versions        ForgeBlueprintVersion[]
   executions      ForgeBlueprintExecution[]
+  realmGates      RealmGate[]
 
   @@index([tenantId])
 }
@@ -500,6 +509,7 @@ model Connection {
   fileEntries    FileEntry[]
   routesAsSource BifrostRoute[] @relation("routeSource")
   routesAsDest   BifrostRoute[] @relation("routeDest")
+  realmGates     RealmGate[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -573,10 +583,14 @@ model BifrostRoute {
   name             String
   enabled          Boolean        @default(true)
 
-  // Source
-  sourceId         String
-  source           Connection     @relation("routeSource", fields: [sourceId], references: [id], onDelete: Restrict)
+  // Source (direct connection OR Raven satellite — mutually exclusive)
+  sourceId         String?
+  source           Connection?    @relation("routeSource", fields: [sourceId], references: [id], onDelete: Restrict)
   sourceConfig     Json           // { query, dataset, incrementalKey, chunkSize? }
+
+  // Raven (on-prem agent) source — alternative to sourceId
+  ravenSatelliteId String?
+  ravenSatellite   RavenSatellite? @relation(fields: [ravenSatelliteId], references: [id])
 
   // Destination
   destId           String
@@ -732,4 +746,171 @@ model ApiCatalogObject {
   schema          Json
 
   @@unique([connectorId, slug])
+}
+
+// ─── Raven (On-Prem Data Agents) ────────────────────
+
+model RavenApiKey {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  keyHash     String    @unique    // bcrypt hash of the full API key
+  keyPrefix   String               // First 8 chars for display: "hrv_a1b2..."
+  name        String               // Human-friendly: "Production Raven Key"
+  scopes      String[]  @default(["raven:read", "raven:push"])
+  status      String    @default("active")  // active | revoked
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@index([keyHash])
+}
+
+model RavenSatellite {
+  id                String    @id @default(uuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name              String    // "Pinnacle Shop Floor", "HQ SQL Server"
+  apiKeyHash        String    // Hash of the API key used to register (links to RavenApiKey.keyHash)
+  status            String    @default("pending")  // pending | active | disconnected | revoked
+  version           String?
+  hostname          String?
+  platform          String?
+  lastHeartbeatAt   DateTime?
+  metadata          Json?     // Latest heartbeat payload (uptime, memory, cpu, etc.)
+  connections       Json?     // Connection summaries: [{id, name, driver, database, status}]
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  jobs              RavenJob[]
+  routes            BifrostRoute[]
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([apiKeyHash])
+}
+
+model RavenJob {
+  id              String          @id @default(uuid())
+  ravenId         String
+  raven           RavenSatellite  @relation(fields: [ravenId], references: [id], onDelete: Cascade)
+  routeId         String?         // Optional link to a Bifrost route that created this job
+  routeLogId      String?         // RouteLog ID for pipeline resumption
+  connectionId    String          // Raven-local connection ID (matches DatabaseConnection.id on the Raven)
+  query           String          @db.Text
+  queryParams     Json?
+  schedule        String?         // Cron expression for recurring jobs
+  destination     Json            // { type: "hermod_cloud" | "direct_push", endpoint?, table?, mode: "append" | "replace" }
+  timeout         Int             @default(120)   // Query timeout in seconds
+  maxRows         Int?            // Safety valve row limit
+  priority        Int             @default(3)     // 1 = highest, 5 = lowest
+  status          String          @default("pending")  // pending | claimed | running | success | error | partial
+  claimedAt       DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  result          Json?           // { rowCount, byteSize, durationMs, error?, chunks }
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  ingestChunks    RavenIngestChunk[]
+
+  @@index([ravenId, status])
+  @@index([status])
+  @@index([createdAt])
+  @@index([connectionId])
+}
+
+model RavenIngestChunk {
+  id            String    @id @default(uuid())
+  jobId         String
+  job           RavenJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  chunkIndex    Int
+  totalChunks   Int
+  data          Json      @db.JsonB
+  receivedAt    DateTime  @default(now())
+
+  @@unique([jobId, chunkIndex])
+  @@index([jobId])
+}
+
+// ─── Realm Gates ────────────────────────────────────
+
+model RealmGate {
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name              String
+
+  realmType         String           // "VANAHEIM" (Excel) or "JOTUNHEIM" (CSV/TSV)
+
+  // Destination (always Asgard — a database connection)
+  connectionId      String
+  connection        Connection       @relation(fields: [connectionId], references: [id])
+  targetTable       String           // e.g. "Customers"
+  targetSchema      String?          // e.g. "dbo" — nullable for databases that don't use schemas
+
+  // Mapping & Strategy
+  primaryKeyColumns Json             @default("[]") // Array of source column names — e.g. ["PO Number", "ISBN"]
+  mergeStrategy     String           // "UPSERT" | "TRUNCATE_RELOAD" | "APPEND"
+  columnMapping     Json             // Array of { sourceColumn, destinationColumn, sourceType, destType }
+  savedSchema       Json             // DuckDB-profiled schema snapshot from initial setup file (drift detection)
+
+  // Optional Forge
+  forgeEnabled      Boolean          @default(false)
+  forgeBlueprintId  String?
+  forgeBlueprint    ForgeBlueprint?  @relation(fields: [forgeBlueprintId], references: [id], onDelete: SetNull)
+
+  // Metadata
+  status            String           @default("ACTIVE") // "ACTIVE" | "PAUSED" | "ARCHIVED"
+  lastPushAt        DateTime?
+  pushCount         Int              @default(0)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  pushes            GatePush[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+model GatePush {
+  id              String    @id @default(cuid())
+  gateId          String
+  gate            RealmGate @relation(fields: [gateId], references: [id], onDelete: Cascade)
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // File info
+  fileName        String
+  fileSize        Int       // bytes
+  fileMimeType    String?
+
+  // Execution
+  status          String    // "VALIDATING" | "VALIDATED" | "SCHEMA_DRIFT" | "PUSHING" | "SUCCESS" | "FAILED" | "CANCELLED"
+  rowCount        Int?
+  rowsInserted    Int?
+  rowsUpdated     Int?
+  rowsErrored     Int?
+
+  // Schema drift details
+  schemaDiff      Json?     // { added: [], removed: [], typeChanged: [] }
+  driftResolution String?   // "ADJUSTED_FILE" | "ADJUSTED_DESTINATION" | null
+
+  // Error handling
+  errorMessage    String?
+  errorDetails    Json?     // stack trace, row-level errors, etc.
+
+  // Temp file reference (for schema drift re-push)
+  tempFileId      String?
+
+  // Timing
+  duration        Int?      // milliseconds
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+
+  @@index([gateId])
+  @@index([tenantId])
+  @@index([tenantId, createdAt(sort: Desc)])
 }
