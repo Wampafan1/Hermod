@@ -26,20 +26,24 @@ export async function handleRouteJob(job: {
 
   // Tier gate: webhook triggers require Thor+
   if (triggeredBy === "webhook") {
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: route.tenantId },
-      select: { plan: true },
-    });
-    if (!tenant || !hasTierFeature(tenant.plan, "webhookTriggers")) {
-      console.warn(`[Worker] Webhook trigger blocked for route ${routeId} -- tenant on ${tenant?.plan ?? "unknown"} plan`);
-      return {
-        routeLogId: "",
-        status: "skipped",
-        totalExtracted: 0,
-        totalLoaded: 0,
-        errorCount: 0,
-        duration: 0,
-      };
+    if (!route.tenantId) {
+      console.warn(`[Worker] Route ${routeId} has no tenantId — skipping webhook tier check`);
+    } else {
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: route.tenantId },
+        select: { plan: true },
+      });
+      if (!tenant || !hasTierFeature(tenant.plan, "webhookTriggers")) {
+        console.warn(`[Worker] Webhook trigger blocked for route ${routeId} -- tenant on ${tenant?.plan ?? "unknown"} plan`);
+        return {
+          routeLogId: "",
+          status: "skipped",
+          totalExtracted: 0,
+          totalLoaded: 0,
+          errorCount: 0,
+          duration: 0,
+        };
+      }
     }
   }
 

@@ -31,6 +31,7 @@ export interface LoadedRoute {
   id: string;
   name: string;
   enabled: boolean;
+  tenantId: string | null;
   sourceId: string | null;
   source: { id: string; type: string; config: unknown; credentials: string | null } | null;
   ravenSatelliteId: string | null;
