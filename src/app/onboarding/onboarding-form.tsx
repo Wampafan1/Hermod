@@ -20,6 +20,7 @@ export default function OnboardingForm({
 }: OnboardingFormProps) {
   const router = useRouter();
   const [workspaceName, setWorkspaceName] = useState(suggestedName);
+  const [selectedPlan, setSelectedPlan] = useState<"heimdall" | "thor" | "odin">("heimdall");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,13 +32,18 @@ export default function OnboardingForm({
       const res = await fetch("/api/onboarding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workspaceName: workspaceName.trim() }),
+        body: JSON.stringify({ workspaceName: workspaceName.trim(), plan: selectedPlan }),
       });
 
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Failed to create workspace");
         setLoading(false);
+        return;
+      }
+
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
         return;
       }
 
@@ -212,6 +218,57 @@ export default function OnboardingForm({
             }}
           />
 
+          {/* Plan selector */}
+          <div className="mt-5">
+            <label
+              style={{
+                fontFamily: "var(--font-inconsolata), 'Inconsolata', monospace",
+                fontSize: 9,
+                letterSpacing: "0.4em",
+                textTransform: "uppercase",
+                color: "var(--text-dim)",
+                display: "block",
+                marginBottom: "0.5rem",
+              }}
+            >
+              Choose Your Plan
+            </label>
+            <div className="flex flex-col gap-2">
+              {([
+                { id: "heimdall" as const, name: "Heimdall", price: "Free", desc: "Cloud connections, manual config" },
+                { id: "thor" as const, name: "Thor", price: "$99/mo", desc: "Data Agent, webhooks, hourly scheduling" },
+                { id: "odin" as const, name: "Odin", price: "$299/mo", desc: "AI formatting, API discovery, white-label" },
+              ]).map((plan) => (
+                <button
+                  key={plan.id}
+                  type="button"
+                  onClick={() => setSelectedPlan(plan.id)}
+                  style={{
+                    fontFamily: "var(--font-inconsolata), 'Inconsolata', monospace",
+                    fontSize: 12,
+                    textAlign: "left",
+                    padding: "0.75rem 1rem",
+                    background: selectedPlan === plan.id ? "rgba(139,105,20,0.1)" : "transparent",
+                    border: selectedPlan === plan.id
+                      ? "1px solid rgba(201,147,58,0.5)"
+                      : "1px solid rgba(201,147,58,0.15)",
+                    color: "var(--text)",
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  <span style={{ color: "var(--gold-bright)", fontWeight: 700, letterSpacing: "0.1em" }}>
+                    {plan.name}
+                  </span>
+                  <span style={{ color: "var(--text-dim)", marginLeft: "0.75rem" }}>{plan.price}</span>
+                  <span style={{ display: "block", fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
+                    {plan.desc}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <button
             onClick={handleCreate}
             disabled={loading || !workspaceName.trim()}
@@ -227,10 +284,10 @@ export default function OnboardingForm({
             {loading ? (
               <span className="flex items-center gap-3 justify-center">
                 <div className="spinner-norse" style={{ width: 16, height: 16 }} />
-                Forging Realm...
+                {selectedPlan === "heimdall" ? "Forging Realm..." : "Redirecting to Checkout..."}
               </span>
             ) : (
-              "Create Workspace"
+              selectedPlan === "heimdall" ? "Create Workspace" : `Continue with ${selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)}`
             )}
           </button>
         </div>

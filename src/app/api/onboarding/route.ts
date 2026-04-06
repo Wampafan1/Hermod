@@ -6,9 +6,13 @@ import { Prisma } from "@prisma/client";
 import { PERSONAL_EMAIL_DOMAINS } from "@/lib/invitations";
 import { generateUniqueSlug } from "@/lib/tenant-utils";
 import { z } from "zod";
+import { getStripePriceId } from "@/lib/tiers";
+import type { TierName } from "@/lib/tiers";
+import { getStripe } from "@/lib/stripe";
 
 const onboardingSchema = z.object({
   workspaceName: z.string().min(1).max(100),
+  plan: z.enum(["heimdall", "thor", "odin"]).default("heimdall"),
 });
 
 // POST /api/onboarding — Create tenant for new user
@@ -186,6 +190,69 @@ export async function POST(req: Request) {
         data: { activeTenantId: tenant.id },
       }),
     ]);
+  }
+
+  // If paid tier selected, redirect to Stripe Checkout
+  const selectedPlan = parsed.data.plan as TierName;
+  if (selectedPlan !== "heimdall" && !joinedExisting) {
+    const priceId = getStripePriceId(selectedPlan);
+    if (!priceId) {
+      // Stripe not configured — proceed to dashboard on heimdall with a warning
+      console.warn(`[Onboarding] Stripe not configured for ${selectedPlan}. Proceeding on heimdall.`);
+      return NextResponse.json({
+        success: true,
+        tenantId: tenant!.id,
+        tenantName: tenant!.name,
+        joinedExisting,
+        redirectTo: "/dashboard",
+        warning: `${selectedPlan} tier requires Stripe configuration. Your workspace was created on the free tier.`,
+      });
+    }
+
+    try {
+      const stripe = getStripe();
+      const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+
+      let customerId = tenant!.stripeCustomerId;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: session.user.email!,
+          metadata: { tenantId: tenant!.id, tenantName: tenant!.name },
+        });
+        customerId = customer.id;
+        await prisma.tenant.update({
+          where: { id: tenant!.id },
+          data: { stripeCustomerId: customerId },
+        });
+      }
+
+      const checkoutSession = await stripe.checkout.sessions.create({
+        customer: customerId,
+        mode: "subscription",
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${baseUrl}/dashboard?upgraded=true`,
+        cancel_url: `${baseUrl}/dashboard?upgrade=cancelled`,
+        metadata: { tenantId: tenant!.id, tier: selectedPlan },
+      });
+
+      return NextResponse.json({
+        success: true,
+        tenantId: tenant!.id,
+        tenantName: tenant!.name,
+        joinedExisting,
+        checkoutUrl: checkoutSession.url,
+      });
+    } catch (err) {
+      console.error("[Onboarding] Stripe checkout creation failed:", err);
+      return NextResponse.json({
+        success: true,
+        tenantId: tenant!.id,
+        tenantName: tenant!.name,
+        joinedExisting,
+        redirectTo: "/dashboard",
+        warning: "Could not create checkout session. Your workspace was created on the free tier.",
+      });
+    }
   }
 
   return NextResponse.json({
