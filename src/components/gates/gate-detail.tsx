@@ -162,7 +162,30 @@ export function GateDetail({ gate: initialGate }: { gate: GateData }) {
             new Set(stmts.map((_, i) => i).filter((i) => !stmts[i].isComment))
           );
         } else if (data.status === "VALIDATED") {
-          setPushState("confirmed");
+          setValidation(data);
+          // Auto-execute — no confirmation step needed
+          setPushState("pushing");
+
+          try {
+            const execRes = await fetch(`/api/gates/${gate.id}/push/${data.pushId}/execute`, {
+              method: "POST",
+            });
+            const execData = await execRes.json();
+
+            if (!execRes.ok) {
+              setError(execData.error || "Push failed");
+              setPushState("failed");
+              return;
+            }
+
+            setPushResult(execData);
+            setPushState("success");
+            toast.success(`Pushed ${execData.rowCount?.toLocaleString()} rows`);
+            refreshGate();
+          } catch {
+            setError("Network error during push execution");
+            setPushState("failed");
+          }
         }
       } catch {
         setError("Network error");
@@ -507,6 +530,35 @@ export function GateDetail({ gate: initialGate }: { gate: GateData }) {
                     )}
                     {p.errorMessage && (
                       <div className="text-red-400 font-inconsolata">{p.errorMessage}</div>
+                    )}
+                    {p.status === "VALIDATED" && (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          setPushState("pushing");
+                          try {
+                            const res = await fetch(`/api/gates/${gate.id}/push/${p.id}/execute`, {
+                              method: "POST",
+                            });
+                            const data = await res.json();
+                            if (!res.ok) {
+                              setError(data.error || "Push failed");
+                              setPushState("failed");
+                              return;
+                            }
+                            setPushResult(data);
+                            setPushState("success");
+                            toast.success(`Pushed ${data.rowCount?.toLocaleString()} rows`);
+                            refreshGate();
+                          } catch {
+                            setError("Network error");
+                            setPushState("failed");
+                          }
+                        }}
+                        className="btn-primary text-[10px] px-3 py-1 mt-2"
+                      >
+                        Execute now
+                      </button>
                     )}
                   </div>
                 )}
