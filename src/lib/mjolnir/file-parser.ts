@@ -258,10 +258,27 @@ async function detectHeaderRowWithAI(
 
 // ─── Heuristic Header Detection (Heimdall/Thor fallback) ─────
 
+/** Patterns that indicate a cell value is data, not a header label. */
+const HEURISTIC_DATA_PATTERNS = [
+  /^\d+$/,                         // pure integer
+  /^\d+\.\d+$/,                    // decimal
+  /^\$[\d,.]+$/,                   // currency
+  /^\d{1,2}\/\d{1,2}\/\d{2,4}$/,  // US date
+  /^\d{4}-\d{2}-\d{2}/,           // ISO date
+  /^[A-Z0-9]{6,}$/,               // reference codes (PO numbers, SKUs)
+];
+
+/** Patterns that indicate a cell value is a label/header. */
+const LABEL_PATTERNS = [
+  /^[A-Z][a-z]+(\s[A-Z][a-z]+)*$/,  // Title Case
+  /^[A-Z][A-Z\s_]+$/,               // UPPER_CASE or UPPER CASE
+  /^[a-z]+(_[a-z]+)+$/,             // snake_case
+  /^[a-z]+([A-Z][a-z]+)+$/,         // camelCase
+];
+
 /**
- * Heuristic: find the first row whose non-empty cell count matches the mode
- * (most common width) across all rows, and whose cells are all strings.
- * Title rows typically have 1-2 cells; the header row matches data width.
+ * Scoring-based heuristic to find the header row.
+ * Evaluates each row on cell count ratio, text patterns, position, and context.
  */
 export function detectHeaderRowHeuristic(
   worksheet: ExcelJS.Worksheet,
@@ -272,69 +289,73 @@ export function detectHeaderRowHeuristic(
   const maxRow = Math.min(worksheet.rowCount, HEADER_SCAN_DEPTH);
   if (maxRow === 0) return 1;
 
-  // Compute non-empty cell counts for ALL rows (not just scan range)
-  const widths: number[] = [];
-  const allRowCount = Math.min(worksheet.rowCount, HEADER_SCAN_DEPTH + 30);
-  for (let r = 1; r <= allRowCount; r++) {
-    const row = worksheet.getRow(r);
-    let w = 0;
-    row.eachCell({ includeEmpty: false }, () => { w++; });
-    if (w > 0) widths.push(w);
-  }
-
-  // Find the mode width
-  const freq = new Map<number, number>();
-  for (const w of widths) freq.set(w, (freq.get(w) ?? 0) + 1);
-  let typicalWidth = 0;
-  let maxFreq = 0;
-  for (const [w, f] of freq) {
-    if (f > maxFreq || (f === maxFreq && w > typicalWidth)) {
-      typicalWidth = w;
-      maxFreq = f;
-    }
+  // Build a lookup of non-empty cell counts per row for context checks
+  const rowCellCounts = new Map<number, number>();
+  for (const rawRow of rows) {
+    rowCellCounts.set(rawRow.rowIndex, countNonEmpty(rawRow.cells));
   }
 
   const scores: RowScore[] = [];
 
   for (const rawRow of rows) {
     const rowIdx = rawRow.rowIndex;
-    const nonEmpty = countNonEmpty(rawRow.cells);
-    if (nonEmpty === 0) continue;
+    const candidateCells = countNonEmpty(rawRow.cells);
+    if (candidateCells === 0) continue;
 
     const stringValues = rawRow.cells.filter((c): c is string => c !== null && c.trim() !== "");
-    const allStrings = stringValues.length === nonEmpty;
-    const allShort = stringValues.every((s) => s.length < 50);
     const uniqueCount = new Set(stringValues).size;
-
     const mergeCount = mergeRanges.filter(
       (r) => rowIdx >= r.top && rowIdx <= r.bottom && r.left !== r.right,
     ).length;
 
     let score = 0;
 
-    // +2: All cells are short strings
-    if (allStrings && allShort && stringValues.length > 0) score += 2;
+    // 1. Cell count ratio (0-40 points): how well does this row match data width?
+    let maxDataWidth = 0;
+    for (let below = rowIdx + 1; below <= Math.min(rowIdx + 5, maxRow); below++) {
+      maxDataWidth = Math.max(maxDataWidth, rowCellCounts.get(below) ?? 0);
+    }
+    if (maxDataWidth > 0) {
+      score += Math.round(Math.min(1, candidateCells / maxDataWidth) * 40);
+    } else if (candidateCells > 1) {
+      score += 20; // no data below — moderate assumption
+    }
 
-    // +2: All cell values are unique
-    if (uniqueCount > 0 && uniqueCount === stringValues.length) score += 2;
+    // 2. Text pattern score (0-30 points)
+    let textScore = 0;
+    for (const val of stringValues) {
+      if (val.length < 30) textScore += 3;
+      if (LABEL_PATTERNS.some((p) => p.test(val))) textScore += 2;
+      if (HEURISTIC_DATA_PATTERNS.some((p) => p.test(val))) textScore -= 5;
+      if (val.length > 50) textScore -= 5;
+    }
+    score += Math.min(30, Math.max(0, Math.round(textScore / candidateCells * 10)));
 
-    // +2: Same column count as majority of data rows (need reliable data)
-    if (typicalWidth > 0 && nonEmpty === typicalWidth && maxFreq >= 3) score += 2;
+    // 3. Position bonus (0-10 points): mild tiebreaker, not a strong signal
+    // Row 1 is the most common header position in simple files
+    if (rowIdx === 1) {
+      score += 5;
+    } else if (rowIdx <= 3) {
+      score += 3;
+    } else {
+      score += 10;
+    }
 
-    // +1: Nearly full row (within 1 of typical width)
-    if (typicalWidth > 0 && nonEmpty >= typicalWidth - 1 && maxFreq >= 3) score += 1;
+    // Bonus: widest row in the file gets a boost (headers typically have the most columns)
+    if (candidateCells >= maxDataWidth && maxDataWidth > 0) score += 5;
 
-    // -3: Merged cells (title/category row)
-    if (mergeCount > 0) score -= 3;
+    // 4. Single-cell penalty: almost always a title or merged header
+    if (candidateCells === 1) score -= 20;
 
-    // -1: Very few cells vs typical (title or subtitle)
-    if (nonEmpty <= 2 && typicalWidth > 3) score -= 1;
+    // 5. Empty row below penalty: real headers have data immediately after
+    const belowCount = rowCellCounts.get(rowIdx + 1) ?? 0;
+    if (belowCount === 0) score -= 15;
 
     scores.push({
       rowIndex: rowIdx,
       uniqueCount,
-      totalCells: nonEmpty,
-      allStrings,
+      totalCells: candidateCells,
+      allStrings: stringValues.length === candidateCells,
       mergeCount,
       score,
     });
@@ -343,7 +364,9 @@ export function detectHeaderRowHeuristic(
   if (scores.length === 0) return 1;
 
   scores.sort((a, b) => b.score - a.score || a.rowIndex - b.rowIndex);
-  return scores[0].rowIndex;
+
+  // Minimum threshold: 25 points
+  return scores[0].score >= 25 ? scores[0].rowIndex : 1;
 }
 
 /**

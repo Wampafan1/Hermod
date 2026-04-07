@@ -432,3 +432,74 @@ describe("formula extraction", () => {
     expect(result.formulas).toBeUndefined();
   });
 });
+
+// ─── Header Detection Heuristic: ERP Export Scenarios ───────────
+
+/**
+ * Helper: create a workbook with arbitrary rows (no assumed header position).
+ * Each entry in `allRows` is one worksheet row.
+ */
+async function createRawWorkbook(allRows: (string | number | null)[][]): Promise<ExcelJS.Workbook> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Sheet1");
+  for (const row of allRows) {
+    ws.addRow(row);
+  }
+  return wb;
+}
+
+describe("detectHeaderRowHeuristic — ERP export scenarios", () => {
+  it("skips title rows and finds headers in row 4", async () => {
+    const wb = await createRawWorkbook([
+      ["Monthly GL Report"],                                // row 1: title
+      ["Period: March 2026"],                               // row 2: subtitle
+      [null],                                               // row 3: empty
+      ["Account", "Description", "Debit", "Credit"],        // row 4: headers
+      ["1000", "Cash", "5000.00", "0.00"],                  // row 5: data
+      ["2000", "Accounts Payable", "0.00", "3200.00"],      // row 6: data
+    ]);
+    const ws = wb.getWorksheet("Sheet1")!;
+    const result = detectHeaderRowHeuristic(ws, []);
+    expect(result).toBe(4);
+  });
+
+  it("detects headers in row 1 when no title rows", async () => {
+    const wb = await createRawWorkbook([
+      ["Name", "Age", "City"],
+      ["Alice", "30", "NYC"],
+      ["Bob", "25", "LA"],
+    ]);
+    const ws = wb.getWorksheet("Sheet1")!;
+    const result = detectHeaderRowHeuristic(ws, []);
+    expect(result).toBe(1);
+  });
+
+  it("skips merged title row and finds headers in row 2", async () => {
+    const wb = await createRawWorkbook([
+      ["Company XYZ - Inventory Report"],                   // row 1: single merged title
+      ["SKU", "Product Name", "Quantity", "Location"],      // row 2: headers
+      ["ABC-001", "Widget A", "150", "Bin 3A"],             // row 3: data
+      ["DEF-002", "Gadget B", "75", "Bin 7C"],              // row 4: data
+    ]);
+    const ws = wb.getWorksheet("Sheet1")!;
+    // Simulate a merge spanning columns A-D on row 1
+    const mergeRanges = [{ top: 1, bottom: 1, left: 1, right: 4 }];
+    const result = detectHeaderRowHeuristic(ws, mergeRanges);
+    expect(result).toBe(2);
+  });
+
+  it("finds headers in row 5 with multiple metadata rows", async () => {
+    const wb = await createRawWorkbook([
+      ["Acme Corp Financial Report"],                       // row 1: title
+      ["Generated: 03/15/2026"],                            // row 2: date
+      ["Filter: All Departments"],                          // row 3: filter
+      [null],                                               // row 4: empty
+      ["Department", "Budget", "Actual", "Variance"],       // row 5: headers
+      ["Engineering", "500000", "485000", "15000"],          // row 6: data
+      ["Sales", "300000", "310000", "-10000"],               // row 7: data
+    ]);
+    const ws = wb.getWorksheet("Sheet1")!;
+    const result = detectHeaderRowHeuristic(ws, []);
+    expect(result).toBe(5);
+  });
+});
