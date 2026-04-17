@@ -9,7 +9,11 @@ import {
   generateMappings,
   type FieldMapping,
 } from "./field-mapper";
-import { buildSuiteQL } from "@/lib/providers/netsuite.provider";
+import {
+  buildSuiteQL,
+  getAvailableJoins,
+  type NsJoin,
+} from "@/lib/providers/netsuite.provider";
 import { canBeSource, canBeDestination } from "@/lib/providers/capabilities";
 import type { ConnectionType } from "@/lib/providers/types";
 import { CursorConfigPanel } from "./cursor-config-panel";
@@ -122,6 +126,13 @@ export function SyncBuilder() {
   const [nsRecordSearch, setNsRecordSearch] = useState("");
   const [nsLoadingRecords, setNsLoadingRecords] = useState(false);
   const [nsLoadingFields, setNsLoadingFields] = useState(false);
+  const [nsJoins, setNsJoins] = useState<NsJoin[]>([]);
+  const [joinFieldLists, setJoinFieldLists] = useState<
+    Record<string, NetSuiteField[]>
+  >({});
+  const [loadingJoinAliases, setLoadingJoinAliases] = useState<Set<string>>(
+    new Set()
+  );
 
   // NetSuite field mapping overrides (preserves user edits to dest column names)
   const [nsDestOverrides, setNsDestOverrides] = useState<Record<string, string>>({});
@@ -206,14 +217,24 @@ export function SyncBuilder() {
     [nsFieldList]
   );
 
+  const activeJoins = useMemo(
+    () => nsJoins.filter((j) => j.fields.length > 0),
+    [nsJoins]
+  );
+
   const generatedSuiteQL = useMemo(() => {
     if (!isNetSuiteSource || !nsRecordType) return "";
-    return buildSuiteQL({
-      recordType: nsRecordType,
-      fields: nsFields,
-      filter: nsFilter.trim() || null,
-    });
-  }, [isNetSuiteSource, nsRecordType, nsFields, nsFilter]);
+    try {
+      return buildSuiteQL({
+        recordType: nsRecordType,
+        fields: nsFields,
+        joins: activeJoins,
+        filter: nsFilter.trim() || null,
+      });
+    } catch {
+      return "";
+    }
+  }, [isNetSuiteSource, nsRecordType, nsFields, activeJoins, nsFilter]);
 
   const hasValidSource = isRavenSource
     ? !!query
@@ -221,22 +242,35 @@ export function SyncBuilder() {
       ? !!nsRecordType && nsFields.length > 0
       : !!query;
 
-  // ── Derive field mappings from NS fields, merging user dest column overrides ──
+  // ── Derive field mappings from NS fields + joined fields ──
   const derivedFieldMappings = useMemo(() => {
     if (!isNetSuiteSource || nsFields.length === 0) return [];
-    const base = generateMappings(
-      nsFields.map((name) => ({
-        name,
-        type: nsFieldMap.get(name)?.type ?? "STRING",
-      }))
-    );
-    // Merge any user-edited dest column names
+    const primary = nsFields.map((name) => ({
+      name,
+      type: nsFieldMap.get(name)?.type ?? "STRING",
+    }));
+    const joined = activeJoins.flatMap((j) => {
+      const list = joinFieldLists[j.alias] ?? [];
+      const typeMap = new Map(list.map((f) => [f.name, f.type]));
+      return j.fields.map((f) => ({
+        name: `${j.alias}_${f}`,
+        type: typeMap.get(f) ?? "STRING",
+      }));
+    });
+    const base = generateMappings([...primary, ...joined]);
     if (Object.keys(nsDestOverrides).length === 0) return base;
     return base.map((m) => ({
       ...m,
       destColumn: nsDestOverrides[m.sourceField] ?? m.destColumn,
     }));
-  }, [nsFields, nsFieldMap, isNetSuiteSource, nsDestOverrides]);
+  }, [
+    nsFields,
+    nsFieldMap,
+    isNetSuiteSource,
+    nsDestOverrides,
+    activeJoins,
+    joinFieldLists,
+  ]);
 
   // ── Derive column schemas for cursor detection ──
   const detectionColumns: ColumnSchema[] = useMemo(() => {
@@ -304,6 +338,38 @@ export function SyncBuilder() {
       .finally(() => setNsLoadingRecords(false));
   }, [sourceId, isNetSuiteSource]);
 
+  // Reset joins when primary record changes — joins are primary-specific.
+  useEffect(() => {
+    setNsJoins([]);
+    setJoinFieldLists({});
+  }, [nsRecordType]);
+
+  // Fetch fields for any newly added join alias.
+  useEffect(() => {
+    if (!isNetSuiteSource || !sourceId) return;
+    for (const j of nsJoins) {
+      if (joinFieldLists[j.alias] || loadingJoinAliases.has(j.alias)) continue;
+      setLoadingJoinAliases((prev) => new Set(prev).add(j.alias));
+      fetch(
+        `/api/bifrost/netsuite/fields?connectionId=${sourceId}&recordType=${encodeURIComponent(j.recordType)}`
+      )
+        .then((r) => r.json())
+        .then((data) => {
+          if (Array.isArray(data)) {
+            setJoinFieldLists((prev) => ({ ...prev, [j.alias]: data }));
+          }
+        })
+        .catch(() => toast.error(`Failed to load fields for ${j.recordType}`))
+        .finally(() => {
+          setLoadingJoinAliases((prev) => {
+            const next = new Set(prev);
+            next.delete(j.alias);
+            return next;
+          });
+        });
+    }
+  }, [nsJoins, sourceId, isNetSuiteSource, joinFieldLists, loadingJoinAliases, toast]);
+
   // ── Fetch NS fields ──
   useEffect(() => {
     if (!isNetSuiteSource || !sourceId || !nsRecordType) {
@@ -354,6 +420,7 @@ export function SyncBuilder() {
               query: generatedSuiteQL,
               recordType: nsRecordType,
               fields: nsFields,
+              ...(activeJoins.length > 0 && { joins: activeJoins }),
               ...(nsFilter.trim() && { filter: nsFilter.trim() }),
               ...(incrementalKey && { incrementalKey }),
             }
@@ -429,6 +496,8 @@ export function SyncBuilder() {
     setNsFieldList([]);
     setNsRecordSearch("");
     setNsDestOverrides({});
+    setNsJoins([]);
+    setJoinFieldLists({});
     setQuery("");
     setFieldMappings([]);
     setCursorConfig(null);
@@ -814,6 +883,175 @@ export function SyncBuilder() {
                     )}
                   </div>
                 )}
+
+                {/* Related record joins */}
+                {nsRecordType && nsFieldList.length > 0 && (() => {
+                  const available = getAvailableJoins(nsRecordType);
+                  const addedRecords = new Set(
+                    nsJoins.map((j) => j.recordType)
+                  );
+                  const addable = available.filter(
+                    (a) => !addedRecords.has(a.recordType)
+                  );
+                  if (available.length === 0) return null;
+                  return (
+                    <div className="space-y-2">
+                      <label className="label-norse">
+                        Related Records
+                      </label>
+
+                      {nsJoins.map((join) => {
+                        const list = joinFieldLists[join.alias] ?? [];
+                        const loading = loadingJoinAliases.has(join.alias);
+                        const selected = new Set(join.fields);
+                        return (
+                          <div
+                            key={join.alias}
+                            className="border border-frost/20 bg-frost/[0.02] p-2"
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="text-[0.55rem] text-frost tracking-[0.35em] uppercase">
+                                {join.recordType}{" "}
+                                <span className="text-text-dim">
+                                  as {join.alias}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setNsJoins((prev) =>
+                                    prev.filter((j) => j.alias !== join.alias)
+                                  );
+                                  setJoinFieldLists((prev) => {
+                                    const next = { ...prev };
+                                    delete next[join.alias];
+                                    return next;
+                                  });
+                                }}
+                                className="text-text-dim hover:text-ember text-xs tracking-wider"
+                                aria-label={`Remove ${join.recordType} join`}
+                              >
+                                ×
+                              </button>
+                            </div>
+
+                            {loading ? (
+                              <LoadingText>Loading fields...</LoadingText>
+                            ) : list.length === 0 ? (
+                              <EmptyText>No fields found</EmptyText>
+                            ) : (
+                              <>
+                                <div className="flex gap-2 mb-1">
+                                  <MiniBtn
+                                    onClick={() =>
+                                      setNsJoins((prev) =>
+                                        prev.map((j) =>
+                                          j.alias === join.alias
+                                            ? { ...j, fields: list.map((f) => f.name) }
+                                            : j
+                                        )
+                                      )
+                                    }
+                                  >
+                                    All
+                                  </MiniBtn>
+                                  <MiniBtn
+                                    onClick={() =>
+                                      setNsJoins((prev) =>
+                                        prev.map((j) =>
+                                          j.alias === join.alias
+                                            ? { ...j, fields: [] }
+                                            : j
+                                        )
+                                      )
+                                    }
+                                  >
+                                    None
+                                  </MiniBtn>
+                                </div>
+                                <div className="border border-border max-h-40 overflow-y-auto bg-void/50">
+                                  {list.map((field) => {
+                                    const checked = selected.has(field.name);
+                                    return (
+                                      <label
+                                        key={field.name}
+                                        className={`flex items-center gap-2 px-2 py-1 border-b border-border/20 cursor-pointer text-xs transition-colors ${
+                                          checked
+                                            ? "bg-frost/[0.06]"
+                                            : "hover:bg-frost/[0.03]"
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() => {
+                                            setNsJoins((prev) =>
+                                              prev.map((j) =>
+                                                j.alias === join.alias
+                                                  ? {
+                                                      ...j,
+                                                      fields: checked
+                                                        ? j.fields.filter(
+                                                            (f) => f !== field.name
+                                                          )
+                                                        : [...j.fields, field.name],
+                                                    }
+                                                  : j
+                                              )
+                                            );
+                                          }}
+                                          className="accent-frost"
+                                        />
+                                        <span className="text-text tracking-wider flex-1 truncate">
+                                          {field.name}
+                                        </span>
+                                        <TypeBadge type={field.type} />
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                                <p className="text-text-dim text-[0.55rem] tracking-wider mt-1">
+                                  {join.fields.length} selected → prefixed{" "}
+                                  <code className="text-frost">
+                                    {join.alias}_*
+                                  </code>
+                                </p>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {addable.length > 0 && (
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const picked = available.find(
+                              (a) => a.recordType === e.target.value
+                            );
+                            if (!picked) return;
+                            setNsJoins((prev) => [
+                              ...prev,
+                              {
+                                recordType: picked.recordType,
+                                alias: picked.alias,
+                                fields: [],
+                              },
+                            ]);
+                          }}
+                          className="input-norse font-mono text-xs"
+                        >
+                          <option value="">+ Add fields from related record…</option>
+                          {addable.map((a) => (
+                            <option key={a.recordType} value={a.recordType}>
+                              {a.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Filter */}
                 {nsRecordType && (

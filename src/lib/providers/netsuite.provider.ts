@@ -930,10 +930,80 @@ function mapRecordTypeToAppliesto(recordType: string): string {
 
 // ─── SuiteQL Builder ─────────────────────────────────────
 
+/**
+ * A joined record pulled alongside the primary record.
+ * `alias` is assigned from NS_JOIN_KEYS — not user-editable — so SQL is deterministic.
+ */
+export interface NsJoin {
+  recordType: string;
+  alias: string;
+  fields: string[];
+}
+
+interface NsJoinDefinition {
+  alias: string;
+  /** SuiteQL ON clause using the primary record name and the alias. */
+  on: (primary: string) => string;
+}
+
+/**
+ * Curated join targets. Keyed `"<primary>-><joined>"`.
+ * Expand by adding entries — no other code changes required.
+ */
+const NS_JOIN_KEYS: Record<string, NsJoinDefinition> = {
+  "transactionline->transaction": {
+    alias: "tx",
+    on: (primary) => `${primary}.transaction = tx.id`,
+  },
+  "transactionline->item": {
+    alias: "itemrec",
+    on: (primary) => `${primary}.item = itemrec.id`,
+  },
+  "transaction->entity": {
+    alias: "ent",
+    on: (primary) => `${primary}.entity = ent.id`,
+  },
+};
+
+export interface NsJoinOption {
+  recordType: string;
+  alias: string;
+  label: string;
+}
+
+/** Joins available for a given primary record type. Returns [] if none. */
+export function getAvailableJoins(primaryRecordType: string): NsJoinOption[] {
+  const prefix = `${primaryRecordType.toLowerCase()}->`;
+  const result: NsJoinOption[] = [];
+  for (const [key, def] of Object.entries(NS_JOIN_KEYS)) {
+    if (key.startsWith(prefix)) {
+      const joinedRecord = key.slice(prefix.length);
+      result.push({
+        recordType: joinedRecord,
+        alias: def.alias,
+        label: joinedRecord,
+      });
+    }
+  }
+  return result;
+}
+
+/** Throws if the (primary, joined) pair isn't in NS_JOIN_KEYS. */
+function validateJoin(primary: string, joined: string): NsJoinDefinition {
+  const def = NS_JOIN_KEYS[`${primary.toLowerCase()}->${joined.toLowerCase()}`];
+  if (!def) {
+    throw new Error(
+      `Unsupported join: ${primary} -> ${joined}`
+    );
+  }
+  return def;
+}
+
 /** Build a SuiteQL query from structured source config. */
 export function buildSuiteQL(config: {
   recordType: string;
   fields: string[];
+  joins?: NsJoin[];
   filter?: string | null;
 }): string {
   validateSuiteQLIdentifier(config.recordType, "record type");
@@ -942,18 +1012,50 @@ export function buildSuiteQL(config: {
   for (const field of clean) {
     validateSuiteQLField(field);
   }
-  const fields = clean.length > 0 ? clean.join(", ") : "*";
-  let query = `SELECT ${fields} FROM ${config.recordType}`;
+
+  const joins = config.joins ?? [];
+  for (const j of joins) {
+    validateSuiteQLIdentifier(j.recordType, "join record type");
+    validateSuiteQLIdentifier(j.alias, "join alias");
+    const def = validateJoin(config.recordType, j.recordType);
+    if (def.alias !== j.alias) {
+      throw new Error(
+        `Join alias mismatch for ${j.recordType}: expected "${def.alias}", got "${j.alias}"`
+      );
+    }
+    for (const f of j.fields) {
+      validateSuiteQLField(f);
+    }
+  }
+
+  const hasJoins = joins.length > 0;
+  const primary = config.recordType;
+
+  // When joins exist, qualify primary fields to avoid ambiguity.
+  const primaryCols = clean.map((f) => (hasJoins ? `${primary}.${f}` : f));
+  const joinedCols = joins.flatMap((j) =>
+    j.fields
+      .filter((f) => !EXCLUDED.has(f))
+      .map((f) => `${j.alias}.${f} AS ${j.alias}_${f}`)
+  );
+  const allCols = [...primaryCols, ...joinedCols];
+  const fields = allCols.length > 0 ? allCols.join(", ") : "*";
+
+  let query = `SELECT ${fields} FROM ${primary}`;
+
+  for (const j of joins) {
+    const def = NS_JOIN_KEYS[`${primary.toLowerCase()}->${j.recordType.toLowerCase()}`];
+    query += ` LEFT JOIN ${j.recordType} ${j.alias} ON ${def.on(primary)}`;
+  }
 
   if (config.filter) {
     query += ` WHERE ${config.filter}`;
   }
 
-  // Only add ORDER BY id if 'id' is among the selected fields — not all
-  // SuiteQL tables have an 'id' column (e.g. itemAssemblyItemBom).
+  // Only add ORDER BY id if 'id' is among the primary's selected fields.
   const hasId = clean.some((f) => f.toLowerCase() === "id");
   if (hasId) {
-    query += " ORDER BY id ASC";
+    query += hasJoins ? ` ORDER BY ${primary}.id ASC` : " ORDER BY id ASC";
   }
   return query;
 }
