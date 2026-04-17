@@ -345,21 +345,29 @@ export function SyncBuilder() {
   }, [nsRecordType]);
 
   // Fetch fields for any newly added join alias.
+  // On failure, cache an empty list so we don't retry every re-render.
   useEffect(() => {
     if (!isNetSuiteSource || !sourceId) return;
     for (const j of nsJoins) {
-      if (joinFieldLists[j.alias] || loadingJoinAliases.has(j.alias)) continue;
+      if (joinFieldLists[j.alias] !== undefined || loadingJoinAliases.has(j.alias)) continue;
       setLoadingJoinAliases((prev) => new Set(prev).add(j.alias));
       fetch(
         `/api/bifrost/netsuite/fields?connectionId=${sourceId}&recordType=${encodeURIComponent(j.recordType)}`
       )
-        .then((r) => r.json())
-        .then((data) => {
-          if (Array.isArray(data)) {
-            setJoinFieldLists((prev) => ({ ...prev, [j.alias]: data }));
-          }
+        .then(async (r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
         })
-        .catch(() => toast.error(`Failed to load fields for ${j.recordType}`))
+        .then((data) => {
+          setJoinFieldLists((prev) => ({
+            ...prev,
+            [j.alias]: Array.isArray(data) ? data : [],
+          }));
+        })
+        .catch(() => {
+          setJoinFieldLists((prev) => ({ ...prev, [j.alias]: [] }));
+          toast.error(`Failed to load fields for ${j.recordType}`);
+        })
         .finally(() => {
           setLoadingJoinAliases((prev) => {
             const next = new Set(prev);

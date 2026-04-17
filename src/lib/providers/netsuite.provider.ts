@@ -959,9 +959,13 @@ const NS_JOIN_KEYS: Record<string, NsJoinDefinition> = {
     alias: "itemrec",
     on: (primary) => `${primary}.item = itemrec.id`,
   },
-  "transaction->entity": {
-    alias: "ent",
-    on: (primary) => `${primary}.entity = ent.id`,
+  "transaction->customer": {
+    alias: "cust",
+    on: (primary) => `${primary}.entity = cust.id`,
+  },
+  "transaction->vendor": {
+    alias: "vend",
+    on: (primary) => `${primary}.entity = vend.id`,
   },
 };
 

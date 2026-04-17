@@ -75,7 +75,7 @@ describe("buildSuiteQL — validation", () => {
       buildSuiteQL({
         recordType: "transactionline",
         fields: ["id"],
-        joins: [{ recordType: "entity", alias: "ent", fields: ["id"] }],
+        joins: [{ recordType: "customer", alias: "cust", fields: ["id"] }],
       })
     ).toThrow(/Unsupported join/);
   });
@@ -128,9 +128,10 @@ describe("getAvailableJoins", () => {
     expect(records).toEqual(["item", "transaction"]);
   });
 
-  it("returns entity for transaction", () => {
+  it("returns customer and vendor for transaction", () => {
     const joins = getAvailableJoins("transaction");
-    expect(joins.map((j) => j.recordType)).toEqual(["entity"]);
+    const records = joins.map((j) => j.recordType).sort();
+    expect(records).toEqual(["customer", "vendor"]);
   });
 
   it("returns empty array for records without curated joins", () => {
