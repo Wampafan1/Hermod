@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { COMMON_TIMEZONES, OTHER_TIMEZONES } from "@/lib/timezones";
+import { StoragePathPreview } from "./storage-path-preview";
 import { StorageTargetForm } from "./storage-target-form";
 
 interface ConnectionOption {
@@ -44,7 +45,7 @@ const WAL_FREQUENCIES = [
   { value: "DAILY", label: "Daily" },
 ];
 
-function cleanPrefix(value: unknown, fallback = "niflheim"): string {
+function cleanPrefix(value: unknown, fallback = "backups"): string {
   if (typeof value !== "string" || value.trim() === "") return fallback;
   return value.trim().replace(/^\/+|\/+$/g, "") || fallback;
 }
@@ -92,6 +93,7 @@ export function BackupPolicyForm({ policyId }: BackupPolicyFormProps) {
   const [enabled, setEnabled] = useState(true);
 
   const selectedSource = connections.find((connection) => connection.id === sourceConnectionId) ?? null;
+  const selectedTarget = targets.find((target) => target.id === storageTargetId) ?? null;
   const sourceScope = connectionScope(selectedSource);
   const sourceDatabase = configuredDatabase(selectedSource);
 
@@ -236,7 +238,12 @@ export function BackupPolicyForm({ policyId }: BackupPolicyFormProps) {
     !!storageTargetId &&
     databaseSelectionValid &&
     (!walEnabled || (sourceScope === "SERVER" && !!replicationSlot));
-  const artifactPrefix = cleanPrefix(storagePrefix, "niflheim");
+  const targetPrefix = typeof selectedTarget?.config?.prefix === "string" ? selectedTarget.config.prefix : "backups";
+  const artifactPrefix = cleanPrefix(storagePrefix || targetPrefix, "backups");
+  const previewServerName = typeof selectedSource?.config?.host === "string"
+    ? selectedSource.config.host
+    : selectedSource?.name ?? "prod-pg-01";
+  const previewDatabaseName = selectedDatabases[0] || sourceDatabase || "app_prod";
 
   return (
     <div className="max-w-5xl mx-auto grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-6">
@@ -418,16 +425,17 @@ export function BackupPolicyForm({ policyId }: BackupPolicyFormProps) {
             </div>
 
             <div>
-              <label className="label-norse">Prefix</label>
+              <label className="label-norse">Folder / Prefix</label>
               <input
                 value={storagePrefix}
                 onChange={(event) => setStoragePrefix(event.target.value)}
                 className="input-norse"
-                placeholder="niflheim/prod"
+                placeholder={targetPrefix}
               />
               <p className="text-text-dim text-[0.68rem] tracking-wide leading-5 mt-2">
-                Backups will write under <span className="text-gold font-mono">{artifactPrefix}</span>. S3 storage targets use
-                bucket-wide object access, so this path can be chosen per policy.
+                Choose the top-level folder where Hermod should place backups. Hermod writes under
+                <span className="text-gold font-mono mx-1">{artifactPrefix}</span>
+                by engine, server, database, backup type, and date.
               </p>
             </div>
           </div>
@@ -572,6 +580,12 @@ export function BackupPolicyForm({ policyId }: BackupPolicyFormProps) {
       </div>
 
       <div className="space-y-6">
+        <StoragePathPreview
+          prefix={artifactPrefix}
+          engine="postgres"
+          serverName={previewServerName}
+          databaseName={previewDatabaseName}
+        />
         <StorageTargetForm
           onCreated={() => {
             loadTargets().catch(() => toast.error("Failed to refresh storage targets"));

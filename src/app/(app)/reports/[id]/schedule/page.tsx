@@ -21,13 +21,11 @@ export default function ScheduleBuilderPage() {
         if (!r.ok) throw new Error("Not found");
         return r.json();
       }),
-      fetch("/api/schedules").then((r) => r.json()),
+      fetch(`/api/schedules?reportId=${encodeURIComponent(reportId)}`).then((r) => r.json()),
     ])
       .then(([report, schedules]) => {
         setReportName(report.name);
-        const schedule = schedules.find(
-          (s: any) => s.report.id === reportId
-        );
+        const schedule = schedules[0];
         if (schedule) {
           setExistingSchedule(schedule);
         }

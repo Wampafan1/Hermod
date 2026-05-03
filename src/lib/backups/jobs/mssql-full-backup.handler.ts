@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { withTimeout } from "@/lib/async-utils";
 import { MssqlBackupEngine } from "@/lib/backups/mssql/mssql-backup-engine";
+import { enforceMssqlBackupRetention } from "@/lib/backups/retention";
 
 export interface MssqlBackupJobPayload {
   policyId: string;
@@ -27,6 +28,12 @@ export async function handleMssqlFullBackupJob(job: { data: MssqlBackupJobPayloa
     FULL_BACKUP_TIMEOUT_MS + 30_000,
     `SQL Server full backup ${policyId}`
   );
+  if (result.succeeded > 0) {
+    const retentionErrors = await enforceMssqlBackupRetention(policyId);
+    if (retentionErrors.length > 0) {
+      console.warn(`[Niflheim:MSSQL] Retention cleanup warning for ${policyId}: ${retentionErrors[0]}`);
+    }
+  }
   console.log(`[Niflheim:MSSQL] Full backup ${policyId} ${result.status}: ${result.bytesWritten} bytes`);
   return result;
 }

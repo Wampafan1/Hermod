@@ -187,10 +187,12 @@ describe("MSSQL backup SQL and validation", () => {
     expect(buildMssqlArtifactKey({
       prefix: "niflheim/sql",
       policyId: "policy_1",
+      runId: "run_1",
+      serverSlug: "prod-sql-01",
       database: "Sales DB",
       type: "DIFFERENTIAL",
       at: new Date("2026-05-03T01:25:32.000Z"),
-    })).toBe("niflheim/sql/policy_1/mssql/Sales DB/differential/2026/05/03/Sales DB-differential-20260503T012532Z.dif");
+    })).toBe("niflheim/sql/mssql/prod-sql-01/Sales_DB/diff/2026/05/03/Sales_DB_DIFF_20260503_012532_run_1.dif");
   });
 
   it("requires disk path or URL settings based on destination mode", () => {

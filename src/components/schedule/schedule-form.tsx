@@ -87,13 +87,9 @@ export function ScheduleForm({ reportId, reportName, existingSchedule }: Schedul
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    fetch("/api/schedules")
+    fetch("/api/schedules/recipient-suggestions")
       .then((r) => r.json())
-      .then((schedules: Array<{ recipients: Recipient[] }>) => {
-        const emails = new Set<string>();
-        schedules.forEach((s) => s.recipients.forEach((r) => emails.add(r.email)));
-        setPreviousEmails(Array.from(emails));
-      })
+      .then((emails: string[]) => setPreviousEmails(emails))
       .catch(() => {});
   }, []);
 

@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { mkdtemp, mkdir, readdir, rm, stat } from "fs/promises";
+import { mkdtemp, mkdir, readdir, rm, stat, writeFile } from "fs/promises";
 import os from "os";
 import path from "path";
 import { Prisma, BackupPolicyStatus, BackupRunStatus, BackupRunType } from "@prisma/client";
@@ -10,8 +10,12 @@ import { connectionForDatabase } from "@/lib/providers/postgres.provider";
 import { getBackupStorageProvider } from "@/lib/backups/storage";
 import type { BackupStorageProviderClient } from "@/lib/backups/storage/types";
 import {
-  buildFullBackupObjectKey,
-  buildWalObjectKey,
+  buildBackupObjectKey,
+  buildManifestObjectKey,
+  buildPostgresWalPrefix,
+  serverSlugFromConfig,
+} from "@/lib/backups/storage/object-keys";
+import {
   calculateFileSha256,
   combineChecksums,
   timestampForObjectKey,
@@ -111,7 +115,7 @@ async function loadPolicy(policyId: string) {
     where: { id: policyId },
     include: {
       sourceConnection: {
-        select: { id: true, type: true, config: true, credentials: true },
+        select: { id: true, name: true, type: true, config: true, credentials: true },
       },
       storageTarget: {
         select: { id: true, provider: true, accessMode: true, config: true, credentials: true },
@@ -188,6 +192,20 @@ function databaseName(connection: ConnectionLike): string {
 
 function fileNameSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "postgres";
+}
+
+function storagePrefixFromPolicy(policy: LoadedBackupPolicy): string | null {
+  if (policy.storagePrefix?.trim()) return policy.storagePrefix;
+  const config = policy.storageTarget.config;
+  if (config && typeof config === "object") {
+    const prefix = (config as { prefix?: unknown }).prefix;
+    if (typeof prefix === "string" && prefix.trim()) return prefix;
+  }
+  return null;
+}
+
+function serverSlugFromPolicy(policy: LoadedBackupPolicy): string {
+  return serverSlugFromConfig(policy.sourceConnection.config, policy.sourceConnection.name);
 }
 
 async function ensureRun(input: {
@@ -291,6 +309,8 @@ export class PostgresBackupEngine {
       tempDir = await mkdtemp(path.join(os.tmpdir(), "hermod-full-backup-"));
       const createdAt = new Date();
       const storage = this.storageResolver(policy.storageTarget);
+      const storagePrefix = storagePrefixFromPolicy(policy);
+      const serverSlug = serverSlugFromPolicy(policy);
       const objectKeys: Array<Record<string, unknown>> = [];
       const checksums: string[] = [];
       const databaseErrors: string[] = [];
@@ -301,7 +321,7 @@ export class PostgresBackupEngine {
         const env = postgresEnv(dbConnection);
         const dumpPath = path.join(
           tempDir,
-          `${fileNameSegment(database)}-${timestampForObjectKey(createdAt)}.dump`
+          `${fileNameSegment(database)}_FULL_${timestampForObjectKey(createdAt)}_${run.id}.dump`
         );
 
         try {
@@ -322,11 +342,15 @@ export class PostgresBackupEngine {
 
           const checksumSha256 = await calculateFileSha256(dumpPath);
           const fileStat = await stat(dumpPath);
-          const objectKey = buildFullBackupObjectKey({
-            prefix: policy.storagePrefix,
-            policyId: policy.id,
-            database,
-            at: createdAt,
+          const objectKey = buildBackupObjectKey({
+            storagePrefix,
+            engine: "postgres",
+            serverSlug,
+            databaseName: database,
+            backupType: "full-logical",
+            timestamp: createdAt,
+            runId: run.id,
+            extension: "dump",
           });
           const uploaded = await storage.uploadFile(dumpPath, objectKey, {
             policyId: policy.id,
@@ -337,10 +361,56 @@ export class PostgresBackupEngine {
             createdAt: createdAt.toISOString(),
             checksumSha256,
           });
+          const manifestObjectKey = buildManifestObjectKey({
+            storagePrefix,
+            engine: "postgres",
+            serverSlug,
+            databaseName: database,
+            backupType: "manifest",
+            timestamp: createdAt,
+            runId: run.id,
+          });
+          const completedAt = new Date();
+          const manifest = {
+            schemaVersion: 1,
+            engine: "postgres",
+            serverSlug,
+            serverDisplayName: policy.sourceConnection.name,
+            database,
+            backupType: "FULL_LOGICAL",
+            policyId: policy.id,
+            runId: run.id,
+            startedAt: createdAt.toISOString(),
+            completedAt: completedAt.toISOString(),
+            objectKey: uploaded.key,
+            manifestObjectKey,
+            checksumSha256,
+            bytes: uploaded.bytes || fileStat.size,
+            storageProvider: policy.storageTarget.provider,
+            sourceConnectionId: policy.sourceConnectionId,
+            restoreChain: {
+              isBaseBackup: true,
+              requiresFullBackup: null,
+              requiresDifferentialBackup: null,
+              logSequence: null,
+            },
+          };
+          const manifestPath = path.join(tempDir, `${fileNameSegment(database)}-${run.id}-manifest.json`);
+          await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+          await storage.uploadFile(manifestPath, manifestObjectKey, {
+            policyId: policy.id,
+            runId: run.id,
+            type: "MANIFEST",
+            sourceConnectionId: policy.sourceConnectionId,
+            database,
+            createdAt: completedAt.toISOString(),
+            checksumSha256,
+          });
           totalBytes += uploaded.bytes || fileStat.size;
           checksums.push(checksumSha256);
           objectKeys.push({
             key: uploaded.key,
+            manifestObjectKey,
             database,
             bytes: uploaded.bytes,
             etag: uploaded.etag,
@@ -490,6 +560,8 @@ export class PostgresBackupEngine {
 
       const storage = this.storageResolver(policy.storageTarget);
       const createdAt = new Date();
+      const storagePrefix = storagePrefixFromPolicy(policy);
+      const serverSlug = serverSlugFromPolicy(policy);
       const entries = await readdir(walDir, { withFileTypes: true });
       const files = entries
         .filter((entry) => entry.isFile() && !entry.name.endsWith(".partial"))
@@ -506,11 +578,14 @@ export class PostgresBackupEngine {
         const fileStat = await stat(filePath);
         if (fileStat.size === 0) continue;
         const checksumSha256 = await calculateFileSha256(filePath);
-        const objectKey = buildWalObjectKey({
-          prefix: policy.storagePrefix,
-          policyId: policy.id,
-          fileName,
-          at: createdAt,
+        const objectKey = buildBackupObjectKey({
+          storagePrefix,
+          engine: "postgres",
+          serverSlug,
+          backupType: "wal",
+          timestamp: createdAt,
+          runId: run.id,
+          walFileName: fileName,
         });
 
         try {
@@ -538,6 +613,57 @@ export class PostgresBackupEngine {
 
       const durationMs = Date.now() - start;
       const checksumSha256 = combineChecksums(checksums);
+      let manifestObjectKey: string | null = null;
+      if (objectKeys.length > 0) {
+        manifestObjectKey = buildManifestObjectKey({
+          storagePrefix,
+          engine: "postgres",
+          serverSlug,
+          backupType: "wal-manifest",
+          timestamp: createdAt,
+          runId: run.id,
+        });
+        const manifest = {
+          schemaVersion: 1,
+          engine: "postgres",
+          serverSlug,
+          serverDisplayName: policy.sourceConnection.name,
+          database: null,
+          backupType: "WAL",
+          policyId: policy.id,
+          runId: run.id,
+          startedAt: createdAt.toISOString(),
+          completedAt: new Date().toISOString(),
+          objectKey: `${buildPostgresWalPrefix({ storagePrefix, serverSlug, date: createdAt })}/`,
+          manifestObjectKey,
+          checksumSha256,
+          bytes: totalBytes,
+          storageProvider: policy.storageTarget.provider,
+          sourceConnectionId: policy.sourceConnectionId,
+          walObjectKeys: objectKeys.map((object) => object.key),
+          restoreChain: {
+            isBaseBackup: false,
+            requiresFullBackup: null,
+            requiresDifferentialBackup: null,
+            logSequence: null,
+          },
+        };
+        const manifestPath = path.join(tempDir, `${run.id}-wal-manifest.json`);
+        await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+        await storage.uploadFile(manifestPath, manifestObjectKey, {
+          policyId: policy.id,
+          runId: run.id,
+          type: "WAL_MANIFEST",
+          sourceConnectionId: policy.sourceConnectionId,
+          createdAt: createdAt.toISOString(),
+          checksumSha256: checksumSha256 ?? undefined,
+        });
+        objectKeys.push({
+          key: manifestObjectKey,
+          manifest: true,
+          bytes: 0,
+        });
+      }
       const status =
         uploadErrors.length > 0
           ? objectKeys.length > 0

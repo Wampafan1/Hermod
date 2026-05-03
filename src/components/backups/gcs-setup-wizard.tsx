@@ -26,7 +26,7 @@ export function GcsSetupWizard({ value, setupMethod, onChange }: GcsSetupWizardP
         <p className="text-text-dim text-xs tracking-wide leading-6">
           {setupMethod === "PROVISIONED"
             ? "Hermod can create the bucket with Application Default Credentials when this deployment already runs in GCP."
-            : "Configure a GCS bucket and the credentials Hermod should use to store PostgreSQL backup artifacts."}
+            : "Configure a GCS bucket and the credentials Hermod should use to store database backup artifacts."}
         </p>
       </div>
 
@@ -68,13 +68,16 @@ export function GcsSetupWizard({ value, setupMethod, onChange }: GcsSetupWizardP
           />
         </div>
         <div>
-          <label className="label-norse">Prefix</label>
+          <label className="label-norse">Folder / Prefix</label>
           <input
             value={value.prefix}
             onChange={(event) => update(value, "prefix", event.target.value, onChange)}
             className="input-norse font-mono text-xs"
-            placeholder="postgres"
+            placeholder="AcmeBackups"
           />
+          <p className="text-text-dim text-[0.68rem] tracking-wide leading-5 mt-2">
+            Choose the top-level folder where Hermod should place backups. Hermod organizes under it by engine, server, database, backup type, and date.
+          </p>
         </div>
         <div>
           <label className="label-norse">Retention Days</label>

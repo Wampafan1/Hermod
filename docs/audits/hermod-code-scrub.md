@@ -2,503 +2,283 @@
 
 Audit date: 2026-05-03
 
-Scope: audit-only pass against the local checkout of `Wampafan1/Hermod`. I did not implement feature fixes or broad rewrites. The working tree was already heavily dirty before the audit, including the new backup/MSSQL backup surface, so findings below describe the current local code rather than a clean `origin/master` baseline.
+Scope: audit-only pass against the local checkout of `Wampafan1/Hermod`. I did not implement feature fixes or broad rewrites. The working tree was already dirty before this audit. I removed only the generated `.next` directory once to confirm the production build failure was not stale build output.
 
 ## Executive Summary
 
 - Overall risk level: CRITICAL
 - Top 5 issues:
-  1. Tenant isolation is incomplete: many core APIs still scope by `userId` only and several create routes do not write `tenantId`.
-  2. Authenticated SSRF is possible through API discovery and REST API test/discovery flows.
-  3. Bifrost full reload can drop the destination table before extraction/load succeeds.
-  4. Retry/resume paths can cause data loss: Helheim manual retry can reuse `WRITE_TRUNCATE`, and Raven resume deletes chunks before downstream load succeeds.
-  5. Gate push SQL generation concatenates unescaped identifiers and raw SQL literals for destination writes.
+  1. Any authenticated user can mutate the global Alfheim API catalog, then trigger a server-side `fetch()` from catalog test routes without the SSRF guard.
+  2. Tenant isolation is still incomplete across credential-adjacent, schedule, history, Helheim, and Mjolnir routes. Several create routes also omit `tenantId`.
+  3. `npm run build` currently fails in Next standalone packaging after static generation.
+  4. PostgreSQL backup uploads can be orphaned if manifest upload fails, leaving failed runs with no object keys even though backup artifacts exist.
+  5. Raven/Data Agent Bifrost resume does not apply or advance incremental watermarks, making repeated extraction likely for incremental agent-backed routes.
 - Build/test status:
   - `npx prisma validate`: PASS.
-  - `npx prisma generate`: FAIL, Windows `EPERM` rename of Prisma query engine DLL.
-  - `npm run build`: PASS on rerun after the user's parallel build finished.
-  - `npm run test`: PASS, 55 test files and 972 tests.
-  - `npm run lint`: FAIL, `next lint` prompts for interactive ESLint setup.
-- Credentials or tenant isolation appear at risk:
-  - Tenant isolation: YES. `withAuth` guarantees `tenantId` (`src/lib/api.ts:35-48`), but many business routes ignore it.
-  - Credentials: direct connection credential responses are mostly excluded from `select`s, but REST provider logs full URLs and auth failure bodies (`src/lib/providers/rest-api.provider.ts:127-131`, `src/lib/providers/rest-api.provider.ts:320`), plaintext credential fallback is accepted (`src/lib/providers/helpers.ts:16-25`), and unsaved REST targets bypass SSRF checks.
-- Auth wrapper status: I did not find an obvious unauthenticated business API route in the inventory sweep. Human routes generally use `withAuth`; Raven agent routes use `withRavenAuth` (`src/lib/raven/auth.ts:25-86`); public/session exceptions are intentional-looking. The high-risk auth problem is scoping, not total absence of authentication.
-- Recent-change context: `git status` showed 56 modified tracked files plus many untracked backup-related files/directories. An initial build attempt failed while another build was running, but a rerun after that process finished passed.
+  - `npx prisma generate`: PASS.
+  - `npm run build`: FAIL.
+  - `npm run test`: PASS, 63 files and 1005 tests.
+  - `npm run lint`: DID NOT RUN; `next lint` opened the first-time ESLint configuration prompt and exited.
+- Credentials or tenant isolation at risk: YES. Tenant-scoped resources are often filtered only by `userId`; some of those paths decrypt saved credentials, return Helheim payload previews, expose recipient emails, or send email through saved SMTP credentials.
 
 ## P0 Critical Issues
 
-### P0-1 Tenant isolation is incomplete across core resources
+### P0-1. Authenticated Alfheim catalog mutation plus unguarded catalog test fetch enables SSRF and global catalog poisoning
 
-- File: `src/app/api/connections/route.ts:9-12`, `src/app/api/connections/route.ts:43-50`, `src/app/api/reports/route.ts:9-20`, `src/app/api/reports/route.ts:49-69`, `src/app/api/bifrost/routes/route.ts:10-12`, `src/app/api/bifrost/routes/route.ts:52-62`, `src/app/api/bifrost/routes/route.ts:106-125`, `prisma/schema.prisma:515-518`, `prisma/schema.prisma:269-272`, `prisma/schema.prisma:960-963`
-- Function/component: core list/create/read/update paths for connections, reports, and Bifrost routes
-- Evidence:
-  - `withAuth` requires an active tenant and exposes `ctx.tenantId` (`src/lib/api.ts:35-48`).
-  - Connections list by `userId` only (`src/app/api/connections/route.ts:9-12`) and create records with `userId` but no `tenantId` (`src/app/api/connections/route.ts:43-50`).
-  - Reports list by `userId` only (`src/app/api/reports/route.ts:9-20`), validate connection ownership by `userId` only (`src/app/api/reports/route.ts:49-52`), and create reports without `tenantId` (`src/app/api/reports/route.ts:60-69`).
-  - Bifrost routes list by `userId` only (`src/app/api/bifrost/routes/route.ts:10-12`), validate source/destination connections by `userId` only (`src/app/api/bifrost/routes/route.ts:52-62`), and create routes without `tenantId` (`src/app/api/bifrost/routes/route.ts:106-125`).
-  - The schema has nullable tenant ownership columns on these models (`prisma/schema.prisma:515-518`, `prisma/schema.prisma:269-272`, `prisma/schema.prisma:960-963`), indicating a partial tenant retrofit.
-- Impact: A user who belongs to multiple tenants can see or operate on resources from the wrong active tenant. Because new records are created without `tenantId`, they become detached from tenant-scoped features and can leak across a user's tenant contexts.
-- Reproduction or reasoning: Create two tenants for one user, switch active tenant, then call `/api/connections`, `/api/reports`, or `/api/bifrost/routes`. Current filters do not include `session.tenantId`, so all same-user records are eligible regardless of active tenant.
-- Minimal fix plan: For tenant-scoped resources, create with `tenantId: ctx.tenantId` and read/update/delete using both `id` and `tenantId`. Cross-resource validations must check referenced rows in the same tenant, not only the same user. Backfill legacy `NULL tenantId` rows with an explicit migration before making tenant columns non-null where appropriate.
-- Whether fix is safe to automate: Partially. API filter/create changes are surgical, but schema nullability/backfill is data-impacting and should not be automated without a reviewed migration and backup.
+- File: `src/app/api/alfheim/catalog/route.ts`
+- Function/component: `POST /api/alfheim/catalog`
+- Evidence: `POST` is wrapped only in `withAuth` and writes directly to the shared `apiCatalogConnector` table at lines 71-93. It records `createdBy: session.user.id`, but has no tenant, role, or platform-admin check.
+- File: `src/app/api/alfheim/catalog/[slug]/route.ts`
+- Function/component: `PUT` and `DELETE /api/alfheim/catalog/[slug]`
+- Evidence: `PUT` and `DELETE` are also only `withAuth`; they update/delete by global `slug` at lines 27-66 and 69-82.
+- File: `src/lib/validations/alfheim.ts`
+- Function/component: `createCatalogConnectorSchema`
+- Evidence: `baseUrl` is only `z.string().min(1)` at line 25, not a URL validator and not restricted to public hosts.
+- File: `src/app/api/alfheim/catalog/[slug]/test/route.ts`
+- Function/component: `POST /api/alfheim/catalog/[slug]/test`
+- Evidence: lines 75-86 substitute request credentials into `connector.baseUrl` and build `testUrl`; line 166 calls raw `fetch(finalTestUrl, fetchInit)` instead of `fetchWithSsrfProtection`.
+- Impact: Any authenticated user can create or edit a catalog connector pointing at internal services or corrupt a connector used by other tenants. The test route can then make the server call that URL with attacker-controlled headers/body fields. This is both SSRF and shared catalog integrity risk.
+- Reproduction or reasoning: Create a catalog connector with a private `baseUrl` such as `http://127.0.0.1:...`, then call the catalog test endpoint. The route uses raw `fetch()` and does not call `src/lib/ssrf.ts`.
+- Minimal fix plan: Restrict catalog mutation to an explicit platform-admin path or make catalog rows tenant-scoped. Validate `baseUrl` as `http`/`https` and reject private/reserved destinations. Replace raw `fetch()` in the test route with `fetchWithSsrfProtection`. Audit existing catalog rows created by non-admin users.
+- Whether fix is safe to automate: Partially. The `fetchWithSsrfProtection` replacement is safe and small; access-control policy for global catalog ownership needs product confirmation.
 
-### P0-2 Authenticated SSRF exists in API discovery and REST connection testing
+### P0-2. Tenant isolation is incomplete across credential-adjacent and data-bearing APIs
 
-- File: `src/app/api/alfheim/discover/openapi/route.ts:18-24`, `src/lib/alfheim/discovery/openapi-parser.ts:35-47`, `src/app/api/alfheim/discover/probe/route.ts:18-23`, `src/lib/alfheim/discovery/probe-endpoints.ts:56-68`, `src/lib/alfheim/discovery/probe-endpoints.ts:92-102`, `src/lib/alfheim/discovery/doc-search.ts:99-112`, `src/app/api/connections/test/route.ts:21-28`, `src/lib/validations/alfheim.ts:74-91`
-- Function/component: Alfheim discovery routes and connection test route
-- Evidence:
-  - OpenAPI import accepts `specUrl: z.string().url()` (`src/lib/validations/alfheim.ts:74-82`) and passes it to `SwaggerParser.validate(input.specUrl)` (`src/lib/alfheim/discovery/openapi-parser.ts:35-47`).
-  - Probe discovery accepts any `baseUrl: z.string().url()` (`src/lib/validations/alfheim.ts:86-91`) and fetches normalized URLs (`src/lib/alfheim/discovery/probe-endpoints.ts:92-102`).
-  - Document discovery fetches `${baseUrl}${specPath}` without private-network checks (`src/lib/alfheim/discovery/doc-search.ts:99-112`).
-  - Connection test SSRF protection only inspects `config.host` (`src/app/api/connections/test/route.ts:21-28`). REST API configs use `baseUrl`, so the guard does not run for REST targets.
-- Impact: Any authenticated user with access to these flows can make the server request internal/private network URLs, metadata services, localhost admin ports, or cloud control-plane endpoints.
-- Reproduction or reasoning: Submit `http://127.0.0.1:...`, `http://169.254.169.254/...`, or an internal hostname as an Alfheim `specUrl`/`baseUrl` or a REST API `baseUrl`. Current zod validation only verifies URL shape.
-- Minimal fix plan: Add one URL-level SSRF guard used before every outbound user-supplied URL fetch, including all redirects. It should resolve DNS, reject private/reserved/link-local/multicast ranges, enforce `http`/`https`, and apply to `specUrl`, `baseUrl`, REST extraction/test URLs, and doc search.
-- Whether fix is safe to automate: Mostly. The guard is a focused security patch, but it needs tests for IPv4, IPv6, DNS rebinding-ish hostnames, redirects, localhost aliases, and cloud metadata IPs.
+- File: `src/app/api/connections/[id]/test/route.ts`
+- Function/component: saved connection test
+- Evidence: line 14 filters `where: { id, userId: session.user.id }` without `tenantId`; line 21 decrypts the saved connection via `toConnectionLike(connection)`.
+- File: `src/app/api/connections/[id]/postgres/databases/route.ts` and `src/app/api/connections/[id]/mssql/databases/route.ts`
+- Function/component: database discovery
+- Evidence: Postgres line 22 and MSSQL line 32 filter by `id` and `userId` only; both select `credentials: true` at Postgres line 27 and MSSQL line 37 before opening provider connections.
+- File: `src/app/api/bifrost/providers/schema/route.ts`
+- Function/component: schema inspection
+- Evidence: line 20 filters connection lookup by `id` and `userId` only, then line 26 decrypts credentials.
+- File: `src/app/api/email-connections/route.ts` and `src/app/api/email-connections/[id]/route.ts`
+- Function/component: SMTP connection CRUD
+- Evidence: list/create omit tenant scope at lines 9-12 and 41-52. Update/delete use only `id` and `userId` at `[id]/route.ts` lines 14-15 and 73-74. Delete counts all schedules by `emailConnectionId` at lines 80-83 without tenant or user scope.
+- File: `src/app/api/sftp-connections/[id]/route.ts` and `src/app/api/sftp-connections/[id]/test/route.ts`
+- Function/component: SFTP connection read/update/delete/test
+- Evidence: lookups filter only by `id` and `userId` at `[id]/route.ts` lines 14-15, 33-34, 94-95 and test route lines 13-14.
+- File: `src/app/api/schedules/recipient-suggestions/route.ts`
+- Function/component: recipient autocomplete
+- Evidence: line 27 scopes recipients by `schedule.report.userId` only; line 34 returns prior recipient email addresses.
+- File: `src/app/api/bifrost/helheim/[id]/route.ts`
+- Function/component: Helheim detail and kill
+- Evidence: GET filters by `id` and `route.userId` only at lines 10-17, then returns `errorDetails` and `payloadPreview` at lines 34-50. PATCH uses the same user-only route scope at lines 64-65.
+- File: `prisma/schema.prisma`
+- Function/component: tenant-scoped models
+- Evidence: tenant IDs are nullable on SFTP connections at lines 192-195, email connections at lines 247-250, reports at lines 272-275, unified connections at lines 521-524, Bifrost routes at lines 968-971, and Helheim entries at line 1021.
+- Impact: A user who belongs to multiple tenants can operate on resources outside the active tenant if they know or retain IDs. Affected paths can use saved DB/SMTP/SFTP credentials, return tenant data, leak recipient emails, or expose dead-letter payload samples.
+- Reproduction or reasoning: The main `/api/connections` route correctly scopes by `userId` and `tenantId` at `src/app/api/connections/route.ts` lines 10-12 and writes `tenantId` at lines 47-50. The routes above diverge from that pattern.
+- Minimal fix plan: For every tenant-owned lookup, add `tenantId: session.tenantId` in addition to `userId`. Write `tenantId` on create for email/SFTP/schedule-adjacent records. Backfill nullable tenant IDs before considering non-null constraints. Add API tests where the same user has two tenants and an ID from the inactive tenant.
+- Whether fix is safe to automate: Partially. Many query edits are mechanical, but nullable historical data needs a migration/backfill plan.
 
-### P0-3 Bifrost full reload drops the destination table before a successful reload is proven
+### P0-3. Production build is broken in standalone packaging
 
-- File: `src/lib/bifrost/engine.ts:453-472`
-- Function/component: `BifrostEngine.execute`, `needsFullReload` path
-- Evidence:
-  - When `route.needsFullReload` is true, the engine drops the destination table immediately if it exists (`src/lib/bifrost/engine.ts:456-466`).
-  - It then deletes the watermark (`src/lib/bifrost/engine.ts:469-472`) before source extraction and destination load have completed.
-- Impact: A transient source, transform, destination, schema, auth, or network failure after the drop leaves the destination table missing or empty. This is direct data loss in production pipelines.
-- Reproduction or reasoning: Mark a route `needsFullReload`, then make extraction or load fail after the drop. The table has already been removed and the watermark cleared.
-- Minimal fix plan: Use staging-table reload and atomic swap/rename where supported. At minimum, extract and load into staging first, validate row counts/schema, then swap/truncate/drop the old target only after the new table is ready.
-- Whether fix is safe to automate: No. This touches destructive write semantics and needs provider-specific design, tests, and rollback behavior.
+- File: `next.config.js`
+- Function/component: Next config
+- Evidence: line 3 sets `output: "standalone"`.
+- File: `src/middleware.ts`
+- Function/component: middleware
+- Evidence: middleware exists at lines 1-20, but the standalone copy phase fails looking for `.next\server\src\middleware.js`.
+- Build evidence: `npm run build` first failed with `ENOENT: no such file or directory, open 'C:\Users\JDelg\Hermod\.next\server\app\_not-found\page.js.nft.json'`. After deleting only generated `.next`, rerun failed with `unhandledRejection Error: ENOENT: no such file or directory, copyfile 'C:\Users\JDelg\Hermod\.next\server\src\middleware.js' -> 'C:\Users\JDelg\Hermod\.next\standalone\.next\server\src\middleware.js'`.
+- Impact: Production deploy artifacts cannot be produced reliably. This is a release blocker regardless of test status.
+- Reproduction or reasoning: The failure reproduced after generated output cleanup, so it is not just stale `.next` from an earlier build.
+- Minimal fix plan: Reproduce in a clean checkout and inspect Next 14.2 standalone tracing for middleware under `src/`. Check whether a Next upgrade, middleware path/output change, or standalone setting is required. Keep this as a build-system fix, not a source cleanup pass.
+- Whether fix is safe to automate: No. The root cause is in build packaging and needs targeted diagnosis.
 
-### P0-4 Helheim manual retry can truncate a destination during single-chunk retry
+### P0-4. PostgreSQL backup artifacts can be uploaded but recorded as failed with empty object keys
 
-- File: `src/app/api/bifrost/helheim/[id]/retry/route.ts:45-56`, `src/lib/worker.ts:500-505`
-- Function/component: manual Helheim retry route
-- Evidence:
-  - Manual retry loads a failed chunk using `{ ...destConfig, schema }` from the original route (`src/app/api/bifrost/helheim/[id]/retry/route.ts:49-56`).
-  - The scheduled worker retry path explicitly avoids this by forcing retry write disposition away from truncate (`src/lib/worker.ts:500-505`).
-- Impact: If the original route uses `WRITE_TRUNCATE`, manually retrying one failed chunk can wipe the destination and load only that chunk.
-- Reproduction or reasoning: Create a route with truncate semantics, force one batch into Helheim, then retry it manually. The manual endpoint passes the original destructive disposition to the provider.
-- Minimal fix plan: Mirror the worker retry behavior in the manual endpoint: force `writeDisposition: "WRITE_APPEND"` or provider-equivalent non-destructive retry mode. Add a regression test for a `WRITE_TRUNCATE` route retry.
-- Whether fix is safe to automate: Yes. This is a surgical endpoint fix with a straightforward test.
-
-### P0-5 Raven resume deletes ingested chunks before transform/load succeeds
-
-- File: `src/lib/bifrost/jobs/raven-resume.handler.ts:50-87`, `src/lib/bifrost/jobs/raven-resume.handler.ts:89-120`, `src/app/api/raven/ingest/[jobId]/complete/route.ts:111-126`
-- Function/component: Raven/Data Agent Bifrost resume pipeline
-- Evidence:
-  - Resume assembles chunks (`src/lib/bifrost/jobs/raven-resume.handler.ts:50-83`) and then deletes them immediately (`src/lib/bifrost/jobs/raven-resume.handler.ts:86-87`).
-  - Transform and destination connection/load occur after deletion (`src/lib/bifrost/jobs/raven-resume.handler.ts:89-120`).
-  - The complete endpoint marks the Raven job success, then treats resume enqueue failure as non-fatal (`src/app/api/raven/ingest/[jobId]/complete/route.ts:111-126`).
-- Impact: If transform/load fails after chunk deletion, the source data needed for retry is gone. If resume enqueue fails, the job is marked complete but the downstream route can remain stuck waiting for a handler that was never queued.
-- Reproduction or reasoning: Complete a Raven job with chunks, then make destination connect/load fail. The resume handler deletes chunks before it reaches the risky downstream operations.
-- Minimal fix plan: Delete chunks only after route completion is durable. If enqueue fails, mark the route log/job in a retryable state or return a non-2xx response so the agent/control plane can retry.
-- Whether fix is safe to automate: Partially. Moving deletion after success is small; complete/enqueue state semantics should be designed and tested.
-
-### P0-6 Gate push SQL builders concatenate unescaped identifiers and raw SQL literals
-
-- File: `src/lib/gates/push-executor.ts:293-322`, `src/lib/gates/push-executor.ts:325-376`, `src/lib/gates/alter-generator.ts:34-44`, `src/lib/gates/alter-generator.ts:175-198`, `src/app/api/gates/route.ts:127-136`, `src/app/api/gates/route.ts:229-251`
-- Function/component: Gate destination DDL/upsert generation
-- Evidence:
-  - Postgres upsert uses `"${schema}"."${table}"` and `"${c}"` without escaping embedded quotes (`src/lib/gates/push-executor.ts:300-322`).
-  - MSSQL and MySQL builders use `[${name}]` and backticks without escaping delimiters (`src/lib/gates/push-executor.ts:325-376`).
-  - DDL quote helper has the same issue (`src/lib/gates/alter-generator.ts:34-44`), then builds `CREATE TABLE` SQL from schema/table/column names (`src/lib/gates/alter-generator.ts:175-198`).
-  - Gate creation can execute an initial push immediately (`src/app/api/gates/route.ts:229-251`).
-- Impact: Malicious or malformed schema/table/column identifiers can break out of quoting or generate destructive SQL against destination databases. Even for trusted users, this can create incorrect writes or failed pushes.
-- Reproduction or reasoning: Provide a destination table/schema/column name containing dialect quote delimiters such as `"`, `]`, or `` ` ``. The generated SQL embeds it directly.
-- Minimal fix plan: Centralize dialect identifier quoting with delimiter escaping and/or enforce strict identifier validation at API boundaries. Prefer provider parameterization/bulk-load APIs for row values instead of building giant SQL value lists.
-- Whether fix is safe to automate: Partially. Identifier escaping is surgical; replacing value-list DML with parameterized/bulk APIs is broader and should be tested per provider.
+- File: `src/lib/backups/postgres/postgres-backup-engine.ts`
+- Function/component: `PostgresBackupEngine.runFullBackup`
+- Evidence: full backup upload and manifest creation happen at lines 343-407, but `checksums.push(...)` and `objectKeys.push(...)` happen only after manifest upload at lines 410-418. If manifest upload throws, the catch at lines 419-425 treats the database as failed. If no object keys were recorded, lines 428-429 throw, and the outer catch records a failed run with `objectKeys: []`, `bytesWritten: 0`, and `checksumSha256: null` at lines 472-487.
+- File: `src/lib/backups/postgres/postgres-backup-engine.ts`
+- Function/component: `PostgresBackupEngine.runWalArchive`
+- Evidence: WAL file uploads and `objectKeys.push(...)` happen at lines 580-609, but manifest upload is outside that per-file catch at lines 651-660. If manifest upload fails, the outer catch records `objectKeys: []`, `bytesWritten: 0`, and `checksumSha256: null` at lines 708-725.
+- Impact: Storage can contain valid backup artifacts that the database no longer knows how to restore or retain. That is recovery data loss from the application point of view, and it can also leave untracked storage costs.
+- Reproduction or reasoning: Simulate storage success for the dump/WAL file and failure for the manifest upload. The code paths above do not persist the already-uploaded artifact key before the manifest step fails.
+- Minimal fix plan: Record primary artifact keys and bytes immediately after artifact upload, before manifest upload. Treat manifest upload as a separate artifact failure or attempt cleanup. Add tests that fail only manifest upload for full and WAL backups.
+- Whether fix is safe to automate: Partially. The logic is local, but recovery semantics for partial manifest failure should be explicit.
 
 ## P1 High Issues
 
-### P1-1 Bifrost route updates can rebind source/destination/blueprint IDs without tenant validation
+### P1-1. Raven/Data Agent Bifrost resume does not apply or advance incremental watermarks
 
-- Evidence: Existing route ownership is checked by `id` + `userId` only (`src/app/api/bifrost/routes/[id]/route.ts:32-34`), then `sourceId`, `ravenSatelliteId`, `destId`, `blueprintId`, and `destConfig` are written directly (`src/app/api/bifrost/routes/[id]/route.ts:66-90`).
-- Impact: A route can be updated to point at references that were never validated for the active tenant. This compounds the tenant isolation issue and can execute pipelines with unintended connections.
-- Minimal fix plan: On every update that changes a foreign key, validate the target row by active `tenantId` and compatible type before updating.
+- File: `src/lib/bifrost/engine.ts`
+- Function/component: normal Bifrost execution and Raven job creation
+- Evidence: normal execution reads watermarks and builds incremental clauses at lines 296-307, then writes watermarks and `lastCheckpoint` after successful loads at lines 824-842. The Raven branch creates a job with raw `route.sourceConfig.query` and `route.sourceConfig.params` at lines 999-1011, with no equivalent watermark handling.
+- File: `src/lib/bifrost/jobs/raven-resume.handler.ts`
+- Function/component: Raven resume handler
+- Evidence: the resume handler loads batches at lines 129-168, finalizes the route log at lines 182-192, and deletes chunks at line 194. It never calls `setWatermark` and never updates `bifrostRoute.lastCheckpoint`.
+- Impact: Incremental Data Agent routes can repeatedly extract the same window or fail to advance cursor state after successful cloud-side load. Depending on destination mode, this can duplicate rows or keep queues permanently behind.
+- Reproduction or reasoning: Compare direct Bifrost route execution with Raven execution. Only the direct path has cursor read/write logic.
+- Minimal fix plan: Apply the same cursor construction before creating a Raven job, include resolved parameters in the job payload, and advance the watermark/lastCheckpoint after successful resume load. Add an agent-backed incremental route test.
+- Whether fix is safe to automate: No. Needs agreement on whether cursor filtering is performed by Hermod before dispatch or by Raven from explicit job fields.
 
-### P1-2 Worker shutdown marks all running logs failed globally
+### P1-2. MySQL Bifrost destination load builds parameter values but never passes them
 
-- Evidence: `markInFlightJobsFailed` updates every `RunLog` with `status: "RUNNING"` and every `RouteLog` with `status: "running"` (`src/lib/worker-shutdown.ts:12-20`) without worker ownership or heartbeat.
-- Impact: In multi-worker or rolling deploy scenarios, one process shutdown can mark legitimate work owned by another process as failed.
-- Minimal fix plan: Track worker/process ownership on log records or use pg-boss job state as source of truth. Only mark jobs owned by the shutting-down worker, or only stale jobs beyond a timeout.
+- File: `src/lib/providers/mysql.provider.ts`
+- Function/component: `MysqlProvider.load`
+- Evidence: lines 223-232 build `values` and placeholder groups, but the `execute` call at lines 236-239 passes only `{ sql, timeout }`; `values` is unused.
+- Impact: Any MySQL destination load with rows will execute an `INSERT ... VALUES (?, ?)` statement without bound parameters and fail at runtime. This breaks MySQL as a Bifrost destination.
+- Reproduction or reasoning: The local test suite covers MySQL provider basics, but it does not assert `load()` passes values to mysql2. The code path is plainly missing the parameter array/options field.
+- Minimal fix plan: Update the `MysqlPoolConnection.execute` type to accept values and pass the `values` array in the bulk insert call. Add a unit test for `load()` that asserts placeholders and values are sent together.
+- Whether fix is safe to automate: Yes.
 
-### P1-3 Scheduler ticks can overlap and advance schedules before enqueue succeeds
+### P1-3. SSRF helper misses IPv4-mapped IPv6 and has DNS time-of-check/time-of-use exposure
 
-- Evidence: Scheduler advances report `nextRunAt` before enqueue (`src/lib/worker.ts:166-191`), advances Bifrost `nextRunAt` before enqueue (`src/lib/worker.ts:219-227`), and runs on `setInterval` without an in-process `tickRunning` guard (`src/lib/worker.ts:549-556`).
-- Impact: A crash between update and enqueue skips a run; an overlapping tick can race schedule advancement/enqueue behavior. Singleton keys help job duplication but do not protect schedule state.
-- Minimal fix plan: Add a scheduler lease or in-process guard, and update `nextRunAt` in the same durable flow as enqueue where possible. At least make skipped-run behavior explicit and observable.
+- File: `src/lib/ssrf.ts`
+- Function/component: `checkSsrf` and `fetchWithSsrfProtection`
+- Evidence: `isPrivateIPv6` only checks `::1`, `fc`, `fd`, and `fe80` at lines 32-38. `checkSsrf` returns `null` for any other IPv6 literal at lines 56-60, so addresses such as `[::ffff:127.0.0.1]` are not reduced to IPv4 and checked by `isPrivateIPv4`. `fetchWithSsrfProtection` checks the URL before calling normal `fetch()` at lines 102-111, so DNS is resolved again during the actual request.
+- Impact: REST API connections and Alfheim discovery code that do use the helper can still be pointed at private services via IPv4-mapped IPv6 or DNS rebinding.
+- Reproduction or reasoning: `net.isIP("::ffff:127.0.0.1")` is an IPv6 address, so this code takes the IPv6 branch and does not run the IPv4 private range checks.
+- Minimal fix plan: Normalize IPv4-mapped IPv6 before checks, cover additional reserved ranges, and add tests for literal IPs and redirects. Consider a custom lookup/agent path that connects to the verified IP rather than re-resolving.
+- Whether fix is safe to automate: Yes for the literal-IP tests and normalization; the DNS rebinding mitigation needs a slightly larger design.
 
-### P1-4 REST API provider can leak sensitive data in logs and accepts empty credentials on create
+### P1-4. PostgreSQL PITR restore can look in the wrong WAL prefix
 
-- Evidence: Auth failure logs include the full URL and first 500 response-body chars (`src/lib/providers/rest-api.provider.ts:127-131`); extraction logs full URL plus credential key names (`src/lib/providers/rest-api.provider.ts:312-320`). REST create validation uses `restApiCredentialsBaseSchema` (`src/lib/validations/unified-connections.ts:183-190`), whose fields are all optional (`src/lib/validations/alfheim.ts:55-70`).
-- Impact: Tokens in query strings or response bodies can land in logs. Invalid REST connections can be saved without credentials even when auth type requires them.
-- Minimal fix plan: Redact URLs before logging, avoid response bodies in auth logs, and use the refined credential schema in create/test paths based on auth type.
+- File: `src/lib/backups/postgres/postgres-backup-engine.ts`
+- Function/component: backup storage prefix resolution
+- Evidence: `storagePrefixFromPolicy` falls back from `policy.storagePrefix` to the storage target config at lines 197-199 and is used for backup object keys at lines 311-314 and WAL keys at line 563.
+- File: `src/lib/backups/postgres/postgres-restore-engine.ts`
+- Function/component: `preparePhysicalPitr`
+- Evidence: restore uses only `restoreJob.policy.storagePrefix` at line 351, then builds the WAL prefix at line 353.
+- File: `src/lib/backups/retention.ts`
+- Function/component: retention prefix resolution
+- Evidence: retention has its own fallback helper at lines 25-30 and uses it for WAL retention at lines 60-68.
+- Impact: If a policy relies on the storage target's default prefix, backups and retention use that prefix, but PITR restore manifest generation may search/list a different WAL prefix and miss required WAL files.
+- Reproduction or reasoning: Configure `policy.storagePrefix = null` and a storage target config prefix. Backup/WAL key generation uses the target prefix; restore does not.
+- Minimal fix plan: Move prefix fallback logic to one shared helper and use it in backup, restore, and retention. Add a PITR manifest test for target-level prefix fallback.
+- Whether fix is safe to automate: Yes.
 
-### P1-5 BigQuery MERGE identifiers are not escaped and failed staging tables are not actually preserved
+### P1-5. Deleting a backup storage target ignores SQL Server backup policies
 
-- Evidence: BigQuery `mergeInto` interpolates dataset/table/column identifiers inside backticks without escaping (`src/lib/providers/bigquery.provider.ts:381-398`). On MERGE failure, the engine logs that staging is preserved (`src/lib/bifrost/engine.ts:791-796`) but the `finally` block drops it (`src/lib/bifrost/engine.ts:798-806`).
-- Impact: Bad identifiers can break or alter generated MERGE SQL. Failed MERGE diagnostics are lost despite log messaging claiming otherwise.
-- Minimal fix plan: Add BigQuery identifier quoting/validation and either actually preserve staging tables on MERGE failure or change the log/message and capture enough diagnostics elsewhere.
+- File: `prisma/schema.prisma`
+- Function/component: storage target relations
+- Evidence: `BackupStorageTarget` has both `policies PostgresBackupPolicy[]` and `mssqlPolicies MssqlBackupPolicy[]` at lines 649-650. `MssqlBackupPolicy.storageTargetId` is nullable with `onDelete: SetNull` at lines 784-785.
+- File: `src/app/api/backups/storage-targets/[id]/route.ts`
+- Function/component: `DELETE /api/backups/storage-targets/[id]`
+- Evidence: delete protection counts only `postgresBackupPolicy` at lines 101-112, force-delete only deletes disabled Postgres policies at lines 124-127, then deletes the storage target at lines 127 and 132.
+- Impact: A target used by SQL Server backup policies can be deleted without the API warning or blocking. Prisma will null out `storageTargetId`, leaving MSSQL policies configured in the UI but unable to upload to the intended target.
+- Reproduction or reasoning: The relation exists in schema but no MSSQL policy count appears in the delete route.
+- Minimal fix plan: Count active and total MSSQL policies alongside Postgres policies. Block deletion when any enabled policy references the target; define force behavior for disabled MSSQL policies.
+- Whether fix is safe to automate: Yes.
 
-### P1-6 Bifrost opens provider connections before entering the guarded `try/finally`
+### P1-6. Report execution still loads unbounded query results before truncation
 
-- Evidence: Source and destination provider connections are opened before `try` starts (`src/lib/bifrost/engine.ts:270-281`), while cleanup happens in the `finally` inside that `try` (`src/lib/bifrost/engine.ts:938-940`).
-- Impact: If destination connect fails after source connect succeeds, the source connection can leak and no route log is reliably updated. If source connect fails, no route log is created.
-- Minimal fix plan: Move connection acquisition into a guarded block that closes whichever connection succeeded, and create/update a route log for connect-stage failures.
-
-### P1-7 Backup APIs mix `userId` and `OR tenantId/userId` scoping
-
-- Evidence: `userScopedWhere` returns only `{ userId }` (`src/lib/backups/api-helpers.ts:11-12`); backup source validation uses `userId` only (`src/lib/backups/api-helpers.ts:27-31`); storage target validation accepts either tenant or user (`src/lib/backups/api-helpers.ts:62-69`); storage target list accepts either tenant or user (`src/app/api/backups/storage-targets/route.ts:22-31`); item GET/PUT uses the same `OR` (`src/app/api/backups/storage-targets/[id]/route.ts:30-56`).
-- Impact: Same-user cross-tenant backup sources/targets can appear or be reused across tenant contexts. Backup/restore is destructive enough that this should be strict.
-- Minimal fix plan: Choose one ownership model. For tenant-scoped backups, require `tenantId: ctx.tenantId` for policies, runs, restores, targets, and referenced connections, with a migration/backfill plan for existing rows.
-
-### P1-8 Query execution and report APIs return raw provider errors and execute user-only scoped connections
-
-- Evidence: Query execution validates connection by `id` + `userId` only (`src/app/api/query/execute/route.ts:21-24`) and returns raw provider error messages to the frontend (`src/app/api/query/execute/route.ts:60-63`). Report creation validates the connection by `userId` only (`src/app/api/reports/route.ts:49-52`).
-- Impact: Active-tenant boundaries are bypassed and provider/SQL/server details can leak to users through raw errors.
-- Minimal fix plan: Scope by tenant and return sanitized error categories with detailed logs server-side.
+- File: `src/lib/report-runner.ts`
+- Function/component: `executeReportPipeline`
+- Evidence: line 118 calls `provider.query(conn, input.sqlQuery)` and materializes all rows. The 500,000 row limit is enforced only afterward at lines 125-127 by slicing the already-loaded array.
+- File: `src/app/api/reports/[id]/run/route.ts`
+- Function/component: manual report run
+- Evidence: line 33 calls `provider.query(conn, report.sqlQuery)` and returns rows without the preview limit used by `src/app/api/query/execute/route.ts`.
+- Impact: A large report can exhaust server memory or produce huge responses before Hermod has a chance to truncate. Scheduled emails and manual runs are both exposed.
+- Reproduction or reasoning: The limit check occurs after provider query completion, so memory use is proportional to the full result set, not the limit.
+- Minimal fix plan: Add streaming or provider-level row caps for report generation. For interactive manual runs, use the same preview cap semantics as query preview. Add stress tests using mocked large providers.
+- Whether fix is safe to automate: No. Needs a provider contract decision.
 
 ## P2 Medium Issues
 
-### P2-1 Nullable tenant columns are widespread and need an intentional migration plan
+### P2-1. New backup `storageLayout` fields are in schema but not in API validation or persistence
 
-- Evidence: Tenant-scoped objects have nullable `tenantId`: `SftpConnection` (`prisma/schema.prisma:192-199`), `EmailConnection` (`prisma/schema.prisma:245-253`), `Report` (`prisma/schema.prisma:269-278`), `Connection` (`prisma/schema.prisma:515-532`), backup targets/policies (`prisma/schema.prisma:639-649`, `prisma/schema.prisma:686-689`), MSSQL backups (`prisma/schema.prisma:816-827`, `prisma/schema.prisma:852-857`), Bifrost route/dead-letter/watermark (`prisma/schema.prisma:960-977`, `prisma/schema.prisma:1013-1019`, `prisma/schema.prisma:1031-1036`).
-- Impact: API fixes alone will not eliminate legacy/null-tenant ambiguity. Some nullability may be intentional for backward compatibility, but it is currently undocumented in code.
-- Minimal fix plan: Inventory legacy rows, backfill by user active/default tenant where safe, and only then consider non-null constraints.
+- File: `prisma/schema.prisma`
+- Function/component: backup policy models
+- Evidence: `PostgresBackupPolicy.storageLayout` exists at line 681 and `MssqlBackupPolicy.storageLayout` exists at line 817.
+- File: `src/lib/validations/backups.ts`
+- Function/component: Postgres backup validation
+- Evidence: create/update schemas at lines 48-58 and 97-108 include `storagePrefix` and target fields but no `storageLayout`.
+- File: `src/lib/validations/mssql-backups.ts`
+- Function/component: MSSQL backup validation
+- Evidence: base schema starts at line 22 and has no `storageLayout`.
+- File: `src/app/api/backups/policies/route.ts` and `src/app/api/backups/mssql/policies/route.ts`
+- Function/component: backup policy create
+- Evidence: Postgres create data begins at lines 125-130 and MSSQL create data begins at lines 76-82; neither persists `storageLayout`.
+- Impact: UI selections for storage layout can be silently stripped by Zod and the database default will always win. This is a correctness bug in recently changed backup layout work.
+- Reproduction or reasoning: Zod object schemas strip unknown keys by default, so a `storageLayout` request property is ignored.
+- Minimal fix plan: Add a shared storage-layout enum validator, persist the field in Postgres and MSSQL create/update routes, and add request tests.
+- Whether fix is safe to automate: Yes.
 
-### P2-2 Route parameter parsing is fragile in many App Router handlers
+### P2-2. `withAuth` discards App Router route params, encouraging fragile URL parsing
 
-- Evidence: Routes parse IDs via `req.url.split(...)`, for example `src/app/api/bifrost/routes/[id]/route.ts:30`, `src/app/api/bifrost/routes/[id]/route.ts:98`, `src/app/api/bifrost/helheim/[id]/retry/route.ts:16`, `src/app/api/raven/ingest/[jobId]/complete/route.ts:13`, `src/app/api/backups/mssql/policies/[id]/preflight/route.ts:5-10`.
-- Impact: Path parsing can break under route nesting, encoded path segments, rewritten URLs, or future path changes.
-- Minimal fix plan: Update `withAuth` to pass App Router `routeContext` through and migrate dynamic routes to typed `{ params }` handlers.
+- File: `src/lib/api.ts`
+- Function/component: `withAuth`
+- Evidence: `withAuth` accepts `routeContext?: unknown` at line 30 but calls `handler(req, ctx)` at line 51. `AuthHandler` has no route-context parameter at lines 21-24.
+- File examples: `src/app/api/connections/[id]/test/route.ts` parses `req.url.split("/connections/")` at line 8; `src/app/api/bifrost/helheim/[id]/route.ts` parses `req.url.split("/helheim/")` at line 8; `src/app/api/blueprints/[routeId]/versions/[version]/route.ts` parses URL parts at lines 7 and 69.
+- Impact: Dynamic routes duplicate brittle parsing logic and are vulnerable to encoded-path and route-shape changes. It also makes tests noisier.
+- Minimal fix plan: Extend `withAuth` to pass route params as a third argument or wrap `{ auth, params }` cleanly, then migrate dynamic routes incrementally.
+- Whether fix is safe to automate: Partially. The wrapper change is small; route migration should be staged.
 
-### P2-3 Dead-letter entries do not store tenant IDs
+### P2-3. Lint script is not CI-ready
 
-- Evidence: `HelheimEntry` has `tenantId String?` (`prisma/schema.prisma:1013-1019`), but `enqueueDeadLetter` does not set it (`src/lib/bifrost/helheim/dead-letter.ts:72-86`).
-- Impact: Dead-letter APIs must join through route ownership for scoping. Tenant-level operations, cleanup, stats, and incident response are harder and more error-prone.
-- Minimal fix plan: Set `tenantId` from the route when enqueuing and backfill existing entries.
+- File: `package.json`
+- Function/component: scripts
+- Evidence: `npm run lint` maps to `next lint` at line 14.
+- Diagnostic evidence: Running `npm run lint` opened the prompt `How would you like to configure ESLint? Strict (recommended) / Base / Cancel` and exited with code 1.
+- Impact: Lint cannot be used as a non-interactive quality gate. A CI job would fail or hang depending on terminal behavior.
+- Minimal fix plan: Add an explicit ESLint config compatible with Next 14 or replace the script with a configured lint command. Re-run in CI-like non-interactive mode.
+- Whether fix is safe to automate: Yes, but only after choosing Strict or Base.
 
-### P2-4 Plaintext credential fallback remains accepted
+### P2-4. Helheim stores and returns raw error details and payload previews
 
-- Evidence: `toConnectionLike` decrypts credentials, but if decrypt fails, it tries `JSON.parse(connection.credentials)` and uses plaintext fallback (`src/lib/providers/helpers.ts:16-25`). Tests assert this behavior.
-- Impact: This may be a compatibility bridge, but it normalizes plaintext credential storage if bad rows or manual inserts exist.
-- Minimal fix plan: Keep fallback only behind a migration/compatibility flag, log row IDs in a secure admin-only channel, and add a migration to re-encrypt or reject plaintext rows.
-
-### P2-5 SQL query parameter fallback uses string interpolation
-
-- Evidence: `resolveQueryParams` replaces `@param` placeholders with single-quoted escaped strings (`src/lib/providers/helpers.ts:41-49`).
-- Impact: Escaping single quotes is better than raw concatenation, but it is still not native parameterization and can create type/casting surprises or edge-case injection risks for providers using it.
-- Minimal fix plan: Prefer provider-native parameters for query execution/extraction. Where unsupported, restrict param origins and add tests for quotes, backslashes, nulls, arrays, and dates.
-
-### P2-6 UI destructive actions mostly use confirmation state, but some flows are not obviously explicit
-
-- Evidence: Reports, Bifrost routes, backup policies, storage targets, and blueprints perform `DELETE` in `executeDelete` after setting `deleteTarget` (`src/components/reports/report-list.tsx:29-37`, `src/components/bifrost/route-list.tsx:114-124`, `src/components/backups/backup-list.tsx:98-105`, `src/components/backups/storage-target-list.tsx:86-93`, `src/components/mjolnir/blueprint-list.tsx:44-53`). Raven settings use explicit `window.confirm` (`src/app/(app)/settings/raven-keys/page.tsx:110-132`, `src/app/(app)/settings/ravens/[ravenId]/page.tsx:123-150`).
-- Impact: I did not find a top-tier destructive UI bug in the sampled main components, but the backup/Bifrost delete dialogs should be verified visually because API-side scoping/destructive behavior is high risk.
-- Minimal fix plan: Add component tests or Playwright checks for delete confirmation modals on backup, Bifrost, report, and connection flows.
+- File: `src/lib/bifrost/helheim/dead-letter.ts`
+- Function/component: dead-letter enqueue
+- Evidence: `errorMessage` and `errorDetails` are stored at lines 80-83; stack snippets are captured at lines 195-197.
+- File: `src/app/api/bifrost/helheim/[id]/route.ts`
+- Function/component: Helheim detail API
+- Evidence: the route returns `errorDetails` and up to 10 decompressed rows in `payloadPreview` at lines 24-50.
+- Impact: This is useful for debugging, but if provider errors contain SQL text, API responses, or secrets, the UI can expose them. Combined with the tenant-scope gap above, the blast radius is larger.
+- Minimal fix plan: Redact known credential patterns before storing error details, cap payload fields, and require tenant scope before returning previews.
+- Whether fix is safe to automate: Partially.
 
 ## P3 Low Issues
 
-### P3-1 Logging is noisy in provider and pipeline tests/runs
+### P3-1. Plaintext credential fallback can mask unsafe test data outside production
 
-- Evidence: REST extraction logs every URL (`src/lib/providers/rest-api.provider.ts:320`); NetSuite provider logs queries during tests (observed in `npm run test` output); Bifrost engine logs staging behavior and batch progress heavily (`src/lib/bifrost/engine.ts:790-810`).
-- Impact: Noise makes real incidents harder to spot and increases accidental sensitive-data exposure risk.
-- Minimal fix plan: Use structured log levels and redact sensitive fields consistently.
+- File: `src/lib/providers/helpers.ts`
+- Function/component: `toConnectionLike`
+- Evidence: if decrypt fails, non-production falls back to `JSON.parse(connection.credentials)` at lines 19-31. The guard allows fallback whenever `NODE_ENV !== "production"` at lines 40-42.
+- Impact: This is intentional for unsaved/test connections, but it can hide accidental plaintext credential persistence during development and tests.
+- Minimal fix plan: Keep the fallback only for explicit test objects or require `HERMOD_ALLOW_PLAINTEXT_CREDENTIALS=true` even in development.
+- Whether fix is safe to automate: No. It may break existing test helpers.
 
-### P3-2 Generated comments and route comments show mojibake in terminal output
+### P3-2. Provider and worker logs are noisy and sometimes include route names, endpoints, and query paths
 
-- Evidence: PowerShell line reads showed garbled box-drawing/comment characters across several files, such as `src/app/api/connections/route.ts:8` and `src/lib/bifrost/engine.ts:453`.
-- Impact: This did not affect build/test behavior, but it hurts auditability in Windows terminals and can complicate diffs.
-- Minimal fix plan: Standardize source encoding to UTF-8 and avoid decorative comment glyphs in code comments.
+- File examples: `src/lib/bifrost/engine.ts`
+- Evidence: REST route logging includes catalog/object/endpoints at lines 387, 397, 414, and 420. Worker logs route/report IDs and names throughout `src/lib/worker.ts`, for example lines 168, 230, 265, and 362.
+- Impact: I did not find decrypted credentials being logged in these paths, but logs may still disclose customer route names, API endpoints, and object names.
+- Minimal fix plan: Keep operational IDs, reduce customer data in logs, and use structured redaction helpers for provider error logging.
+- Whether fix is safe to automate: Partially.
 
 ## Build/Test Results
 
-- Command: `npx prisma validate`
-  - Exit code: 0
-  - Result:
-    - `Environment variables loaded from .env`
-    - `Prisma schema loaded from prisma\schema.prisma`
-    - `The schema at prisma\schema.prisma is valid`
-
-- Command: `npx prisma generate`
-  - Exit code: 1
-  - Exact failure:
-    - `EPERM: operation not permitted, rename 'C:\Users\JDelg\Hermod\node_modules\.prisma\client\query_engine-windows.dll.node.tmp380920' -> 'C:\Users\JDelg\Hermod\node_modules\.prisma\client\query_engine-windows.dll.node'`
-  - Interpretation: Matches the known Windows Prisma DLL lock failure. I did not move/delete `.prisma` because this was an audit-only pass.
-
-- Command: `npm run build`
-  - Exit code: 0
-  - Result:
-    - Next.js 14.2.35 compiled successfully.
-    - Type checking passed.
-    - Static generation completed: `Generating static pages (106/106)`.
-    - Build finalized and emitted the route table.
-  - Note: An earlier run before the user's parallel build finished failed at `src/app/api/backups/mssql/policies/[id]/preflight/route.ts:9:30`; this was not reproduced on rerun.
-
-- Command: `npm run test`
-  - Exit code: 0
-  - Result:
-    - `Test Files 55 passed (55)`
-    - `Tests 972 passed (972)`
-    - `Duration 7.31s`
-  - Notable non-failing stderr/log signals:
-    - REST auth failure logging appears in tests: `[REST] Auth failed 401 for https://api.example.com: null`.
-    - Plaintext credential fallback is exercised: `[toConnectionLike] Credentials for POSTGRES connection were not encrypted - using plaintext fallback`.
-
-- Command: `npm run lint`
-  - Exit code: 1
-  - Result:
-    - Script runs `next lint`.
-    - It prompts interactively: `How would you like to configure ESLint? Strict (recommended) / Base / Cancel`.
-  - Interpretation: Lint is not currently usable in non-interactive CI without ESLint config migration/setup.
-
-- Command not run: `npm install`
-  - Reason: dependencies were already present and all requested npm/prisma diagnostics could be invoked without installing.
+- `npm install`: not run; dependencies were already present and commands were available.
+- `npx prisma validate`: PASS. Output included `The schema at prisma\schema.prisma is valid`.
+- `npx prisma generate`: PASS. Output included `Generated Prisma Client (v5.22.0) to .\node_modules\@prisma\client in 928ms`.
+- `npm run build`: FAIL.
+  - First run failed after compile/type/static generation with: `Error: ENOENT: no such file or directory, open 'C:\Users\JDelg\Hermod\.next\server\app\_not-found\page.js.nft.json'`.
+  - I deleted only generated `.next` output and reran.
+  - Second run failed after compile/type/static generation with: `unhandledRejection Error: ENOENT: no such file or directory, copyfile 'C:\Users\JDelg\Hermod\.next\server\src\middleware.js' -> 'C:\Users\JDelg\Hermod\.next\standalone\.next\server\src\middleware.js'`.
+- `npm run test`: PASS. Vitest reported `63 passed (63)` test files and `1005 passed (1005)` tests in 6.08s.
+- `npm run lint`: FAIL/NOT EXECUTED. `next lint` prompted for initial ESLint configuration with `Strict`, `Base`, and `Cancel` choices, then exited code 1.
 
 ## Suggested Fix Order
 
-1. Add centralized tenant scoping helpers and patch create/read/update/delete paths for connections, reports, schedules, email/SFTP connections, Bifrost routes, backups, and query execution. Add tests for same-user multi-tenant isolation.
-2. Add SSRF protection to all user-supplied outbound URL paths, with redirect/DNS/IP tests.
-3. Patch the surgical data-loss bugs: force manual Helheim retry append mode and move Raven chunk deletion after durable success.
-4. Redesign Bifrost full reload around staging/swap semantics before allowing `needsFullReload` to drop production targets.
-5. Harden Gate and BigQuery SQL identifier quoting/validation, then add dialect-specific tests.
-6. Fix worker ownership/overlap semantics for shutdown cleanup and scheduler ticks.
-7. Plan and execute tenantId backfill/non-null migrations only after API behavior is corrected and backed up.
-8. Make lint non-interactive in CI and resolve the Prisma generate lock locally with the documented Windows workaround.
+1. Lock down Alfheim catalog mutation and replace catalog test raw `fetch()` with SSRF-protected fetch.
+2. Patch tenant filters on credential-adjacent routes first: saved connection test, DB discovery, provider schema, email connections, SFTP connections, schedules, recipient suggestions, Helheim, and blueprint/version APIs.
+3. Fix the production build failure in a clean checkout and preserve the exact repro in CI.
+4. Repair PostgreSQL backup artifact/manifest failure handling and add manifest-failure tests.
+5. Fix MySQL provider `load()` parameter binding.
+6. Fix backup storage target deletion to include MSSQL policies.
+7. Share backup storage-prefix resolution between backup, retention, and restore.
+8. Decide the Raven incremental cursor contract, then update job creation and resume handling.
+9. Add API tests for active-tenant isolation across routes where the same user belongs to multiple tenants.
+10. Make lint non-interactive and wire build, lint, Prisma validate/generate, and tests into CI.
 
 ## Do Not Touch Yet
 
-- Do not make tenant columns non-null or run destructive Prisma changes until legacy/null tenant data is inventoried and backed up.
-- Do not change Bifrost full-reload, MERGE, or watermark semantics broadly without provider-specific migration tests and rollback strategy.
-- Do not rewrite provider query execution globally; user-authored SQL is core product behavior, and parameterization changes need provider-by-provider validation.
-- Do not alter backup/restore destructive flows without fixture databases/storage targets and explicit recovery tests.
-- Do not clean up the large dirty working tree or generated-looking backup additions as part of this audit. Those changes pre-existed this pass and should be reviewed/owned separately.
-
-## Fix Pass Results
-
-Fix pass date: 2026-05-03
-
-Scope: stabilization-only pass against the highest-priority findings. Changes were limited to P0 issues plus small P1 fixes that directly overlapped credential leakage, destructive writes, identifier safety, or connection cleanup.
-
-### Fixed: P0-1 Tenant isolation is incomplete across core resources
-
-- Files changed: `src/app/api/connections/route.ts`, `src/app/api/connections/[id]/route.ts`, `src/app/api/connections/[id]/move/route.ts`, `src/app/api/reports/route.ts`, `src/app/api/reports/[id]/route.ts`, `src/app/api/bifrost/routes/route.ts`, `src/app/api/bifrost/routes/[id]/route.ts`, `src/app/api/bifrost/routes/[id]/run/route.ts`, `src/app/api/bifrost/routes/[id]/logs/route.ts`, `src/app/api/query/execute/route.ts`, `src/app/api/bifrost/helheim/[id]/retry/route.ts`.
-- Summary of fix: Core connection, report, Bifrost route, route-run/log, query execution, and manual Helheim retry paths now scope by `userId` and active `tenantId`; create paths write `tenantId`; Bifrost route updates validate changed connection/Raven/blueprint references before rebinding.
-- Why minimal: No schema migration or broad auth helper rewrite; only existing `where` clauses and create/update validation were tightened.
-- Tests/commands run: `npx tsc --noEmit --pretty false` after tenant patch.
-- Result: Type check still failed only on pre-existing test typing issues; no new errors from the changed tenant-scoped route files.
-- Remaining risk: Legacy rows with `NULL tenantId`, backup APIs, email/SFTP connection APIs, and some other tenant-scoped surfaces still need a broader tenant backfill/scoping pass.
-
-### Fixed: P0-2 Authenticated SSRF exists in API discovery and REST connection testing
-
-- Files changed: `src/lib/ssrf.ts`, `src/lib/alfheim/discovery/openapi-parser.ts`, `src/lib/alfheim/discovery/probe-endpoints.ts`, `src/lib/alfheim/discovery/doc-search.ts`, `src/app/api/connections/test/route.ts`, `src/lib/providers/rest-api.provider.ts`, `src/__tests__/security.test.ts`.
-- Summary of fix: Added URL-level SSRF checks for `http`/`https`, DNS resolution, private/reserved IPv4 and IPv6 ranges, and redirect chains. Applied the guarded fetch path to OpenAPI fetch, probe/doc-search fetches, REST connection tests, and REST extraction. OpenAPI URL parsing now fetches through the guard and disables external reference resolution during validation.
-- Why minimal: Centralized the guard in `src/lib/ssrf.ts` and replaced direct user-supplied fetches without changing discovery API shapes.
-- Tests/commands run: `npm run test -- src/__tests__/security.test.ts`, `npm run test -- src/__tests__/alfheim/rest-api-provider.test.ts`.
-- Result: Security test passed, 14 tests. REST provider test passed, 23 tests.
-- Remaining risk: Additional outbound URL surfaces should continue to adopt `fetchWithSsrfProtection`; the guard intentionally allows public DNS failures to surface from the actual request.
-
-### Fixed: P0-3 Bifrost full reload drops the destination table before a successful reload is proven
-
-- Files changed: `src/lib/bifrost/engine.ts`, `src/__tests__/bifrost/bifrost-engine.test.ts`.
-- Summary of fix: Removed the pre-load `dropTable` and watermark deletion path. If `needsFullReload` is set and the destination table already exists, the route now fails loudly and leaves the destination untouched until a staged reload/swap implementation exists.
-- Why minimal: This avoids destructive behavior without attempting a broad provider-specific staged reload redesign.
-- Tests/commands run: `npm run test -- src/__tests__/bifrost/bifrost-engine.test.ts`.
-- Result: Bifrost engine test passed, 23 tests.
-- Remaining risk: Existing-table full reload is now blocked rather than completed. A proper staged reload/swap design is still required before re-enabling automatic full reload against existing targets.
-
-### Fixed: P0-4 Helheim manual retry can truncate a destination during single-chunk retry
-
-- Files changed: `src/app/api/bifrost/helheim/[id]/retry/route.ts`, `src/__tests__/bifrost/helheim-retry.test.ts`.
-- Summary of fix: Manual Helheim retry now scopes the entry through active tenant ownership and forces `writeDisposition: "WRITE_APPEND"` when loading the retry chunk. The retry route also closes the destination connection if decompression or loading fails after connect.
-- Why minimal: Mirrored the existing worker retry override instead of changing retry storage or provider behavior.
-- Tests/commands run: `npm run test -- src/__tests__/bifrost/helheim-retry.test.ts`.
-- Result: Helheim retry test passed, 5 tests.
-- Remaining risk: No full HTTP integration test was added for the route; the focused regression covers the destructive write-disposition rule.
-
-### Fixed: P0-5 Raven resume deletes ingested chunks before transform/load succeeds
-
-- Files changed: `src/lib/bifrost/jobs/raven-resume.handler.ts`, `src/app/api/raven/ingest/[jobId]/complete/route.ts`.
-- Summary of fix: Raven chunks are now deleted only after downstream route log finalization succeeds. If enqueueing `resume-raven-route` fails after completion, the complete endpoint resets the Raven job to `running`, clears `completedAt`, records a retryable error result, and returns HTTP 500.
-- Why minimal: Moved cleanup ordering and made enqueue failure non-successful without changing Raven auth, chunk upload, or pg-boss job schema.
-- Tests/commands run: `npx tsc --noEmit --pretty false`, `npm run test`.
-- Result: Type check still failed only on pre-existing test typing issues; full test suite passed, 56 files and 980 tests.
-- Remaining risk: This still needs an integration test covering chunk retention across transform/load failure and enqueue failure.
-
-### Fixed: P0-6 Gate push SQL builders concatenate unescaped identifiers
-
-- Files changed: `src/lib/gates/sql-identifiers.ts`, `src/lib/gates/push-executor.ts`, `src/lib/gates/alter-generator.ts`, `src/__tests__/gates/sql-identifiers.test.ts`.
-- Summary of fix: Added dialect-aware identifier quoting with delimiter escaping for Postgres, MSSQL, MySQL, and BigQuery-style identifiers, then wired Gate upsert and DDL builders through it.
-- Why minimal: Escaped identifiers in the existing builders without replacing the entire DML strategy.
-- Tests/commands run: `npm run test -- src/__tests__/gates/sql-identifiers.test.ts`.
-- Result: Gate SQL identifier test passed, 3 tests.
-- Remaining risk: Row values are still rendered into SQL as escaped literals. Replacing value-list DML with parameterized/bulk provider APIs remains a larger follow-up.
-
-### Fixed: P1-1 Bifrost route updates can rebind references without tenant validation
-
-- Files changed: `src/app/api/bifrost/routes/[id]/route.ts`.
-- Summary of fix: Update requests now validate changed `sourceId`, `ravenSatelliteId`, and `destId` against the active tenant before updating the route; `blueprintId` is validated by user ownership because the current schema has no `tenantId` on blueprints.
-- Why minimal: Added validation around the existing update payload instead of changing schema or route shape.
-- Tests/commands run: `npm run build`.
-- Result: Production build passed.
-- Remaining risk: Blueprint tenant ownership remains schema-limited until blueprints gain tenant scoping or an explicit migration plan.
-
-### Fixed: P1-4 REST API provider can leak sensitive data in logs and accepts empty credentials
-
-- Files changed: `src/lib/providers/rest-api.provider.ts`, `src/lib/validations/unified-connections.ts`.
-- Summary of fix: REST auth failures no longer log response bodies; REST extract logs redact query strings and no longer list credential key names; REST create/test validation now uses the credential-presence refinement.
-- Why minimal: Kept response/API shapes and auth header construction intact while removing sensitive log material and invalid empty REST credentials.
-- Tests/commands run: `npm run test -- src/__tests__/alfheim/rest-api-provider.test.ts`, `npm run test -- src/__tests__/providers/unified-connection-validation.test.ts`.
-- Result: REST provider test passed, 23 tests. Unified connection validation test passed, 17 tests.
-- Remaining risk: OAuth2/CUSTOM REST credentials may need a more type-aware auth-mode schema if the catalog supports flows beyond the current credential refinement.
-
-### Fixed: P1-5 BigQuery MERGE identifiers are not escaped and failed staging tables are not preserved
-
-- Files changed: `src/lib/providers/bigquery.provider.ts`, `src/lib/bifrost/engine.ts`, `src/__tests__/providers/bigquery-provider.test.ts`, `src/__tests__/bifrost/bifrost-engine.test.ts`.
-- Summary of fix: BigQuery MERGE SQL now escapes backtick delimiters in dataset/table/column identifiers. Bifrost now drops staging tables only after successful MERGE and leaves staging tables in place after MERGE failure, matching the existing failure log.
-- Why minimal: Only touched MERGE SQL generation and the success/failure cleanup branch.
-- Tests/commands run: `npm run test -- src/__tests__/providers/bigquery-provider.test.ts`, `npm run test -- src/__tests__/bifrost/bifrost-engine.test.ts`.
-- Result: BigQuery provider test passed, 52 tests. Bifrost engine test passed, 23 tests.
-- Remaining risk: Failed staging tables now require operational cleanup after investigation.
-
-### Fixed: P1-6 Bifrost opens provider connections before entering guarded cleanup
-
-- Files changed: `src/lib/bifrost/engine.ts`, `src/__tests__/bifrost/bifrost-engine.test.ts`.
-- Summary of fix: Source and destination connections are now acquired inside the engine `try` block and closed via nullable cleanup in `finally`, so a destination connect failure closes an already-open source connection.
-- Why minimal: Moved the existing connection acquisition into the existing error/finally boundary without changing route log semantics.
-- Tests/commands run: `npm run test -- src/__tests__/bifrost/bifrost-engine.test.ts`.
-- Result: Bifrost engine test passed, 23 tests.
-- Remaining risk: Source-connect failures still cannot create rich provider diagnostics beyond the existing failed route log path.
-
-### Final Validation
-
-- Command: `npx prisma validate`
-  - Exit code: 0
-  - Result: `The schema at prisma\schema.prisma is valid`
-- Command: `npx prisma generate`
-  - Exit code: 1
-  - Exact failure: `EPERM: operation not permitted, rename 'C:\Users\JDelg\Hermod\node_modules\.prisma\client\query_engine-windows.dll.node.tmp384576' -> 'C:\Users\JDelg\Hermod\node_modules\.prisma\client\query_engine-windows.dll.node'`
-  - Interpretation: Same Windows Prisma DLL lock class noted in the audit. No destructive workaround was run.
-- Command: `npm run test`
-  - Exit code: 0
-  - Result: `Test Files 56 passed (56)`, `Tests 980 passed (980)`, `Duration 6.15s`
-- Command: `npm run build`
-  - Exit code: 0
-  - Result: Next.js 14.2.35 compiled successfully, type validity passed, static generation completed `106/106`.
-- Command: `npm run lint`
-  - Exit code: 1
-  - Result: `next lint` prompted interactively for ESLint configuration: `Strict (recommended) / Base / Cancel`.
-- Supplemental command: `npx tsc --noEmit --pretty false`
-  - Exit code: 1
-  - Result: Still fails on pre-existing test type errors in backup validation, Mjolnir parsed-file fixtures, NetSuite provider test cast, unified connection validation union accesses, and ExcelJS worksheet view assertions. No new application type errors remained after the fix pass.
-
-### Issues Intentionally Not Fixed In This Pass
-
-- P1-2 worker shutdown ownership: requires schema/runtime ownership or heartbeat design to avoid marking another worker's jobs failed.
-- P1-3 scheduler overlap/advance-before-enqueue: requires scheduler lease/transaction design and pg-boss behavior review.
-- P1-7 backup API tenant scoping: destructive backup/restore flows need a dedicated tenant model decision and fixtures before tightening.
-- P1-8 raw query/provider errors: sanitizing query errors changes user-facing debugging behavior and should be paired with server-side structured error logging.
-- P2 nullable tenant columns: requires data inventory, backfill plan, and reviewed migration.
-- P2 route param parsing: requires a `withAuth` route-context signature change across many dynamic routes.
-- P2 plaintext credential fallback: compatibility behavior remains and needs migration/flag planning before removal.
-
-## Fix Pass 2 Results
-
-Fix pass date: 2026-05-03
-
-Scope: continued stabilization pass for the remaining safe P1/P2 findings. This pass avoided schema migrations, broad route-context rewrites, UI restyling, and feature work. The prior "intentionally not fixed" list is superseded for P1-2, P1-3, P1-7, P1-8, P2-3, P2-4, and P2-5.
-
-### Fixed: P1-2 Worker shutdown marks all running logs failed globally
-
-- Files changed: `src/lib/worker-shutdown.ts`, `src/__tests__/worker-shutdown.test.ts`.
-- Summary of fix: Shutdown cleanup no longer updates every `RUNNING` report/route log. It accepts explicit owned `runLogIds`/`routeLogIds`, deduplicates them, and only marks those rows failed. If no owned IDs are provided, cleanup is a no-op.
-- Why minimal: Avoided adding schema/runtime worker ownership in this pass; removed the dangerous global write while preserving a path for owned cleanup.
-- Tests/commands run: `npm run test -- src/__tests__/worker-shutdown.test.ts`.
-- Result: Passed, 4 tests.
-- Remaining risk: Current worker shutdown does not yet pass owned log IDs, so stale owned logs rely on existing startup/list repair paths rather than graceful-shutdown marking.
-
-### Fixed With Remaining Risk: P1-3 Scheduler ticks can overlap and advance schedules before enqueue succeeds
-
-- Files changed: `src/lib/worker.ts`.
-- Summary of fix: Added an in-process scheduler tick guard to skip overlapping ticks in the same worker. Report, Bifrost, PostgreSQL backup, and SQL Server backup scheduler paths now enqueue with pg-boss before advancing `nextRunAt`/`next*RunAt`.
-- Why minimal: Kept the existing scheduler architecture and pg-boss job names/singleton keys; only reordered the risky update/send sequence and added local overlap protection.
-- Tests/commands run: `npm run build`.
-- Result: Passed.
-- Remaining risk: This is not a distributed scheduler lease. Multiple worker processes can still race unless deployment ensures a single scheduler or adds a durable lease. A crash after enqueue but before advancing may cause a retry/duplicate attempt later, but this is safer than silently skipping a due run.
-
-### Fixed: P1-7 Backup APIs mix `userId` and `OR tenantId/userId` scoping
-
-- Files changed: `src/lib/backups/api-helpers.ts`, `src/lib/backups/mssql/api-helpers.ts`, `src/app/api/backups/coverage/route.ts`, `src/app/api/backups/mssql/coverage/route.ts`, `src/app/api/backups/policies/route.ts`, `src/app/api/backups/policies/[id]/route.ts`, `src/app/api/backups/policies/[id]/preflight/route.ts`, `src/app/api/backups/policies/[id]/run-full/route.ts`, `src/app/api/backups/policies/[id]/run-wal/route.ts`, `src/app/api/backups/policies/[id]/runs/route.ts`, `src/app/api/backups/mssql/policies/route.ts`, `src/app/api/backups/mssql/policies/[id]/route.ts`, `src/app/api/backups/mssql/policies/preflight/route.ts`, `src/app/api/backups/mssql/policies/[id]/preflight/route.ts`, `src/app/api/backups/mssql/policies/[id]/run-full/route.ts`, `src/app/api/backups/mssql/policies/[id]/run-differential/route.ts`, `src/app/api/backups/mssql/policies/[id]/run-log/route.ts`, `src/app/api/backups/mssql/policies/[id]/runs/route.ts`, `src/app/api/backups/restore-points/route.ts`, `src/app/api/backups/restores/route.ts`, `src/app/api/backups/storage-targets/route.ts`, `src/app/api/backups/storage-targets/[id]/route.ts`, `src/app/api/backups/storage-targets/[id]/test/route.ts`, `src/__tests__/backups/validation.test.ts`, `src/__tests__/backups/storage-api.test.ts`.
-- Summary of fix: Backup source/target validation, policy/runs/coverage/manual-run/preflight/restore-point/storage-target APIs now require both `userId` and active `tenantId` where those models have tenant scope. Storage target `OR tenantId/userId` lookups were replaced with strict active-tenant ownership.
-- Why minimal: Only tightened existing Prisma `where` clauses and reference checks; no schema changes or destructive backup behavior changes.
-- Tests/commands run: `npm run test -- src/__tests__/backups/validation.test.ts src/__tests__/backups/storage-api.test.ts`.
-- Result: Passed, 13 tests.
-- Remaining risk: Legacy backup rows with `NULL tenantId` may become hidden until a reviewed backfill migration assigns ownership. That migration is still intentionally not done.
-
-### Fixed: P1-8 Query execution and report APIs return raw provider errors and execute user-only scoped connections
-
-- Files changed: `src/app/api/query/execute/route.ts`, `src/app/api/query/estimate/route.ts`, `src/app/api/reports/[id]/run/route.ts`, `src/app/api/reports/[id]/send/route.ts`, `src/__tests__/query-api.test.ts`.
-- Summary of fix: Query execute/estimate and report run/send now scope lookups to active `tenantId`. Provider failures return generic user-facing errors while logging non-secret identifiers and error type server-side.
-- Why minimal: Preserved response shapes (`{ error: string }`) and avoided changing provider execution semantics.
-- Tests/commands run: `npm run test -- src/__tests__/query-api.test.ts`.
-- Result: Passed, 2 tests.
-- Remaining risk: Some connection test/discovery endpoints still return detailed provider errors for debugging. Those should be reviewed separately with a product decision on user-facing diagnostics.
-
-### Fixed: P2-3 Dead-letter entries do not store tenant IDs
-
-- Files changed: `src/lib/bifrost/helheim/dead-letter.ts`, `src/lib/bifrost/engine.ts`, `src/lib/bifrost/jobs/raven-resume.handler.ts`, `src/__tests__/bifrost/helheim-dead-letter.test.ts`.
-- Summary of fix: `enqueueDeadLetter` now accepts and persists the route tenant ID. Engine and Raven resume call sites pass `route.tenantId`.
-- Why minimal: Used the existing nullable `HelheimEntry.tenantId` column; no migration or API shape change.
-- Tests/commands run: `npm run test -- src/__tests__/bifrost/helheim-dead-letter.test.ts src/__tests__/bifrost/helheim.test.ts`.
-- Result: Passed, 12 tests.
-- Remaining risk: Existing Helheim entries still need a data backfill if tenant-level cleanup/stats should include historical rows.
-
-### Fixed With Compatibility Guard: P2-4 Plaintext credential fallback remains accepted
-
-- Files changed: `src/lib/providers/helpers.ts`, `src/__tests__/providers/registry.test.ts`.
-- Summary of fix: Plaintext fallback remains available for non-production/local compatibility and can be explicitly enabled with `HERMOD_ALLOW_PLAINTEXT_CREDENTIALS=true`. In production without that flag, saved credentials that cannot be decrypted now throw instead of silently accepting plaintext. Invalid non-JSON fallback now throws instead of returning empty credentials.
-- Why minimal: Did not change connection create/update encryption or add a migration; only gated the risky fallback path.
-- Tests/commands run: `npm run test -- src/__tests__/providers/registry.test.ts src/__tests__/providers/helpers.test.ts`.
-- Result: Passed, 15 tests.
-- Remaining risk: A production deployment with legacy plaintext credential rows needs a migration/re-encryption plan or a temporary explicit compatibility flag during migration.
-
-### Hardened: P2-5 SQL query parameter fallback uses string interpolation
-
-- Files changed: `src/lib/providers/helpers.ts`, `src/__tests__/providers/helpers.test.ts`.
-- Summary of fix: Fallback interpolation now rejects invalid parameter names before constructing regexes, rejects arrays/objects/undefined and NUL bytes, escapes scalar values consistently, and renders `null` as SQL `NULL`.
-- Why minimal: Hardened the existing fallback without rewriting provider extraction to native parameter APIs.
-- Tests/commands run: `npm run test -- src/__tests__/providers/helpers.test.ts`.
-- Result: Passed, 4 tests.
-- Remaining risk: This is still string interpolation. Provider-native parameterization remains the better long-term fix for Postgres/MSSQL/MySQL extraction.
-
-### Final Validation Pass 2
-
-- Command: `npx prisma validate`
-  - Exit code: 0
-  - Result: `The schema at prisma\schema.prisma is valid`
-- Command: `npx prisma generate`
-  - First exit code: 1
-  - First exact failure: `EPERM: operation not permitted, rename 'C:\Users\JDelg\Hermod\node_modules\.prisma\client\query_engine-windows.dll.node.tmp310320' -> 'C:\Users\JDelg\Hermod\node_modules\.prisma\client\query_engine-windows.dll.node'`
-  - Follow-up: Used the repo-documented Windows workaround and moved `node_modules\.prisma` to `node_modules\.prisma_old_20260502222406`.
-  - Rerun exit code: 0
-  - Result: Prisma Client generated successfully.
-- Command: `npm run test`
-  - Exit code: 0
-  - Result: `Test Files 59 passed (59)`, `Tests 990 passed (990)`, `Duration 5.98s`
-- Command: `npm run build`
-  - Exit code: 0
-  - Result: Next.js 14.2.35 compiled successfully, type validity passed, static generation completed `106/106`.
-- Command: `npm run lint`
-  - Exit code: 1
-  - Result: `next lint` prompted interactively for ESLint setup: `Strict (recommended) / Base / Cancel`.
-- Targeted tests run during this pass:
-  - `npm run test -- src/__tests__/worker-shutdown.test.ts`: passed, 4 tests.
-  - `npm run test -- src/__tests__/backups/validation.test.ts src/__tests__/backups/storage-api.test.ts`: passed, 13 tests.
-  - `npm run test -- src/__tests__/query-api.test.ts`: passed, 2 tests.
-  - `npm run test -- src/__tests__/bifrost/helheim-dead-letter.test.ts src/__tests__/bifrost/helheim.test.ts`: passed, 12 tests.
-  - `npm run test -- src/__tests__/providers/helpers.test.ts`: passed, 4 tests.
-  - `npm run test -- src/__tests__/providers/registry.test.ts src/__tests__/providers/helpers.test.ts`: passed, 15 tests.
-
-### Issues Intentionally Not Fixed In Pass 2
-
-- P2-1 nullable tenant columns: still requires data inventory, tenant backfill, and reviewed migrations before changing nullability or indexes.
-- P2-2 route parameter parsing: many dynamic API handlers still parse `req.url`. A safe fix requires passing App Router route context through `withAuth`/`withRavenAuth` and migrating route families deliberately.
-- P2-6 UI destructive action confirmation tests: not changed because this pass focused on backend stabilization and no e2e/browser test harness was added.
+- Do not make tenant IDs non-null until nullable rows are backfilled and migration impact is reviewed.
+- Do not run `prisma db push`; schema changes here require migration review.
+- Do not broadly rewrite provider interfaces just to fix MySQL. Make the smallest parameter-binding patch first.
+- Do not change Raven/Data Agent resume semantics until the cursor owner is decided.
+- Do not delete or rewrite backup storage layout migrations until the intended UI/API contract is confirmed.
+- Do not clean up the large dirty working tree as part of this audit; many modified files predate this pass.

@@ -63,6 +63,7 @@ function makePolicy() {
     replicationSlot: null,
     sourceConnection: {
       id: "conn_1",
+      name: "Prod PG",
       type: "POSTGRES",
       config: {
         host: "db.example.com",
@@ -127,7 +128,7 @@ describe("PostgresBackupEngine", () => {
       expect.objectContaining({ PGPASSWORD: "super-secret" }),
       expect.objectContaining({ timeoutMs: 1000 })
     );
-    expect(uploadFile).toHaveBeenCalledOnce();
+    expect(uploadFile).toHaveBeenCalledTimes(2);
     expect(mockRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "run_1" },
       data: expect.objectContaining({ status: "SUCCESS" }),
@@ -223,11 +224,11 @@ describe("PostgresBackupEngine", () => {
 
     expect(result.status).toBe("SUCCESS");
     expect(processRunner).toHaveBeenCalledTimes(2);
-    expect(uploadFile).toHaveBeenCalledTimes(2);
+    expect(uploadFile).toHaveBeenCalledTimes(4);
     expect(result.objectKeys.map((artifact) => artifact.database)).toEqual(["analytics", "erp"]);
     expect(result.objectKeys.map((artifact) => artifact.key)).toEqual([
-      expect.stringContaining("/full-logical/analytics/"),
-      expect.stringContaining("/full-logical/erp/"),
+      expect.stringContaining("/databases/analytics/full-logical/"),
+      expect.stringContaining("/databases/erp/full-logical/"),
     ]);
     listSpy.mockRestore();
   });
@@ -285,7 +286,7 @@ describe("PostgresBackupEngine", () => {
     });
 
     expect(result.status).toBe("PARTIAL");
-    expect(uploadFile).toHaveBeenCalledOnce();
+    expect(uploadFile).toHaveBeenCalledTimes(2);
     expect(mockRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "run_1" },
       data: expect.objectContaining({

@@ -23,10 +23,10 @@ const gcpBucketName = z.string()
   .refine((value) => !value.includes("..") && !value.startsWith("goog"), "Use a valid GCS bucket name");
 
 export const storagePrefixSchema = z.preprocess(
-  (value) => (typeof value === "string" && value.trim() === "" ? "postgres" : value),
+  (value) => (typeof value === "string" && value.trim() === "" ? "backups" : value),
   z.string()
     .trim()
-    .default("postgres")
+    .default("backups")
     .refine((value) => !value.startsWith("/") && !value.includes("..") && !/[;&|`$<>\\]/.test(value), {
       message: "Prefix must be relative and cannot contain shell metacharacters",
     })

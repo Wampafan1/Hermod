@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { COMMON_TIMEZONES, OTHER_TIMEZONES } from "@/lib/timezones";
+import { StoragePathPreview } from "@/components/backups/storage-path-preview";
 import { MssqlDatabaseSelector } from "./mssql-database-selector";
 import { MssqlDestinationModePanel } from "./mssql-destination-mode-panel";
 import { MssqlPreflightPanel } from "./mssql-preflight-panel";
@@ -103,8 +104,14 @@ export function MssqlBackupPolicyForm({ policyId }: MssqlBackupPolicyFormProps) 
   const [enabled, setEnabled] = useState(true);
 
   const selectedSource = connections.find((connection) => connection.id === sourceConnectionId) ?? null;
+  const selectedTarget = targets.find((target) => target.id === storageTargetId) ?? null;
   const scope = sourceScope(selectedSource);
   const database = configuredDatabase(selectedSource);
+  const previewPrefix = typeof selectedTarget?.config?.prefix === "string" ? selectedTarget.config.prefix : "backups";
+  const previewServerName = typeof selectedSource?.config?.host === "string"
+    ? selectedSource.config.host
+    : selectedSource?.name ?? "prod-sql-01";
+  const previewDatabaseName = selectedDatabases[0] || database || "Accounting";
 
   useEffect(() => {
     Promise.all([
@@ -490,6 +497,12 @@ export function MssqlBackupPolicyForm({ policyId }: MssqlBackupPolicyFormProps) 
 
         <div className="space-y-6">
           <MssqlPreflightPanel policyId={policyId} payload={payload} />
+          <StoragePathPreview
+            prefix={previewPrefix}
+            engine="mssql"
+            serverName={previewServerName}
+            databaseName={previewDatabaseName}
+          />
           <div className="border border-border bg-deep p-5">
             <h2 className="heading-norse text-xs mb-3">Restore Note</h2>
             <p className="text-text-dim text-xs tracking-wide leading-6">

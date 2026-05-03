@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { withTimeout } from "@/lib/async-utils";
 import { MssqlBackupEngine } from "@/lib/backups/mssql/mssql-backup-engine";
+import { enforceMssqlBackupRetention } from "@/lib/backups/retention";
 import type { MssqlBackupJobPayload } from "./mssql-full-backup.handler";
 
 const LOG_BACKUP_TIMEOUT_MS = 30 * 60_000;
@@ -23,6 +24,12 @@ export async function handleMssqlLogBackupJob(job: { data: MssqlBackupJobPayload
     LOG_BACKUP_TIMEOUT_MS + 30_000,
     `SQL Server transaction log backup ${policyId}`
   );
+  if (result.succeeded > 0) {
+    const retentionErrors = await enforceMssqlBackupRetention(policyId);
+    if (retentionErrors.length > 0) {
+      console.warn(`[Niflheim:MSSQL] Retention cleanup warning for ${policyId}: ${retentionErrors[0]}`);
+    }
+  }
   console.log(`[Niflheim:MSSQL] Transaction log backup ${policyId} ${result.status}: ${result.bytesWritten} bytes`);
   return result;
 }

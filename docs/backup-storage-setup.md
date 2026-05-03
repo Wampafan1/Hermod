@@ -64,7 +64,16 @@ Warnings are shown for optional metadata checks, but write, read, list, and dele
 
 ## Lifecycle Retention
 
-The wizard can generate lifecycle rules that expire objects under the configured prefix after the selected retention window. The prefix is an organization and lifecycle setting, not the AWS IAM security boundary. For S3, Hermod assumes the bucket is dedicated to backups and the generated IAM object policy is bucket-wide so backup policies can choose their own artifact paths. Niflheim also keeps run metadata so artifact visibility remains available even after storage lifecycle removes old objects.
+The wizard can generate lifecycle rules that expire objects under the configured folder/prefix after the selected retention window. The prefix is an organization and lifecycle setting, not the AWS IAM security boundary. For S3, Hermod assumes the bucket is dedicated to backups and the generated IAM object policy is bucket-wide so backup policies can write the database-centered layout under that folder. Niflheim also keeps run metadata so artifact visibility remains available even after storage lifecycle removes old objects.
+
+Hermod asks for only the top-level folder, for example `AcmeBackups`. It then creates object keys such as:
+
+```text
+AcmeBackups/mssql/prod-sql-01/Accounting/full/2026/05/03/Accounting_FULL_20260503_020000_run_abc123.bak
+AcmeBackups/postgres/prod-pg-01/databases/app_prod/full-logical/2026/05/03/app_prod_FULL_20260503_020000_run_abc123.dump
+```
+
+See [backup-storage-layout.md](backup-storage-layout.md) for the full layout and restore behavior.
 
 ## Backup Restore Caveat
 

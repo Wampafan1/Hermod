@@ -60,15 +60,15 @@ export function AwsS3SetupWizard({ value, setupMethod, onChange }: AwsS3SetupWiz
           />
         </div>
         <div>
-          <label className="label-norse">Default Prefix</label>
+          <label className="label-norse">Folder / Prefix</label>
           <input
             value={value.prefix}
             onChange={(event) => update(value, "prefix", event.target.value, onChange)}
             className="input-norse font-mono text-xs"
-            placeholder="postgres"
+            placeholder="AcmeBackups"
           />
           <p className="text-text-dim text-[0.68rem] tracking-wide leading-5 mt-2">
-            Used for storage tests, lifecycle rules, and default organization. AWS object access is bucket-wide so policies can choose their own artifact paths.
+            Choose the top-level folder where Hermod should place backups. Hermod organizes under it by engine, server, database, backup type, and date.
           </p>
         </div>
         <div>

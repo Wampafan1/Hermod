@@ -145,7 +145,7 @@ export function StorageTargetList() {
                   <th scope="col" className="px-4 py-3 text-left font-normal">Provider</th>
                   <th scope="col" className="px-4 py-3 text-left font-normal">Bucket</th>
                   <th scope="col" className="px-4 py-3 text-left font-normal">Region</th>
-                  <th scope="col" className="px-4 py-3 text-left font-normal">Prefix</th>
+                  <th scope="col" className="px-4 py-3 text-left font-normal">Folder</th>
                   <th scope="col" className="px-4 py-3 text-left font-normal">Access</th>
                   <th scope="col" className="px-4 py-3 text-left font-normal">Last Test</th>
                   <th scope="col" className="px-4 py-3 text-right font-normal">Actions</th>
@@ -168,7 +168,7 @@ export function StorageTargetList() {
                     <td className="px-4 py-3 text-text-dim tracking-wider">{target.provider.replace(/_/g, " ")}</td>
                     <td className="px-4 py-3 text-text-dim tracking-wider font-mono">{configText(target, "bucket")}</td>
                     <td className="px-4 py-3 text-text-dim tracking-wider">{configText(target, "region", configText(target, "location"))}</td>
-                    <td className="px-4 py-3 text-text-dim tracking-wider font-mono">{configText(target, "prefix", "postgres")}</td>
+                    <td className="px-4 py-3 text-text-dim tracking-wider font-mono">{configText(target, "prefix", "backups")}</td>
                     <td className="px-4 py-3 text-text-dim tracking-wider">{target.accessMode.replace(/_/g, " ")}</td>
                     <td className="px-4 py-3 text-text-dim tracking-wider">
                       {target.lastTestedAt ? new Date(target.lastTestedAt).toLocaleString() : "Never"}

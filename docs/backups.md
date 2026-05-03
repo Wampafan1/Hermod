@@ -20,7 +20,7 @@ PostgreSQL connections can be database-scoped or server-scoped:
 For server-scoped policies, each selected database produces its own artifact:
 
 ```text
-<prefix>/<policyId>/full-logical/<database>/YYYY/MM/DD/<database>-<timestamp>.dump
+<prefix>/postgres/<server>/databases/<database>/full-logical/YYYY/MM/DD/<database>_FULL_<timestamp>_<runId>.dump
 ```
 
 If one selected database fails but others dump and upload successfully, Hermod marks the run `PARTIAL` and records the per-database error while preserving the successful artifacts.
@@ -28,6 +28,12 @@ If one selected database fails but others dump and upload successfully, Hermod m
 Optional WAL/PITR coverage uses `pg_receivewal`. WAL archival is not an incremental `pg_dump`; it requires PostgreSQL server-side replication configuration and a physical replication slot. WAL/PITR restore normally requires a base backup and restores into a fresh PostgreSQL data directory. Logical dumps alone are not enough for physical point-in-time recovery.
 
 WAL transaction logs are cluster-level, not database-level. Hermod requires a server-scoped PostgreSQL connection for WAL/PITR coverage; database-scoped connections can run logical full backups only.
+
+PostgreSQL WAL artifacts are stored under a server-level folder, not under a database folder:
+
+```text
+<prefix>/postgres/<server>/wal/YYYY/MM/DD/<wal-segment>
+```
 
 ## Required PostgreSQL Tools
 
@@ -58,7 +64,9 @@ Hermod encrypts storage credentials at rest with the existing AES-256-GCM encryp
 
 ## Retention
 
-Each policy has `retentionDays`. Retention cleanup deletes old storage objects under that policy prefix after successful backup runs. The latest successful full backup is retained even if it is older than the retention window.
+Each policy has `retentionDays`. Retention cleanup deletes old storage objects under the database-centered PostgreSQL prefixes after successful backup runs. The latest successful full backup for a database is retained even if it is older than the retention window.
+
+See [backup-storage-layout.md](backup-storage-layout.md) for the full object-key convention.
 
 ## Restore Caveat
 

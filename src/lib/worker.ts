@@ -22,11 +22,13 @@ import {
 } from "./bifrost/helheim/dead-letter";
 import { inferSchemaFromRows, normalizeRowDates, getDateColumns } from "./bifrost/engine";
 import { getProvider, toConnectionLike } from "./providers";
-import { withTimeout, safeErrorMessage } from "./async-utils";
+import { mapWithConcurrency, withTimeout, safeErrorMessage } from "./async-utils";
 
 const prisma = new PrismaClient();
 const POLL_INTERVAL = 60_000; // 60 seconds
 const TICK_TIMEOUT_MS = 5 * 60_000; // 5 minutes — max time for a scheduler tick
+const DUE_WORK_BATCH_SIZE = 100;
+const ENQUEUE_CONCURRENCY = 10;
 
 interface SendReportJob {
   reportId: string;
@@ -155,6 +157,8 @@ async function main() {
           enabled: true,
           nextRunAt: { lte: now },
         },
+        orderBy: { nextRunAt: "asc" },
+        take: DUE_WORK_BATCH_SIZE,
         include: {
           report: { select: { id: true, name: true } },
         },
@@ -204,6 +208,8 @@ async function main() {
           enabled: true,
           nextRunAt: { lte: now },
         },
+        orderBy: { nextRunAt: "asc" },
+        take: DUE_WORK_BATCH_SIZE,
         select: {
           id: true,
           name: true,
@@ -217,14 +223,16 @@ async function main() {
         },
       });
 
-      await Promise.all(
-        dueRoutes.map(async (route) => {
+      await mapWithConcurrency(
+        dueRoutes,
+        ENQUEUE_CONCURRENCY,
+        async (route) => {
           console.log(`[Worker] Enqueuing Bifrost route: ${route.name} (route=${route.id})`);
           await boss.send("run-route", { routeId: route.id, triggeredBy: "schedule" }, {
             singletonKey: route.id,
           });
           await advanceRouteNextRun(route);
-        })
+        }
       );
 
       if (dueRoutes.length > 0) {
@@ -238,6 +246,8 @@ async function main() {
           enabled: true,
           nextFullRunAt: { lte: now },
         },
+        orderBy: { nextFullRunAt: "asc" },
+        take: DUE_WORK_BATCH_SIZE,
         select: {
           id: true,
           name: true,
@@ -248,8 +258,10 @@ async function main() {
         },
       });
 
-      await Promise.all(
-        dueFullBackups.map(async (policy) => {
+      await mapWithConcurrency(
+        dueFullBackups,
+        ENQUEUE_CONCURRENCY,
+        async (policy) => {
           console.log(`[Worker] Enqueuing Niflheim full backup: ${policy.name} (policy=${policy.id})`);
           const nextFullRunAt = advanceBackupRun(
             {
@@ -269,7 +281,7 @@ async function main() {
             where: { id: policy.id },
             data: { nextFullRunAt },
           });
-        })
+        }
       );
 
       if (dueFullBackups.length > 0) {
@@ -283,6 +295,8 @@ async function main() {
           walEnabled: true,
           nextWalRunAt: { lte: now },
         },
+        orderBy: { nextWalRunAt: "asc" },
+        take: DUE_WORK_BATCH_SIZE,
         select: {
           id: true,
           name: true,
@@ -293,8 +307,10 @@ async function main() {
         },
       });
 
-      await Promise.all(
-        dueWalBackups.map(async (policy) => {
+      await mapWithConcurrency(
+        dueWalBackups,
+        ENQUEUE_CONCURRENCY,
+        async (policy) => {
           console.log(`[Worker] Enqueuing Niflheim WAL archive: ${policy.name} (policy=${policy.id})`);
           const nextWalRunAt = advanceBackupRun(
             {
@@ -314,7 +330,7 @@ async function main() {
             where: { id: policy.id },
             data: { nextWalRunAt },
           });
-        })
+        }
       );
 
       if (dueWalBackups.length > 0) {
@@ -327,6 +343,8 @@ async function main() {
           enabled: true,
           nextFullRunAt: { lte: now },
         },
+        orderBy: { nextFullRunAt: "asc" },
+        take: DUE_WORK_BATCH_SIZE,
         select: {
           id: true,
           name: true,
@@ -337,8 +355,10 @@ async function main() {
         },
       });
 
-      await Promise.all(
-        dueMssqlFullBackups.map(async (policy) => {
+      await mapWithConcurrency(
+        dueMssqlFullBackups,
+        ENQUEUE_CONCURRENCY,
+        async (policy) => {
           console.log(`[Worker] Enqueuing SQL Server full backup: ${policy.name} (policy=${policy.id})`);
           const nextFullRunAt = advanceBackupRun(
             {
@@ -358,7 +378,7 @@ async function main() {
             where: { id: policy.id },
             data: { nextFullRunAt },
           });
-        })
+        }
       );
 
       if (dueMssqlFullBackups.length > 0) {
@@ -372,6 +392,8 @@ async function main() {
           differentialFrequency: { not: null },
           nextDifferentialRunAt: { lte: now },
         },
+        orderBy: { nextDifferentialRunAt: "asc" },
+        take: DUE_WORK_BATCH_SIZE,
         select: {
           id: true,
           name: true,
@@ -382,8 +404,10 @@ async function main() {
         },
       });
 
-      await Promise.all(
-        dueMssqlDiffBackups.map(async (policy) => {
+      await mapWithConcurrency(
+        dueMssqlDiffBackups,
+        ENQUEUE_CONCURRENCY,
+        async (policy) => {
           console.log(`[Worker] Enqueuing SQL Server differential backup: ${policy.name} (policy=${policy.id})`);
           const nextDifferentialRunAt = advanceBackupRun(
             {
@@ -403,7 +427,7 @@ async function main() {
             where: { id: policy.id },
             data: { nextDifferentialRunAt },
           });
-        })
+        }
       );
 
       if (dueMssqlDiffBackups.length > 0) {
@@ -417,6 +441,8 @@ async function main() {
           logFrequency: { not: null },
           nextLogRunAt: { lte: now },
         },
+        orderBy: { nextLogRunAt: "asc" },
+        take: DUE_WORK_BATCH_SIZE,
         select: {
           id: true,
           name: true,
@@ -427,8 +453,10 @@ async function main() {
         },
       });
 
-      await Promise.all(
-        dueMssqlLogBackups.map(async (policy) => {
+      await mapWithConcurrency(
+        dueMssqlLogBackups,
+        ENQUEUE_CONCURRENCY,
+        async (policy) => {
           console.log(`[Worker] Enqueuing SQL Server transaction log backup: ${policy.name} (policy=${policy.id})`);
           const nextLogRunAt = advanceBackupRun(
             {
@@ -448,7 +476,7 @@ async function main() {
             where: { id: policy.id },
             data: { nextLogRunAt },
           });
-        })
+        }
       );
 
       if (dueMssqlLogBackups.length > 0) {

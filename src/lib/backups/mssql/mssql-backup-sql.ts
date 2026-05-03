@@ -1,4 +1,5 @@
 import type { MssqlBackupDestinationMode, MssqlBackupType } from "@prisma/client";
+import { buildBackupObjectKey, sanitizeObjectKeySegment, timestampForFilename } from "@/lib/backups/storage/object-keys";
 
 export interface MssqlBackupSqlOptions {
   database: string;
@@ -61,27 +62,33 @@ export function buildMssqlVerifySql(input: Pick<MssqlBackupSqlOptions, "destinat
 export function buildMssqlArtifactKey(input: {
   prefix: string;
   policyId: string;
+  runId?: string;
+  serverSlug?: string;
   database: string;
   type: MssqlBackupType;
   at: Date;
 }): string {
-  const prefix = input.prefix.replace(/^\/+|\/+$/g, "") || "niflheim";
-  const database = input.database.replace(/[\\/\0]/g, "_");
-  const yyyy = String(input.at.getUTCFullYear());
-  const mm = String(input.at.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(input.at.getUTCDate()).padStart(2, "0");
-  const stamp = input.at.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  const type = input.type.toLowerCase();
-  return `${prefix}/${input.policyId}/mssql/${database}/${type}/${yyyy}/${mm}/${dd}/${database}-${type}-${stamp}.${extension(input.type)}`;
+  return buildBackupObjectKey({
+    storagePrefix: input.prefix,
+    engine: "mssql",
+    serverSlug: input.serverSlug ?? "sql-server",
+    databaseName: input.database,
+    backupType: input.type === "DIFFERENTIAL" ? "diff" : input.type === "LOG" ? "log" : "full",
+    timestamp: input.at,
+    runId: input.runId ?? input.policyId,
+    extension: extension(input.type),
+  });
 }
 
 export function buildMssqlBackupFileName(input: {
   database: string;
   type: MssqlBackupType;
   at: Date;
+  runId?: string;
 }): string {
-  const database = input.database.replace(/[\\/\0]/g, "_");
-  const stamp = input.at.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  const type = input.type.toLowerCase();
-  return `${database}-${type}-${stamp}.${extension(input.type)}`;
+  const database = sanitizeObjectKeySegment(input.database, "database");
+  const stamp = timestampForFilename(input.at);
+  const runId = sanitizeObjectKeySegment(input.runId ?? "run", "run");
+  const label = input.type === "DIFFERENTIAL" ? "DIFF" : input.type === "LOG" ? "LOG" : "FULL";
+  return `${database}_${label}_${stamp}_${runId}.${extension(input.type)}`;
 }

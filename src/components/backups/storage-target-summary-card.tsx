@@ -29,7 +29,7 @@ export function StorageTargetSummaryCard({ target }: StorageTargetSummaryCardPro
   const config = target.config ?? {};
   const bucket = value(config.bucket);
   const region = value(config.region ?? config.location);
-  const prefix = value(config.prefix, "postgres");
+  const prefix = value(config.prefix, "backups");
 
   return (
     <div className="border border-border bg-deep p-5">
@@ -49,7 +49,7 @@ export function StorageTargetSummaryCard({ target }: StorageTargetSummaryCardPro
           ["Provider", target.provider.replace(/_/g, " ")],
           ["Access", target.accessMode.replace(/_/g, " ")],
           ["Region", region],
-          ["Prefix", prefix],
+          ["Folder", prefix],
           ["Retention", `${value(config.retentionDays, "30")} days`],
           ["Last Test", target.lastTestedAt ? new Date(target.lastTestedAt).toLocaleString() : "Never"],
         ].map(([label, text]) => (

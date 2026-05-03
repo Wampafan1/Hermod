@@ -1,7 +1,7 @@
 import type { GcpProvisioningRequestInput } from "@/lib/validations/backup-storage";
 
 function prefix(input: GcpProvisioningRequestInput): string {
-  return input.prefix.replace(/^\/+|\/+$/g, "") || "postgres";
+  return input.prefix.replace(/^\/+|\/+$/g, "") || "backups";
 }
 
 export function generateGcpStorageCommands(input: GcpProvisioningRequestInput): string[] {

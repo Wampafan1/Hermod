@@ -9,7 +9,7 @@ interface StoragePermissionsReviewProps {
 }
 
 function cleanPrefix(prefix: string): string {
-  return prefix.replace(/^\/+|\/+$/g, "") || "postgres";
+  return prefix.replace(/^\/+|\/+$/g, "") || "backups";
 }
 
 function awsPolicy(bucket: string, prefix: string, kmsKeyArn?: string | null) {
@@ -71,7 +71,7 @@ const AWS_PERMISSIONS = [
 const GCP_PERMISSIONS = [
   "Write backup artifacts",
   "Read backup artifacts for restore",
-  "List objects in the configured bucket/prefix",
+  "List objects in the configured backup folder",
   "Delete old objects during retention cleanup",
   "Manage lifecycle rules when Hermod provisions the bucket",
 ];
@@ -91,9 +91,8 @@ export function StoragePermissionsReview({ provider, bucket, prefix, accessMode,
               {bucket || "bucket-not-set"} / bucket-wide objects
             </p>
             <p className="text-text-dim text-[0.68rem] tracking-wide leading-5 mt-2">
-              Use a dedicated backup bucket. Prefix <span className="font-mono text-gold">{scopedPrefix}</span> is used for
-              storage tests, lifecycle rules, and default organization, but AWS object permissions cover the bucket so policies
-              can choose their own artifact paths.
+              Use a dedicated backup bucket. Folder <span className="font-mono text-gold">{scopedPrefix}</span> is the top-level
+              prefix Hermod uses before engine, server, database, backup type, and date.
             </p>
           </div>
           <div>

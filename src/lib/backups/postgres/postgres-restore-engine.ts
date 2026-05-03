@@ -10,7 +10,8 @@ import { connectionForDatabase } from "@/lib/providers/postgres.provider";
 import { getBackupStorageProvider } from "@/lib/backups/storage";
 import type { BackupStorageProviderClient } from "@/lib/backups/storage/types";
 import { extractObjectKeys } from "@/lib/backups/api-helpers";
-import { calculateFileSha256, normalizeStoragePrefix } from "./artifacts";
+import { buildManifestObjectKey, buildPostgresWalPrefix, serverSlugFromConfig } from "@/lib/backups/storage/object-keys";
+import { calculateFileSha256 } from "./artifacts";
 import { postgresConnectionScope } from "./database-selection";
 import { verifyBackupBinary } from "./preflight";
 
@@ -347,8 +348,9 @@ export class PostgresRestoreEngine {
       }
 
       const storage = this.storageResolver(restoreJob.policy.storageTarget);
-      const prefix = `${normalizeStoragePrefix(restoreJob.policy.storagePrefix)}/${restoreJob.policy.id}`;
-      const walPrefix = `${prefix}/wal/`;
+      const storagePrefix = restoreJob.policy.storagePrefix;
+      const serverSlug = serverSlugFromConfig(restoreJob.policy.sourceConnection.config, restoreJob.policy.sourceConnection.name);
+      const walPrefix = buildPostgresWalPrefix({ storagePrefix, serverSlug });
       const walObjects = await storage.list(walPrefix);
       const objectKeys = extractObjectKeys(restoreJob.backupRun.objectKeys);
       const options = restoreOptions(restoreJob.options);
@@ -380,7 +382,14 @@ export class PostgresRestoreEngine {
       const manifestPath = path.join(tempDir, "restore-manifest.json");
       await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
       const manifestStat = await stat(manifestPath);
-      const manifestKey = `${prefix}/restore-manifests/${restoreJob.id}.json`;
+      const manifestKey = buildManifestObjectKey({
+        storagePrefix,
+        engine: "postgres",
+        serverSlug,
+        backupType: "wal-manifest",
+        timestamp: new Date(),
+        runId: restoreJob.id,
+      });
       await storage.uploadFile(manifestPath, manifestKey, {
         policyId: restoreJob.policyId,
         runId: restoreJob.id,

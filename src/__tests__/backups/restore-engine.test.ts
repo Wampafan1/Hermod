@@ -264,7 +264,7 @@ describe("PostgresRestoreEngine", () => {
     expect(processRunner).not.toHaveBeenCalled();
     expect(uploadFile).toHaveBeenCalledWith(
       expect.any(String),
-      "niflheim/policy_1/restore-manifests/restore_1.json",
+      expect.stringContaining("niflheim/postgres/Source/wal-manifests/"),
       expect.objectContaining({ type: "PHYSICAL_PITR_PREPARE" })
     );
   });

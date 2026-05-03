@@ -38,7 +38,7 @@ function resolvePlainStorageProvider(
         {
           bucket: String(config.bucket ?? ""),
           region: String(config.region ?? ""),
-          prefix: String(config.prefix ?? "postgres"),
+          prefix: String(config.prefix ?? "backups"),
           endpoint: config.endpoint ? String(config.endpoint) : undefined,
           forcePathStyle: Boolean(config.forcePathStyle),
           encryption: config.encryption === "SSE_KMS" ? "SSE_KMS" : "SSE_S3",
@@ -60,7 +60,7 @@ function resolvePlainStorageProvider(
           bucket: String(config.bucket ?? ""),
           projectId: config.projectId ? String(config.projectId) : undefined,
           location: config.location ? String(config.location) : undefined,
-          prefix: String(config.prefix ?? "postgres"),
+          prefix: String(config.prefix ?? "backups"),
           uniformBucketLevelAccess: config.uniformBucketLevelAccess !== false,
           retentionDays: config.retentionDays ? Number(config.retentionDays) : undefined,
         },

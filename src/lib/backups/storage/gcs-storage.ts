@@ -118,7 +118,7 @@ export class GcsBackupStorage implements BackupStorageProviderClient {
   async test(): Promise<StorageTestResult> {
     const checks: StorageTestCheck[] = [];
     const bucket = this.storage.bucket(this.config.bucket);
-    const prefix = this.config.prefix ? this.config.prefix.replace(/^\/+|\/+$/g, "") : "postgres";
+    const prefix = this.config.prefix ? this.config.prefix.replace(/^\/+|\/+$/g, "") : "backups";
     const testKey = `${prefix}/.hermod-storage-test-${randomUUID()}.txt`;
     const localPath = path.join(os.tmpdir(), `hermod-storage-test-${randomUUID()}.txt`);
 

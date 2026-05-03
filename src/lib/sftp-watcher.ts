@@ -11,6 +11,7 @@ const WATCH_INTERVAL = 30_000; // 30 seconds
 const SUPPORTED_EXTENSIONS = new Set([".csv", ".tsv", ".xlsx"]);
 
 let watcherTimer: ReturnType<typeof setInterval> | null = null;
+let watcherTickRunning = false;
 
 /**
  * Start the SFTP file watcher. Polls all active SFTP connections' inbound
@@ -21,9 +22,26 @@ export function startSftpWatcher(prisma: PrismaClient): void {
   console.log("[SFTP Watcher] Starting file watcher...");
 
   async function tick() {
+    if (watcherTickRunning) {
+      console.warn("[SFTP Watcher] Skipping tick; previous tick is still running");
+      return;
+    }
+
+    watcherTickRunning = true;
     try {
       const connections = await prisma.sftpConnection.findMany({
         where: { status: SftpStatus.ACTIVE },
+        select: {
+          id: true,
+          userId: true,
+          sftpUsername: true,
+          fileFormat: true,
+          bqDataset: true,
+          bqTable: true,
+          loadMode: true,
+          notificationEmails: true,
+          name: true,
+        },
       });
 
       for (const conn of connections) {
@@ -31,6 +49,8 @@ export function startSftpWatcher(prisma: PrismaClient): void {
       }
     } catch (error) {
       console.error("[SFTP Watcher] Tick error:", error);
+    } finally {
+      watcherTickRunning = false;
     }
   }
 
@@ -123,6 +143,15 @@ async function processConnection(
         const emailConn = await prisma.emailConnection.findFirst({
           where: { userId: conn.userId },
           orderBy: { createdAt: "asc" },
+          select: {
+            host: true,
+            port: true,
+            secure: true,
+            authType: true,
+            username: true,
+            password: true,
+            fromAddress: true,
+          },
         });
         if (emailConn) {
           const emailConfig = toEmailConfig(emailConn);
@@ -162,6 +191,15 @@ async function processConnection(
         const emailConn = await prisma.emailConnection.findFirst({
           where: { userId: conn.userId },
           orderBy: { createdAt: "asc" },
+          select: {
+            host: true,
+            port: true,
+            secure: true,
+            authType: true,
+            username: true,
+            password: true,
+            fromAddress: true,
+          },
         }).catch(() => null);
         if (emailConn) {
           const emailConfig = toEmailConfig(emailConn);

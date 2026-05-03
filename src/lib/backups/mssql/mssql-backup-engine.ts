@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { createReadStream } from "fs";
-import { stat } from "fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "fs/promises";
+import os from "os";
 import path from "path";
 import {
   MssqlBackupRunStatus,
@@ -12,9 +13,13 @@ import { prisma } from "@/lib/db";
 import { toConnectionLike } from "@/lib/providers";
 import { MssqlProvider, type MssqlDatabaseInfo } from "@/lib/providers/mssql.provider";
 import { getBackupStorageProvider } from "@/lib/backups/storage";
-import { normalizeStoragePrefix } from "@/lib/backups/postgres/artifacts";
 import {
-  buildMssqlArtifactKey,
+  buildBackupObjectKey,
+  buildManifestObjectKey,
+  normalizeStoragePrefix,
+  serverSlugFromConfig,
+} from "@/lib/backups/storage/object-keys";
+import {
   buildMssqlBackupFileName,
   buildMssqlBackupSql,
   buildMssqlVerifySql,
@@ -62,10 +67,26 @@ async function sha256File(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
+async function uploadManifest(input: {
+  storage: ReturnType<typeof getBackupStorageProvider>;
+  manifest: Prisma.InputJsonObject;
+  manifestObjectKey: string;
+  metadata: Record<string, string>;
+}) {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "hermod-mssql-manifest-"));
+  try {
+    const manifestPath = path.join(tempDir, "manifest.json");
+    await writeFile(manifestPath, JSON.stringify(input.manifest, null, 2));
+    await input.storage.uploadFile(manifestPath, input.manifestObjectKey, input.metadata);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 function storagePrefixFromTarget(target: { config: unknown } | null | undefined): string {
-  if (!target?.config || typeof target.config !== "object") return "niflheim";
+  if (!target?.config || typeof target.config !== "object") return "";
   const prefix = (target.config as { prefix?: unknown }).prefix;
-  return normalizeStoragePrefix(typeof prefix === "string" ? prefix : "niflheim");
+  return normalizeStoragePrefix(typeof prefix === "string" ? prefix : null);
 }
 
 function lastSuccessfulField(type: MssqlBackupType) {
@@ -76,6 +97,12 @@ function lastSuccessfulField(type: MssqlBackupType) {
 
 function isLogUnsupported(database: MssqlDatabaseInfo): boolean {
   return database.recoveryModel === "SIMPLE";
+}
+
+function mssqlObjectBackupType(type: MssqlBackupType): "full" | "diff" | "log" {
+  if (type === "DIFFERENTIAL") return "diff";
+  if (type === "LOG") return "log";
+  return "full";
 }
 
 export class MssqlBackupEngine {
@@ -202,6 +229,7 @@ export class MssqlBackupEngine {
       database: input.database,
       type: input.type,
       at: input.runStartedAt,
+      runId: input.runId,
     });
     const destination = this.resolveDestination(input.policy, fileName);
     const sql = buildMssqlBackupSql({
@@ -229,24 +257,67 @@ export class MssqlBackupEngine {
       await conn.close();
     }
 
+    const serverSlug = serverSlugFromConfig(input.policy.sourceConnection.config, input.policy.sourceConnection.name);
+    const preparedManifest: Prisma.InputJsonObject = {
+      schemaVersion: 1,
+      engine: "mssql",
+      serverSlug,
+      serverDisplayName: input.policy.sourceConnection.name,
+      database: input.database,
+      backupType: input.type === "DIFFERENTIAL" ? "DIFF" : input.type,
+      policyId: input.policy.id,
+      runId: input.runId,
+      startedAt: input.runStartedAt.toISOString(),
+      completedAt: new Date().toISOString(),
+      objectKey: destination.sqlTarget,
+      manifestObjectKey: null,
+      checksumSha256: null,
+      bytes: null,
+      storageProvider: input.policy.storageTarget?.provider ?? null,
+      sourceConnectionId: input.policy.sourceConnectionId,
+      restoreChain: {
+        isBaseBackup: input.type === "FULL",
+        requiresFullBackup: input.type === "FULL" ? null : true,
+        requiresDifferentialBackup: null,
+        logSequence: null,
+      },
+      firstLsn: null,
+      lastLsn: null,
+      checkpointLsn: null,
+      databaseBackupLsn: null,
+    };
     const metadata: Prisma.InputJsonObject = {
       database: input.database,
       type: input.type,
+      serverSlug,
       destinationMode: input.policy.destinationMode,
       sqlTarget: destination.sqlTarget,
       createdAt: input.runStartedAt.toISOString(),
       uploaded: false,
+      manifest: preparedManifest,
     };
 
     if (input.policy.destinationMode === "BACKUP_TO_DISK_SHARED_PATH" && destination.hermodPath && input.policy.storageTarget) {
       const checksumSha256 = await sha256File(destination.hermodPath);
       const storage = getBackupStorageProvider(input.policy.storageTarget);
-      const objectKey = buildMssqlArtifactKey({
-        prefix: storagePrefixFromTarget(input.policy.storageTarget),
-        policyId: input.policy.id,
-        database: input.database,
-        type: input.type,
-        at: input.runStartedAt,
+      const storagePrefix = storagePrefixFromTarget(input.policy.storageTarget);
+      const objectKey = buildBackupObjectKey({
+        storagePrefix,
+        engine: "mssql",
+        serverSlug,
+        databaseName: input.database,
+        backupType: mssqlObjectBackupType(input.type),
+        timestamp: input.runStartedAt,
+        runId: input.runId,
+      });
+      const manifestObjectKey = buildManifestObjectKey({
+        storagePrefix,
+        engine: "mssql",
+        serverSlug,
+        databaseName: input.database,
+        backupType: "manifest",
+        timestamp: input.runStartedAt,
+        runId: input.runId,
       });
       const uploaded = await storage.uploadFile(destination.hermodPath, objectKey, {
         policyId: input.policy.id,
@@ -257,11 +328,56 @@ export class MssqlBackupEngine {
         createdAt: input.runStartedAt.toISOString(),
         checksumSha256,
       });
+      const completedAt = new Date();
+      const manifest: Prisma.InputJsonObject = {
+        schemaVersion: 1,
+        engine: "mssql",
+        serverSlug,
+        serverDisplayName: input.policy.sourceConnection.name,
+        database: input.database,
+        backupType: input.type === "DIFFERENTIAL" ? "DIFF" : input.type,
+        policyId: input.policy.id,
+        runId: input.runId,
+        startedAt: input.runStartedAt.toISOString(),
+        completedAt: completedAt.toISOString(),
+        objectKey: uploaded.key,
+        manifestObjectKey,
+        checksumSha256,
+        bytes: uploaded.bytes,
+        storageProvider: input.policy.storageTarget.provider,
+        sourceConnectionId: input.policy.sourceConnectionId,
+        restoreChain: {
+          isBaseBackup: input.type === "FULL",
+          requiresFullBackup: input.type === "FULL" ? null : true,
+          requiresDifferentialBackup: input.type === "LOG" ? null : null,
+          logSequence: null,
+        },
+        firstLsn: null,
+        lastLsn: null,
+        checkpointLsn: null,
+        databaseBackupLsn: null,
+      };
+      await uploadManifest({
+        storage,
+        manifest,
+        manifestObjectKey,
+        metadata: {
+          policyId: input.policy.id,
+          runId: input.runId,
+          type: "MSSQL_MANIFEST",
+          sourceConnectionId: input.policy.sourceConnectionId,
+          database: input.database,
+          createdAt: completedAt.toISOString(),
+          checksumSha256,
+        },
+      });
       return {
         metadata: {
           ...metadata,
+          manifest,
           hermodPath: destination.hermodPath,
           objectKey: uploaded.key,
+          manifestObjectKey,
           etag: uploaded.etag,
           uploaded: true,
           bytes: uploaded.bytes,
@@ -278,6 +394,11 @@ export class MssqlBackupEngine {
       return {
         metadata: {
           ...metadata,
+          manifest: {
+            ...preparedManifest,
+            checksumSha256,
+            bytes: fileStat.size,
+          },
           hermodPath: destination.hermodPath,
           bytes: fileStat.size,
           checksumSha256,

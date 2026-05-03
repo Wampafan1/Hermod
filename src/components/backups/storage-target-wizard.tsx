@@ -9,6 +9,7 @@ import { GcsSetupWizard } from "./gcs-setup-wizard";
 import { CloudFormationLaunchCard } from "./cloudformation-launch-card";
 import { GeneratedCommandsCard } from "./generated-commands-card";
 import { StoragePermissionsReview } from "./storage-permissions-review";
+import { StoragePathPreview } from "./storage-path-preview";
 import { StorageTestPanel, type StorageTestResult } from "./storage-test-panel";
 import { StorageTargetSummaryCard } from "./storage-target-summary-card";
 import type {
@@ -56,7 +57,7 @@ const DEFAULT_AWS: AwsS3WizardState = {
   name: "",
   bucket: "",
   region: "us-east-1",
-  prefix: "postgres",
+  prefix: "backups",
   retentionDays: 30,
   encryption: "SSE_S3",
   kmsKeyArn: "",
@@ -74,7 +75,7 @@ const DEFAULT_GCP: GcsWizardState = {
   bucket: "",
   projectId: "",
   location: "us-central1",
-  prefix: "postgres",
+  prefix: "backups",
   retentionDays: 30,
   uniformBucketLevelAccess: true,
   accessMode: "GCP_APPLICATION_DEFAULT",
@@ -142,7 +143,7 @@ export function StorageTargetWizard({ targetId }: StorageTargetWizardProps) {
             name: target.name,
             bucket: text(config.bucket),
             region: text(config.region, "us-east-1"),
-            prefix: text(config.prefix, "postgres"),
+            prefix: text(config.prefix, "backups"),
             retentionDays: intValue(config.retentionDays, 30),
             encryption: config.encryption === "SSE_KMS" ? "SSE_KMS" : "SSE_S3",
             kmsKeyArn: text(config.kmsKeyArn),
@@ -156,7 +157,7 @@ export function StorageTargetWizard({ targetId }: StorageTargetWizardProps) {
             bucket: text(config.bucket),
             projectId: text(config.projectId),
             location: text(config.location, "us-central1"),
-            prefix: text(config.prefix, "postgres"),
+            prefix: text(config.prefix, "backups"),
             retentionDays: intValue(config.retentionDays, 30),
             uniformBucketLevelAccess: boolValue(config.uniformBucketLevelAccess, true),
             accessMode: target.accessMode as GcsWizardState["accessMode"],
@@ -763,6 +764,7 @@ export function StorageTargetWizard({ targetId }: StorageTargetWizardProps) {
 
         <div className="space-y-6">
           <StorageTargetSummaryCard target={activeSummary} />
+          <StoragePathPreview prefix={activePrefix} />
           <div className="border border-border bg-deep p-5">
             <h2 className="heading-norse text-xs mb-3 pb-2 border-b border-border">Safety Notes</h2>
             <ul className="space-y-2 text-text-dim text-xs tracking-wide leading-6">

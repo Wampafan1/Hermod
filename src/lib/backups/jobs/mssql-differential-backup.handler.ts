@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { withTimeout } from "@/lib/async-utils";
 import { MssqlBackupEngine } from "@/lib/backups/mssql/mssql-backup-engine";
+import { enforceMssqlBackupRetention } from "@/lib/backups/retention";
 import type { MssqlBackupJobPayload } from "./mssql-full-backup.handler";
 
 const DIFF_BACKUP_TIMEOUT_MS = 60 * 60_000;
@@ -23,6 +24,12 @@ export async function handleMssqlDifferentialBackupJob(job: { data: MssqlBackupJ
     DIFF_BACKUP_TIMEOUT_MS + 30_000,
     `SQL Server differential backup ${policyId}`
   );
+  if (result.succeeded > 0) {
+    const retentionErrors = await enforceMssqlBackupRetention(policyId);
+    if (retentionErrors.length > 0) {
+      console.warn(`[Niflheim:MSSQL] Retention cleanup warning for ${policyId}: ${retentionErrors[0]}`);
+    }
+  }
   console.log(`[Niflheim:MSSQL] Differential backup ${policyId} ${result.status}: ${result.bytesWritten} bytes`);
   return result;
 }

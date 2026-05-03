@@ -6,7 +6,7 @@ export function generateHermodExternalId(): string {
 }
 
 function normalizedPrefix(prefix: string): string {
-  return prefix.replace(/^\/+|\/+$/g, "") || "postgres";
+  return prefix.replace(/^\/+|\/+$/g, "") || "backups";
 }
 
 export function generateAwsIamPolicy(input: Pick<AwsProvisioningRequestInput, "bucket" | "prefix"> & { kmsKeyArn?: string | null }) {

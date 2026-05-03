@@ -197,6 +197,8 @@ model SftpConnection {
   updatedAt          DateTime          @updatedAt
 
   @@index([tenantId])
+  @@index([status], map: "idx_sftp_connection_status")
+  @@index([userId, createdAt(sort: Desc)], map: "idx_sftp_connection_user_created")
 }
 
 enum SftpSourceType {
@@ -251,6 +253,7 @@ model EmailConnection {
   updatedAt   DateTime      @updatedAt
 
   @@index([tenantId])
+  @@index([userId, createdAt(sort: Asc)], map: "idx_email_connection_user_created")
 }
 
 // ─── Reports ─────────────────────────────────────────
@@ -276,6 +279,7 @@ model Report {
   updatedAt    DateTime   @updatedAt
 
   @@index([tenantId])
+  @@index([userId, updatedAt(sort: Desc)], map: "idx_report_user_updated")
 }
 
 // ─── Schedules ───────────────────────────────────────
@@ -327,6 +331,8 @@ model Recipient {
   name       String?
   scheduleId String
   schedule   Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId], map: "idx_recipient_schedule")
 }
 
 // ─── Run History ─────────────────────────────────────
@@ -341,7 +347,7 @@ model RunLog {
   startedAt  DateTime  @default(now())
   completedAt DateTime?
 
-  @@index([reportId, status])
+  @@index([reportId, status, startedAt(sort: Desc)], map: "idx_run_log_report_status_started")
   @@index([startedAt])
 }
 
@@ -672,6 +678,7 @@ model PostgresBackupPolicy {
 
   retentionDays        Int                 @default(30)
   storagePrefix        String?
+  storageLayout        String              @default("DATABASE_CENTERED")
   databaseSelectionMode String             @default("SINGLE")
   selectedDatabases    String[]            @default([])
   excludedDatabases    String[]            @default([])
@@ -807,6 +814,7 @@ model MssqlBackupPolicy {
   verifyAfterBackup     Boolean                    @default(true)
 
   retentionDays         Int                        @default(30)
+  storageLayout         String                     @default("DATABASE_CENTERED")
 
   lastSuccessfulFullAt  DateTime?
   lastSuccessfulDiffAt  DateTime?
@@ -991,7 +999,7 @@ model RouteLog {
   startedAt        DateTime     @default(now())
   completedAt      DateTime?
 
-  @@index([routeId, status])
+  @@index([routeId, status, startedAt(sort: Desc)], map: "idx_route_log_route_status_started")
   @@index([routeId, startedAt])
 }
 
@@ -1017,6 +1025,8 @@ model HelheimEntry {
   @@index([status, nextRetryAt])
   @@index([status, lastRetriedAt])
   @@index([tenantId])
+  @@index([tenantId, status, createdAt(sort: Desc)], map: "idx_helheim_entry_tenant_status_created")
+  @@index([jobId], map: "idx_helheim_entry_job")
 }
 
 // ─── Pipeline Watermarks (Incremental Sync) ─────────
@@ -1157,7 +1167,7 @@ model RavenJob {
 
   ingestChunks    RavenIngestChunk[]
 
-  @@index([ravenId, status])
+  @@index([ravenId, status, priority, createdAt, id], map: "idx_raven_job_polling")
   @@index([status])
   @@index([createdAt])
   @@index([connectionId])

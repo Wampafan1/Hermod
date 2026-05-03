@@ -1,63 +1,56 @@
 import { createHash } from "crypto";
 import { createReadStream } from "fs";
-import path from "path";
-
-function pad(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-function sanitizeSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "postgres";
-}
+import {
+  buildBackupObjectKey,
+  normalizeStoragePrefix as normalizeObjectStoragePrefix,
+  timestampForFilename,
+} from "@/lib/backups/storage/object-keys";
 
 export function normalizeStoragePrefix(prefix: string | null | undefined): string {
-  if (!prefix) return "niflheim";
-  return prefix
-    .split("/")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => sanitizeSegment(part))
-    .join("/") || "niflheim";
+  return normalizeObjectStoragePrefix(prefix) || "niflheim";
 }
 
 export function timestampForObjectKey(date: Date): string {
-  return [
-    date.getUTCFullYear(),
-    pad(date.getUTCMonth() + 1),
-    pad(date.getUTCDate()),
-    "T",
-    pad(date.getUTCHours()),
-    pad(date.getUTCMinutes()),
-    pad(date.getUTCSeconds()),
-    "Z",
-  ].join("");
-}
-
-function datePath(date: Date): string {
-  return `${date.getUTCFullYear()}/${pad(date.getUTCMonth() + 1)}/${pad(date.getUTCDate())}`;
+  return `${timestampForFilename(date).replace("_", "T")}Z`;
 }
 
 export function buildFullBackupObjectKey(input: {
   prefix?: string | null;
   policyId: string;
+  runId?: string;
+  serverSlug?: string;
   database: string;
   at: Date;
 }): string {
-  const prefix = normalizeStoragePrefix(input.prefix);
-  const database = sanitizeSegment(input.database);
-  const stamp = timestampForObjectKey(input.at);
-  return `${prefix}/${input.policyId}/full-logical/${database}/${datePath(input.at)}/${database}-${stamp}.dump`;
+  return buildBackupObjectKey({
+    storagePrefix: input.prefix,
+    engine: "postgres",
+    serverSlug: input.serverSlug ?? "postgres",
+    databaseName: input.database,
+    backupType: "full-logical",
+    timestamp: input.at,
+    runId: input.runId ?? input.policyId,
+    extension: "dump",
+  });
 }
 
 export function buildWalObjectKey(input: {
   prefix?: string | null;
   policyId: string;
+  runId?: string;
+  serverSlug?: string;
   fileName: string;
   at: Date;
 }): string {
-  const prefix = normalizeStoragePrefix(input.prefix);
-  const fileName = sanitizeSegment(path.basename(input.fileName));
-  return `${prefix}/${input.policyId}/wal/${datePath(input.at)}/${fileName}`;
+  return buildBackupObjectKey({
+    storagePrefix: input.prefix,
+    engine: "postgres",
+    serverSlug: input.serverSlug ?? "postgres",
+    backupType: "wal",
+    timestamp: input.at,
+    runId: input.runId ?? input.policyId,
+    walFileName: input.fileName,
+  });
 }
 
 export async function calculateFileSha256(localPath: string): Promise<string> {

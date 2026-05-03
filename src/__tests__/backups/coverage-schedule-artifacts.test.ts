@@ -65,25 +65,31 @@ describe("backup artifact helpers", () => {
     expect(buildFullBackupObjectKey({
       prefix: "tenant/prod",
       policyId: "pol_123",
+      runId: "run_123",
+      serverSlug: "prod-pg-01",
       database: "erp prod",
       at,
-    })).toBe("tenant/prod/pol_123/full-logical/erp_prod/2026/05/02/erp_prod-20260502T070000Z.dump");
+    })).toBe("tenant/prod/postgres/prod-pg-01/databases/erp_prod/full-logical/2026/05/02/erp_prod_FULL_20260502_070000_run_123.dump");
 
     expect(buildWalObjectKey({
       prefix: "tenant/prod",
       policyId: "pol_123",
+      runId: "run_123",
+      serverSlug: "prod-pg-01",
       fileName: "00000001000000000000000A",
       at,
-    })).toBe("tenant/prod/pol_123/wal/2026/05/02/00000001000000000000000A");
+    })).toBe("tenant/prod/postgres/prod-pg-01/wal/2026/05/02/00000001000000000000000A");
   });
 
   it("ignores empty prefix path segments instead of turning them into postgres", () => {
     expect(buildFullBackupObjectKey({
       prefix: "niflheim/",
       policyId: "pol_123",
+      runId: "run_123",
+      serverSlug: "prod-pg-01",
       database: "anton",
       at: new Date("2026-05-03T01:25:32.000Z"),
-    })).toBe("niflheim/pol_123/full-logical/anton/2026/05/03/anton-20260503T012532Z.dump");
+    })).toBe("niflheim/postgres/prod-pg-01/databases/anton/full-logical/2026/05/03/anton_FULL_20260503_012532_run_123.dump");
   });
 
   it("computes SHA-256 checksums for backup files", async () => {

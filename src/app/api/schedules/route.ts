@@ -4,16 +4,25 @@ import { withAuth } from "@/lib/api";
 import { createScheduleSchema } from "@/lib/validations/schedules";
 import { calculateNextRun } from "@/lib/schedule-utils";
 
-// GET /api/schedules — list all schedules with report names
-export const GET = withAuth(async (_req, session) => {
+// GET /api/schedules — list schedules with report names
+export const GET = withAuth(async (req, session) => {
+  const url = new URL(req.url);
+  const reportId = url.searchParams.get("reportId");
+
   const schedules = await prisma.schedule.findMany({
-    where: { report: { userId: session.user.id } },
+    where: {
+      report: {
+        userId: session.user.id,
+        ...(reportId ? { id: reportId } : {}),
+      },
+    },
     include: {
       report: { select: { id: true, name: true } },
       recipients: { select: { email: true, name: true } },
       emailConnection: { select: { id: true, name: true } },
     },
     orderBy: { nextRunAt: "asc" },
+    take: reportId ? 1 : undefined,
   });
   return NextResponse.json(schedules);
 });

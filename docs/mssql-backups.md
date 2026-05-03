@@ -62,10 +62,17 @@ This is reserved for a future on-prem agent workflow. The model and UI acknowled
 Uploaded shared-path backups use:
 
 ```text
-<prefix>/<policyId>/mssql/<database>/<type>/YYYY/MM/DD/<database>-<type>-<timestamp>.<extension>
+<prefix>/mssql/<server>/<database>/<type>/YYYY/MM/DD/<database>_<TYPE>_<timestamp>_<runId>.<extension>
 ```
 
 Full backups use `.bak`, differential backups use `.dif`, and log backups use `.trn`.
+Manifests are written beside each database under:
+
+```text
+<prefix>/mssql/<server>/<database>/manifests/YYYY/MM/DD/<runId>.json
+```
+
+The folder layout is database-centered so restore browsing starts with server and database, then shows full, differential, and log chains. Policy IDs stay in Hermod metadata and manifests rather than being the primary browsing folder.
 
 ## Permissions
 
