@@ -47,6 +47,7 @@ describe("watermark service", () => {
         tableName: "customers",
         watermark: "2026-01-15T10:00:00.000Z",
         watermarkType: "timestamp_cursor",
+        tenantId: "tenant-1",
         rowsSynced: 42,
       });
 
@@ -58,6 +59,8 @@ describe("watermark service", () => {
       });
       expect(call.create.watermark).toBe("2026-01-15T10:00:00.000Z");
       expect(call.update.watermark).toBe("2026-01-15T10:00:00.000Z");
+      expect(call.create.tenantId).toBe("tenant-1");
+      expect(call.update.tenantId).toBe("tenant-1");
     });
   });
 

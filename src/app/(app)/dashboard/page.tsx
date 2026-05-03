@@ -10,7 +10,7 @@ import { DAILY_GREETINGS } from "@/lib/realm-config";
 
 export default async function DashboardPage() {
   const session = await requireAuth();
-  const data = await getDashboardData(session.user.id);
+  const data = await getDashboardData(session.user.id, session.user.tenantId);
 
   const now = new Date();
   const dayInfo = DAILY_GREETINGS[now.getDay()];

@@ -66,7 +66,7 @@ export interface DashboardData {
   totalRunCount: number;
 }
 
-export async function getDashboardData(userId: string): Promise<DashboardData> {
+export async function getDashboardData(userId: string, tenantId: string): Promise<DashboardData> {
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -86,41 +86,41 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     totalRunCount,
   ] = await Promise.all([
     // [A] Active routes count
-    prisma.bifrostRoute.count({ where: { userId, enabled: true } }),
+    prisma.bifrostRoute.count({ where: { userId, tenantId, enabled: true } }),
 
     // [A] Runs today
     prisma.routeLog.count({
-      where: { route: { userId }, startedAt: { gte: startOfToday } },
+      where: { route: { userId, tenantId }, startedAt: { gte: startOfToday } },
     }),
 
     // [A] Runs in last 7 days grouped by status
     prisma.routeLog.groupBy({
       by: ["status"],
-      where: { route: { userId }, startedAt: { gte: sevenDaysAgo } },
+      where: { route: { userId, tenantId }, startedAt: { gte: sevenDaysAgo } },
       _count: true,
     }),
 
     // [A] Rows synced in last 7 days
     prisma.routeLog.aggregate({
-      where: { route: { userId }, startedAt: { gte: sevenDaysAgo } },
+      where: { route: { userId, tenantId }, startedAt: { gte: sevenDaysAgo } },
       _sum: { rowsLoaded: true },
     }),
 
     // [A] Helheim pending count
     prisma.helheimEntry.count({
-      where: { route: { userId }, status: { in: ["pending", "retrying"] } },
+      where: { route: { userId, tenantId }, status: { in: ["pending", "retrying"] } },
     }),
 
     // [E] Helheim status breakdown
     prisma.helheimEntry.groupBy({
       by: ["status"],
-      where: { route: { userId } },
+      where: { route: { userId, tenantId } },
       _count: true,
     }),
 
     // [B] All routes with last run
     prisma.bifrostRoute.findMany({
-      where: { userId },
+      where: { userId, tenantId },
       orderBy: { name: "asc" },
       include: {
         source: { select: { name: true, type: true } },
@@ -142,7 +142,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     // [B] Helheim pending counts per route
     prisma.helheimEntry.groupBy({
       by: ["routeId"],
-      where: { route: { userId }, status: { in: ["pending", "retrying"] } },
+      where: { route: { userId, tenantId }, status: { in: ["pending", "retrying"] } },
       _count: true,
     }),
 
@@ -150,6 +150,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     prisma.bifrostRoute.findMany({
       where: {
         userId,
+        tenantId,
         enabled: true,
         nextRunAt: { gte: now, lte: twentyFourHoursFromNow },
       },
@@ -160,7 +161,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
 
     // [D] Recent 50 runs for timeline
     prisma.routeLog.findMany({
-      where: { route: { userId } },
+      where: { route: { userId, tenantId } },
       orderBy: { startedAt: "desc" },
       take: 50,
       include: { route: { select: { name: true } } },
@@ -168,7 +169,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
 
     // [D] Total run count for pagination
     prisma.routeLog.count({
-      where: { route: { userId } },
+      where: { route: { userId, tenantId } },
     }),
   ]);
 

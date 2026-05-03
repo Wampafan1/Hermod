@@ -83,6 +83,29 @@ describe("Bifrost Zod validation", () => {
       expect(result.daysOfWeek).toEqual([1, 3, 5]);
     });
 
+    it("rejects invalid route frequency", () => {
+      expect(() =>
+        createRouteSchema.parse({
+          ...validInput,
+          frequency: "EVERY_TWO_MOONS",
+        })
+      ).toThrow();
+    });
+
+    it("preserves NetSuite reference fields", () => {
+      const result = createRouteSchema.parse({
+        ...validInput,
+        sourceConfig: {
+          query: "SELECT BUILTIN.DF(entity) as entity FROM transaction",
+          recordType: "transaction",
+          fields: ["id", "entity"],
+          referenceFields: ["entity"],
+        },
+      });
+
+      expect(result.sourceConfig.referenceFields).toEqual(["entity"]);
+    });
+
     it("rejects invalid day of week", () => {
       expect(() =>
         createRouteSchema.parse({
@@ -130,6 +153,12 @@ describe("Bifrost Zod validation", () => {
     it("accepts enabled toggle", () => {
       const result = updateRouteSchema.parse({ enabled: false });
       expect(result.enabled).toBe(false);
+    });
+
+    it("rejects invalid update frequency", () => {
+      expect(() =>
+        updateRouteSchema.parse({ frequency: "WHENEVER" })
+      ).toThrow();
     });
   });
 

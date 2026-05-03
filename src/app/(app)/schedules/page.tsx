@@ -5,9 +5,10 @@ import { RealmBanner } from "@/components/realm-banner";
 
 export default async function SchedulesPage() {
   const session = await requireAuth();
+  const { id: userId, tenantId } = session.user;
 
   const schedules = await prisma.schedule.findMany({
-    where: { report: { userId: session.user.id } },
+    where: { report: { userId, tenantId } },
     include: {
       report: { select: { id: true, name: true } },
       recipients: { select: { email: true } },

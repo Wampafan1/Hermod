@@ -6,9 +6,10 @@ import { RealmBanner } from "@/components/realm-banner";
 
 export default async function ReportsPage() {
   const session = await requireAuth();
+  const { id: userId, tenantId } = session.user;
 
   const reports = await prisma.report.findMany({
-    where: { userId: session.user.id },
+    where: { userId, tenantId },
     orderBy: { updatedAt: "desc" },
     include: {
       connection: { select: { name: true, type: true } },

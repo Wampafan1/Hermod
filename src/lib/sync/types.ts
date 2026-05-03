@@ -40,5 +40,6 @@ export interface WatermarkRecord {
   tableName: string;
   watermark: string;
   watermarkType: CursorStrategy;
+  tenantId?: string | null;
   rowsSynced?: number;
 }

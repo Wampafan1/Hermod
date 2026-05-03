@@ -6,10 +6,11 @@ import { RealmBanner } from "@/components/realm-banner";
 export default async function HelheimPage() {
   const session = await requireAuth();
   const userId = session.user.id;
+  const tenantId = session.user.tenantId;
 
   const [entries, statusCounts] = await Promise.all([
     prisma.helheimEntry.findMany({
-      where: { route: { userId } },
+      where: { route: { userId, tenantId } },
       select: {
         id: true,
         routeId: true,
@@ -32,7 +33,7 @@ export default async function HelheimPage() {
 
     prisma.helheimEntry.groupBy({
       by: ["status"],
-      where: { route: { userId } },
+      where: { route: { userId, tenantId } },
       _count: true,
     }),
   ]);

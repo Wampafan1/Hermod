@@ -12,7 +12,7 @@ export default async function GateDetailPage({ params }: Props) {
   const { gateId } = await params;
 
   const gate = await prisma.realmGate.findFirst({
-    where: { id: gateId, tenantId: session.user.tenantId ?? undefined },
+    where: { id: gateId, tenantId: session.user.tenantId },
     include: {
       connection: { select: { id: true, name: true, type: true } },
       forgeBlueprint: { select: { id: true, name: true, status: true } },

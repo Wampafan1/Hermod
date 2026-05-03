@@ -31,11 +31,13 @@ export async function setWatermark(record: WatermarkRecord): Promise<void> {
       tableName: record.tableName,
       watermark: record.watermark,
       watermarkType: record.watermarkType,
+      tenantId: record.tenantId ?? null,
       rowsSynced: record.rowsSynced ?? null,
     },
     update: {
       watermark: record.watermark,
       watermarkType: record.watermarkType,
+      tenantId: record.tenantId ?? null,
       rowsSynced: record.rowsSynced ?? null,
       runAt: new Date(),
     },

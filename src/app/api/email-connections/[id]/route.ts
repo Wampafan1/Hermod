@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { encrypt } from "@/lib/crypto";
-import { updateEmailConnectionSchema } from "@/lib/validations/email-connections";
+import {
+  createEmailConnectionSchema,
+  updateEmailConnectionSchema,
+} from "@/lib/validations/email-connections";
 
 // PUT /api/email-connections/[id] — update email connection
 export const PUT = withAuth(async (req, session) => {
@@ -12,7 +15,7 @@ export const PUT = withAuth(async (req, session) => {
   }
 
   const existing = await prisma.emailConnection.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!existing) {
     return NextResponse.json({ error: "Email connection not found" }, { status: 404 });
@@ -31,6 +34,32 @@ export const PUT = withAuth(async (req, session) => {
 
   // If authType is being changed to NONE, clear credentials
   const authType = data.authType ?? existing.authType;
+  const finalState = {
+    name: data.name ?? existing.name,
+    host: data.host ?? existing.host,
+    port: data.port ?? existing.port,
+    secure: data.secure ?? existing.secure,
+    authType,
+    username: authType === "NONE"
+      ? null
+      : data.username !== undefined
+        ? data.username
+        : existing.username,
+    password: authType === "NONE"
+      ? null
+      : data.password !== undefined
+        ? data.password
+        : existing.password,
+    fromAddress: data.fromAddress ?? existing.fromAddress,
+  };
+  const finalParsed = createEmailConnectionSchema.safeParse(finalState);
+  if (!finalParsed.success) {
+    return NextResponse.json(
+      { error: "Validation failed", details: finalParsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+
   const updateData: Record<string, unknown> = { ...data };
 
   if (data.password) {
@@ -71,7 +100,7 @@ export const DELETE = withAuth(async (req, session) => {
   }
 
   const existing = await prisma.emailConnection.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!existing) {
     return NextResponse.json({ error: "Email connection not found" }, { status: 404 });
@@ -79,7 +108,10 @@ export const DELETE = withAuth(async (req, session) => {
 
   // Check if any schedules reference this connection
   const schedulesUsing = await prisma.schedule.count({
-    where: { emailConnectionId: id },
+    where: {
+      emailConnectionId: id,
+      report: { userId: session.user.id, tenantId: session.tenantId },
+    },
   });
   if (schedulesUsing > 0) {
     return NextResponse.json(

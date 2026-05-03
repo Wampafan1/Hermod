@@ -6,10 +6,11 @@ const PAGE_SIZE = 50;
 
 export default async function HistoryPage() {
   const session = await requireAuth();
+  const { id: userId, tenantId } = session.user;
 
   const [runsRaw, reports] = await Promise.all([
     prisma.runLog.findMany({
-      where: { report: { userId: session.user.id } },
+      where: { report: { userId, tenantId } },
       orderBy: { startedAt: "desc" },
       take: PAGE_SIZE + 1,
       include: {
@@ -23,7 +24,7 @@ export default async function HistoryPage() {
       },
     }),
     prisma.report.findMany({
-      where: { userId: session.user.id },
+      where: { userId, tenantId },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),

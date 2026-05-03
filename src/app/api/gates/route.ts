@@ -128,10 +128,7 @@ export const POST = withAuth(async (req, ctx) => {
   const connection = await prisma.connection.findFirst({
     where: {
       id: connectionId,
-      OR: [
-        { tenantId: ctx.tenantId },
-        { userId: ctx.userId },
-      ],
+      tenantId: ctx.tenantId,
     },
   });
 

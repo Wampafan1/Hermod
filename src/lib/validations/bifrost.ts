@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ScheduleFrequency } from "@prisma/client";
 
 // ─── Source Config ───────────────────────────────────
 
@@ -10,10 +11,13 @@ const sourceConfigSchema = z.object({
   // NetSuite structured config (stored alongside generated SuiteQL query)
   recordType: z.string().optional(),
   fields: z.array(z.string()).optional(),
+  referenceFields: z.array(z.string()).optional(),
   filter: z.string().optional(),
   // REST API (Alfheim) — references catalog object for extraction config
   objectSlug: z.string().optional(),
 });
+
+const routeFrequencySchema = z.nativeEnum(ScheduleFrequency).nullable().optional();
 
 // ─── Dest Config ─────────────────────────────────────
 
@@ -81,7 +85,7 @@ export const createRouteSchema = z.object({
   destConfig: destConfigSchema,
   transformEnabled: z.boolean().default(false),
   blueprintId: z.string().nullable().optional(),
-  frequency: z.string().nullable().optional(),
+  frequency: routeFrequencySchema,
   daysOfWeek: z.array(z.number().int().min(0).max(6)).default([]),
   dayOfMonth: z.number().int().min(0).max(31).nullable().optional(),
   timeHour: z.number().int().min(0).max(23).default(7),
@@ -105,7 +109,7 @@ export const updateRouteSchema = z.object({
   destConfig: destConfigSchema.optional(),
   transformEnabled: z.boolean().optional(),
   blueprintId: z.string().nullable().optional(),
-  frequency: z.string().nullable().optional(),
+  frequency: routeFrequencySchema,
   daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
   dayOfMonth: z.number().int().min(0).max(31).nullable().optional(),
   timeHour: z.number().int().min(0).max(23).optional(),

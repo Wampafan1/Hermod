@@ -8,7 +8,7 @@ export default async function GatesPage() {
 
   const gates = await prisma.realmGate.findMany({
     where: {
-      tenantId: session.user.tenantId ?? undefined,
+      tenantId: session.user.tenantId,
       status: { not: "ARCHIVED" },
     },
     include: {

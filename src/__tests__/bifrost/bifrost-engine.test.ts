@@ -326,6 +326,36 @@ describe("BifrostEngine", () => {
     );
   });
 
+  it("blocks direct WRITE_TRUNCATE when destination table exists", async () => {
+    mockExtractGen.mockImplementation(() => asyncGenFromChunks([[{ id: 1 }]]));
+    mockLoad.mockResolvedValue({ rowsLoaded: 1, errors: [] });
+    mockGetSchema.mockResolvedValue({ fields: [{ name: "id", type: "INTEGER", mode: "NULLABLE" }] });
+
+    const result = await engine.execute(
+      makeRoute({
+        destConfig: {
+          dataset: "ds",
+          table: "tbl",
+          writeDisposition: "WRITE_TRUNCATE",
+          autoCreateTable: false,
+        },
+      }),
+      "manual"
+    );
+
+    expect(result.status).toBe("failed");
+    expect(mockLoad).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "log_1" },
+        data: expect.objectContaining({
+          status: "failed",
+          error: expect.stringContaining("WRITE_TRUNCATE"),
+        }),
+      })
+    );
+  });
+
   it("closes connections even on error", async () => {
     const closeSource = vi.fn();
     const closeDest = vi.fn();

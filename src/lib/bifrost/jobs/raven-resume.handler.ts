@@ -15,6 +15,7 @@ import { enqueueDeadLetter } from "../helheim/dead-letter";
 import { inferSchemaFromRows, normalizeRowDates, getDateColumns } from "../engine";
 import type { DestConfig } from "../types";
 import { DEFAULT_CHUNK_SIZE } from "../types";
+import { extractNewWatermark, setWatermark } from "@/lib/sync/watermark";
 
 interface RavenResumePayload {
   routeId: string;
@@ -44,6 +45,22 @@ export async function handleRavenResume(job: {
     if (ravenJob.status !== "success") {
       throw new Error(
         `RavenJob ${ravenJobId} is in "${ravenJob.status}" state — expected "success"`
+      );
+    }
+
+    const destProvider = getProvider(route.dest.type);
+    if (route.destConfig.writeDisposition === "WRITE_TRUNCATE") {
+      throw new Error(
+        "Raven resume for WRITE_TRUNCATE routes is blocked until a safe staged replace is implemented."
+      );
+    }
+    if (
+      route.cursorConfig?.primaryKey &&
+      route.cursorConfig.strategy !== "full_refresh" &&
+      "mergeInto" in destProvider
+    ) {
+      throw new Error(
+        "Raven resume for incremental MERGE routes is blocked until resume uses the staged MERGE loader."
       );
     }
 
@@ -112,12 +129,12 @@ export async function handleRavenResume(job: {
     }
 
     // 4. Load to destination
-    const destProvider = getProvider(route.dest.type);
     const destConnLike = toConnectionLike(route.dest);
     const destConn = await destProvider.connect(destConnLike);
 
     let totalLoaded = 0;
     let errorCount = 0;
+    let runningMaxWatermark: string | null = null;
 
     try {
       if (!destProvider.load) {
@@ -147,16 +164,36 @@ export async function handleRavenResume(job: {
         const effectiveDestConfig: DestConfig = {
           ...route.destConfig,
           ...(schema && { schema }),
-          // First batch uses route's writeDisposition; subsequent batches append
-          ...(batchIndex > 0 &&
-            route.destConfig.writeDisposition === "WRITE_TRUNCATE" && {
-              writeDisposition: "WRITE_APPEND" as const,
-            }),
         };
 
         try {
           const result = await destProvider.load(destConn, batch, effectiveDestConfig);
           totalLoaded += result.rowsLoaded;
+          if (
+            result.rowsLoaded > 0 &&
+            route.cursorConfig?.cursorColumn &&
+            route.cursorConfig.strategy !== "full_refresh"
+          ) {
+            const batchMax = extractNewWatermark(
+              batch,
+              route.cursorConfig.cursorColumn,
+              route.cursorConfig.strategy
+            );
+            if (batchMax) {
+              if (!runningMaxWatermark) {
+                runningMaxWatermark = batchMax;
+              } else {
+                runningMaxWatermark = extractNewWatermark(
+                  [
+                    { [route.cursorConfig.cursorColumn]: runningMaxWatermark },
+                    { [route.cursorConfig.cursorColumn]: batchMax },
+                  ],
+                  route.cursorConfig.cursorColumn,
+                  route.cursorConfig.strategy
+                ) ?? runningMaxWatermark;
+              }
+            }
+          }
         } catch (err) {
           console.error(
             `[Bifrost/Raven] Load batch #${batchIndex} failed:`,
@@ -178,6 +215,30 @@ export async function handleRavenResume(job: {
         : totalLoaded > 0
           ? "partial"
           : "failed";
+
+    if (totalLoaded > 0) {
+      if (
+        route.cursorConfig?.cursorColumn &&
+        route.cursorConfig.strategy !== "full_refresh" &&
+        runningMaxWatermark
+      ) {
+        await setWatermark({
+          routeId: route.id,
+          tableName: route.destConfig.table,
+          watermark: runningMaxWatermark,
+          watermarkType: route.cursorConfig.strategy,
+          tenantId: route.tenantId,
+          rowsSynced: totalLoaded,
+        });
+      }
+
+      if (route.sourceConfig.incrementalKey || route.cursorConfig) {
+        await prisma.bifrostRoute.update({
+          where: { id: route.id },
+          data: { lastCheckpoint: new Date() },
+        });
+      }
+    }
 
     await prisma.routeLog.update({
       where: { id: routeLogId },

@@ -563,6 +563,12 @@ export class BifrostEngine {
         );
       }
 
+      if (!useMerge && destTableExists && route.destConfig.writeDisposition === "WRITE_TRUNCATE") {
+        throw new Error(
+          "WRITE_TRUNCATE on an existing destination table is blocked until a safe staged replace is implemented."
+        );
+      }
+
       // Explicit schema — inferred once from the first batch and reused for
       // every subsequent load job. Prevents BigQuery from re-inferring types
       // per chunk, which causes "Schema does not match" / "changed type from"
@@ -830,6 +836,7 @@ export class BifrostEngine {
             tableName,
             watermark: runningMaxWatermark,
             watermarkType: cursorConfig.strategy,
+            tenantId: route.tenantId,
             rowsSynced: totalLoaded,
           });
         }
@@ -987,6 +994,41 @@ export class BifrostEngine {
       );
     }
 
+    const ravenSourceConfig: SourceConfig = { ...route.sourceConfig };
+    const cursorConfig = route.cursorConfig;
+    const tableName = route.destConfig.table;
+    let priorWatermark: string | null = null;
+
+    if (cursorConfig && cursorConfig.strategy !== "full_refresh" && cursorConfig.cursorColumn) {
+      priorWatermark = await getWatermark(route.id, tableName);
+    }
+
+    const incrementalClause = cursorConfig?.cursorColumn
+      ? buildIncrementalClause(cursorConfig.cursorColumn, cursorConfig.strategy, priorWatermark)
+      : null;
+
+    if (ravenSourceConfig.query?.includes("@last_run")) {
+      const watermarkFormatted = priorWatermark ?? new Date(0).toISOString();
+      ravenSourceConfig.query = ravenSourceConfig.query.replace(
+        /@last_run/g,
+        `'${watermarkFormatted}'`
+      );
+    } else if (incrementalClause && ravenSourceConfig.query) {
+      const q = ravenSourceConfig.query.trimEnd().replace(/;$/, "");
+      ravenSourceConfig.query = `SELECT * FROM (${q}) AS __incr WHERE ${incrementalClause}`;
+    } else if (route.sourceConfig.incrementalKey) {
+      const params = this.buildQueryParams(route);
+      if (params.last_run) {
+        const lastRunValue = params.last_run instanceof Date
+          ? params.last_run.toISOString()
+          : String(params.last_run);
+        ravenSourceConfig.params = {
+          ...ravenSourceConfig.params,
+          last_run: lastRunValue,
+        };
+      }
+    }
+
     // Create route log
     const routeLog = await prisma.routeLog.create({
       data: {
@@ -1003,8 +1045,8 @@ export class BifrostEngine {
         routeId: route.id,
         routeLogId: routeLog.id,
         connectionId: agentConnection.id,
-        query: route.sourceConfig.query,
-        queryParams: (route.sourceConfig.params ?? {}) as any,
+        query: ravenSourceConfig.query,
+        queryParams: (ravenSourceConfig.params ?? {}) as any,
         destination: { type: "hermod_cloud" } as any,
         timeout: 120,
         maxRows: route.sourceConfig.chunkSize ? route.sourceConfig.chunkSize * 100 : undefined,
