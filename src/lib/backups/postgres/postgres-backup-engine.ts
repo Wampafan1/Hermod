@@ -183,6 +183,23 @@ function postgresArgs(connection: ConnectionLike): string[] {
   ];
 }
 
+function postgresReplicationArgs(connection: ConnectionLike): string[] {
+  const config = connection.config as {
+    host: string;
+    port?: number;
+    username: string;
+  };
+
+  return [
+    "--host",
+    config.host,
+    "--port",
+    String(config.port ?? 5432),
+    "--username",
+    config.username,
+  ];
+}
+
 function databaseName(connection: ConnectionLike): string {
   const config = connection.config as { database?: string; maintenanceDatabase?: string; scope?: string };
   return config.scope === "SERVER"
@@ -548,7 +565,7 @@ export class PostgresBackupEngine {
           "--slot",
           policy.replicationSlot,
           "--no-loop",
-          ...postgresArgs(connLike),
+          ...postgresReplicationArgs(connLike),
         ],
         env,
         {

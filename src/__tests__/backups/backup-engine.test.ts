@@ -398,6 +398,16 @@ describe("PostgresBackupEngine", () => {
     });
 
     expect(result.status).toBe("PARTIAL");
+    const walArgs = processRunner.mock.calls[0][1];
+    expect(walArgs).toEqual(expect.arrayContaining([
+      "--host",
+      "db.example.com",
+      "--port",
+      "5432",
+      "--username",
+      "backup",
+    ]));
+    expect(walArgs).not.toContain("--dbname");
     expect(result.objectKeys).toHaveLength(1);
     expect(result.objectKeys[0].key).toContain("/wal/");
     expect(mockRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
