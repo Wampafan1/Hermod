@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { ensureBossStarted } from "@/lib/pg-boss";
 import { restoreCreateSchema } from "@/lib/validations/backups";
 import { serializeRestoreJob, validateRestoreReferences } from "@/lib/backups/api-helpers";
+import { buildJobSingletonKey } from "@/lib/worker-guardrails";
 
 const restoreInclude = {
   policy: {
@@ -96,7 +97,7 @@ export const POST = withAuth(async (req, session) => {
     await boss.send(
       "postgres-restore",
       { restoreJobId: restoreJob.id },
-      { singletonKey: `restore-${restoreJob.id}` }
+      { singletonKey: buildJobSingletonKey("postgres-restore", restoreJob.id) }
     );
   } catch {
     await prisma.postgresRestoreJob.update({

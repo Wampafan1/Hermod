@@ -43,6 +43,27 @@ describe("backup API validation", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("validates and preserves PostgreSQL backup storage layout", () => {
+    const parsed = createBackupPolicySchema.safeParse({
+      name: "Prod",
+      sourceConnectionId: "conn_1",
+      storageTargetId: "target_1",
+      storageLayout: "TYPE_CENTERED",
+    });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.storageLayout).toBe("TYPE_CENTERED");
+    }
+
+    expect(createBackupPolicySchema.safeParse({
+      name: "Prod",
+      sourceConnectionId: "conn_1",
+      storageTargetId: "target_1",
+      storageLayout: "BAD_LAYOUT",
+    }).success).toBe(false);
+  });
+
   it("keeps existing POSTGRES database connections valid and defaults scope", () => {
     const parsed = createConnectionSchema.safeParse({
       name: "Prod",

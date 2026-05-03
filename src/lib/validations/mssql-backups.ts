@@ -12,6 +12,7 @@ export const mssqlFullFrequencySchema = z.enum(["DAILY", "WEEKLY", "MONTHLY"]);
 export const mssqlDifferentialFrequencySchema = z.enum(["EVERY_4_HOURS", "EVERY_6_HOURS", "EVERY_12_HOURS", "DAILY"]);
 export const mssqlLogFrequencySchema = z.enum(["EVERY_15_MIN", "EVERY_30_MIN", "HOURLY", "EVERY_4_HOURS"]);
 export const mssqlDatabaseSelectionModeSchema = z.enum(["SINGLE", "MULTIPLE", "ALL_USER_DATABASES", "PATTERN"]);
+export const mssqlBackupStorageLayoutSchema = z.enum(["DATABASE_CENTERED", "TYPE_CENTERED"]);
 export const mssqlDestinationModeSchema = z.enum([
   "BACKUP_TO_URL",
   "BACKUP_TO_DISK_SHARED_PATH",
@@ -43,6 +44,7 @@ const mssqlBackupPolicyBaseSchema = z.object({
   copyOnly: z.boolean().default(false),
   verifyAfterBackup: z.boolean().default(true),
   retentionDays: z.coerce.number().int().min(1).max(3650).default(30),
+  storageLayout: mssqlBackupStorageLayoutSchema.default("DATABASE_CENTERED"),
   enabled: z.boolean().default(true),
 });
 

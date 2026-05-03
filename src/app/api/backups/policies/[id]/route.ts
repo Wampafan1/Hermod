@@ -171,6 +171,7 @@ export const PUT = withAuth(async (req, session) => {
   if (data.timezone !== undefined) updateData.timezone = data.timezone;
   if (data.retentionDays !== undefined) updateData.retentionDays = data.retentionDays;
   if (data.storagePrefix !== undefined) updateData.storagePrefix = data.storagePrefix ?? null;
+  if (data.storageLayout !== undefined) updateData.storageLayout = data.storageLayout;
   updateData.databaseSelectionMode = databaseSelection.databaseSelectionMode;
   updateData.selectedDatabases = databaseSelection.selectedDatabases;
   updateData.excludedDatabases = databaseSelection.excludedDatabases;

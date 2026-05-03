@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
+import { redactSecretText, sanitizeHelheimValue } from "@/lib/bifrost/helheim/dead-letter";
 
 // GET /api/bifrost/helheim — List DLQ entries
 export const GET = withAuth(async (req, session) => {
@@ -17,7 +18,7 @@ export const GET = withAuth(async (req, session) => {
 
   const entries = await prisma.helheimEntry.findMany({
     where: {
-      route: { userId: session.user.id },
+      route: { userId: session.user.id, tenantId: session.tenantId },
       ...(routeId && { routeId }),
       ...statusFilter,
       ...(jobId && { jobId }),
@@ -47,6 +48,8 @@ export const GET = withAuth(async (req, session) => {
   return NextResponse.json(
     entries.map((e) => ({
       ...e,
+      errorMessage: redactSecretText(e.errorMessage),
+      errorDetails: sanitizeHelheimValue(e.errorDetails),
       routeName: e.route.name,
       route: undefined,
     }))

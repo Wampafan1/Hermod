@@ -12,7 +12,7 @@ export const PUT = withAuth(async (req, session) => {
   }
 
   const existing = await prisma.schedule.findFirst({
-    where: { id, report: { userId: session.user.id } },
+    where: { id, report: { userId: session.user.id, tenantId: session.tenantId } },
     include: { report: true },
   });
   if (!existing) {
@@ -47,7 +47,7 @@ export const PUT = withAuth(async (req, session) => {
   // Validate emailConnectionId ownership if provided
   if (data.emailConnectionId) {
     const emailConn = await prisma.emailConnection.findFirst({
-      where: { id: data.emailConnectionId, userId: session.user.id },
+      where: { id: data.emailConnectionId, userId: session.user.id, tenantId: session.tenantId },
     });
     if (!emailConn) {
       return NextResponse.json({ error: "Email connection not found" }, { status: 404 });
@@ -90,7 +90,7 @@ export const DELETE = withAuth(async (req, session) => {
   }
 
   const existing = await prisma.schedule.findFirst({
-    where: { id, report: { userId: session.user.id } },
+    where: { id, report: { userId: session.user.id, tenantId: session.tenantId } },
   });
   if (!existing) {
     return NextResponse.json({ error: "Schedule not found" }, { status: 404 });

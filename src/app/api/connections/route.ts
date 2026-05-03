@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { encrypt } from "@/lib/crypto";
 import { createConnectionSchema } from "@/lib/validations/unified-connections";
+import { serializeConnection } from "@/lib/connections/api-helpers";
 
 // ─── GET /api/connections — list user's connections ──────────
 export const GET = withAuth(async (_req, session) => {
@@ -24,7 +25,7 @@ export const GET = withAuth(async (_req, session) => {
     orderBy: { createdAt: "desc" },
   });
 
-  return NextResponse.json(connections);
+  return NextResponse.json(connections.map(serializeConnection));
 });
 
 // ─── POST /api/connections — create connection ───────────────
@@ -61,5 +62,5 @@ export const POST = withAuth(async (req, session) => {
     },
   });
 
-  return NextResponse.json(connection, { status: 201 });
+  return NextResponse.json(serializeConnection(connection), { status: 201 });
 });

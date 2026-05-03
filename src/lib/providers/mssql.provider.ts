@@ -56,7 +56,7 @@ export interface MssqlDatabaseInfo {
   canConnect?: boolean;
 }
 
-function targetDatabase(cfg: MssqlConfig): string {
+export function effectiveMssqlDatabase(cfg: MssqlConfig): string {
   return cfg.scope === "SERVER"
     ? cfg.maintenanceDatabase || "master"
     : cfg.database || "master";
@@ -65,7 +65,7 @@ function targetDatabase(cfg: MssqlConfig): string {
 function poolConfig(connection: ConnectionLike, database?: string) {
   const cfg = connection.config as unknown as MssqlConfig;
   const creds = connection.credentials as { password: string };
-  const db = database || targetDatabase(cfg);
+  const db = database || effectiveMssqlDatabase(cfg);
   return {
     cfg,
     creds,

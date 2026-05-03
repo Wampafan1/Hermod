@@ -44,6 +44,16 @@ describe("SSRF Protection", () => {
     expect(result).toContain("private IP");
   });
 
+  it("rejects IPv4-mapped IPv6 loopback", async () => {
+    const result = await checkSsrf("::ffff:127.0.0.1");
+    expect(result).toContain("private IP");
+  });
+
+  it("rejects IPv4-mapped IPv6 private networks", async () => {
+    const result = await checkSsrf("::ffff:10.0.0.1");
+    expect(result).toContain("private IP");
+  });
+
   it("rejects 169.254.x.x link-local", async () => {
     const result = await checkSsrf("169.254.1.1");
     expect(result).toContain("private IP");
@@ -87,5 +97,38 @@ describe("PREVIEW_ROW_LIMIT", () => {
     const { PREVIEW_ROW_LIMIT } = await import("@/lib/query-limits");
     expect(PREVIEW_ROW_LIMIT).toBe(10_000);
     expect(Number.isInteger(PREVIEW_ROW_LIMIT)).toBe(true);
+  });
+});
+
+describe("buildLimitedSqlQuery", () => {
+  it("wraps Postgres read queries with a server-side row limit", async () => {
+    const { buildLimitedSqlQuery } = await import("@/lib/query-limits");
+    const limited = buildLimitedSqlQuery("SELECT * FROM invoices;", "POSTGRES", 10001);
+
+    expect(limited.limited).toBe(true);
+    expect(limited.usesSessionRowLimit).toBe(false);
+    expect(limited.sql).toContain("LIMIT 10001");
+    expect(limited.sql).toContain("SELECT * FROM invoices");
+  });
+
+  it("uses a resettable rowcount guard for SQL Server read queries", async () => {
+    const { buildLimitedSqlQuery, MSSQL_RESET_ROWCOUNT_SQL } = await import("@/lib/query-limits");
+    const limited = buildLimitedSqlQuery("WITH x AS (SELECT 1 AS id) SELECT * FROM x", "MSSQL", 10);
+
+    expect(limited.limited).toBe(true);
+    expect(limited.usesSessionRowLimit).toBe(true);
+    expect(limited.sql).toContain("SET ROWCOUNT 10");
+    expect(limited.sql).toContain(MSSQL_RESET_ROWCOUNT_SQL);
+  });
+
+  it("does not wrap non-read statements", async () => {
+    const { buildLimitedSqlQuery } = await import("@/lib/query-limits");
+    const sql = "UPDATE reports SET name = 'bad'";
+
+    expect(buildLimitedSqlQuery(sql, "POSTGRES", 10)).toEqual({
+      sql,
+      limited: false,
+      usesSessionRowLimit: false,
+    });
   });
 });

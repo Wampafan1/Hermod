@@ -5,12 +5,24 @@ const {
   mockFindMany,
   mockUpdate,
   mockCreate,
+  mockTargetDelete,
+  mockTransaction,
+  mockPostgresPolicyCount,
+  mockPostgresPolicyDeleteMany,
+  mockMssqlPolicyCount,
+  mockMssqlPolicyDeleteMany,
   mockTestUnsaved,
 } = vi.hoisted(() => ({
   mockFindFirst: vi.fn(),
   mockFindMany: vi.fn(),
   mockUpdate: vi.fn(),
   mockCreate: vi.fn(),
+  mockTargetDelete: vi.fn(),
+  mockTransaction: vi.fn(),
+  mockPostgresPolicyCount: vi.fn(),
+  mockPostgresPolicyDeleteMany: vi.fn(),
+  mockMssqlPolicyCount: vi.fn(),
+  mockMssqlPolicyDeleteMany: vi.fn(),
   mockTestUnsaved: vi.fn(),
 }));
 
@@ -31,10 +43,17 @@ vi.mock("@/lib/db", () => ({
       findMany: mockFindMany,
       update: mockUpdate,
       create: mockCreate,
+      delete: mockTargetDelete,
     },
     postgresBackupPolicy: {
-      count: vi.fn(),
+      count: mockPostgresPolicyCount,
+      deleteMany: mockPostgresPolicyDeleteMany,
     },
+    mssqlBackupPolicy: {
+      count: mockMssqlPolicyCount,
+      deleteMany: mockMssqlPolicyDeleteMany,
+    },
+    $transaction: mockTransaction,
   },
 }));
 
@@ -57,6 +76,12 @@ function jsonRequest(url: string, body: unknown): Request {
 describe("backup storage target API safety", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPostgresPolicyCount.mockResolvedValue(0);
+    mockMssqlPolicyCount.mockResolvedValue(0);
+    mockPostgresPolicyDeleteMany.mockResolvedValue({ count: 0 });
+    mockMssqlPolicyDeleteMany.mockResolvedValue({ count: 0 });
+    mockTargetDelete.mockResolvedValue({});
+    mockTransaction.mockResolvedValue([]);
   });
 
   it("GET does not return credentials even if a selected record includes them", async () => {
@@ -141,5 +166,48 @@ describe("backup storage target API safety", () => {
     ]);
     expect(mockCreate).not.toHaveBeenCalled();
     expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("blocks deleting a storage target used by active MSSQL backup policies", async () => {
+    mockFindFirst.mockResolvedValue({ id: "target_1" });
+    mockPostgresPolicyCount.mockResolvedValue(0);
+    mockMssqlPolicyCount.mockResolvedValue(1);
+
+    const { DELETE } = await import("@/app/api/backups/storage-targets/[id]/route");
+    const res = await DELETE(new Request("http://localhost/api/backups/storage-targets/target_1", {
+      method: "DELETE",
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.error).toContain("active backup policy");
+    expect(mockTargetDelete).not.toHaveBeenCalled();
+  });
+
+  it("force-deletes disabled Postgres and MSSQL policies before deleting a target", async () => {
+    mockFindFirst.mockResolvedValue({ id: "target_1" });
+    mockPostgresPolicyCount
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1);
+    mockMssqlPolicyCount
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(2);
+
+    const { DELETE } = await import("@/app/api/backups/storage-targets/[id]/route");
+    const res = await DELETE(new Request("http://localhost/api/backups/storage-targets/target_1?force=true", {
+      method: "DELETE",
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data).toEqual({ success: true, deletedPolicies: 3 });
+    expect(mockPostgresPolicyDeleteMany).toHaveBeenCalledWith({
+      where: { storageTargetId: "target_1", enabled: false, userId: "user_1", tenantId: "tenant_1" },
+    });
+    expect(mockMssqlPolicyDeleteMany).toHaveBeenCalledWith({
+      where: { storageTargetId: "target_1", status: "DISABLED", userId: "user_1", tenantId: "tenant_1" },
+    });
+    expect(mockTargetDelete).toHaveBeenCalledWith({ where: { id: "target_1" } });
+    expect(mockTransaction).toHaveBeenCalledOnce();
   });
 });

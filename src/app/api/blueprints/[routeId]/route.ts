@@ -7,7 +7,7 @@ export const GET = withAuth(async (req, session) => {
   const routeId = req.url.split("/blueprints/")[1]?.split("/")[0]?.split("?")[0];
 
   const blueprint = await prisma.forgeBlueprint.findFirst({
-    where: { routeId, route: { userId: session.user.id } },
+    where: { routeId, route: { userId: session.user.id, tenantId: session.tenantId } },
     include: {
       versions: {
         orderBy: { version: "desc" },

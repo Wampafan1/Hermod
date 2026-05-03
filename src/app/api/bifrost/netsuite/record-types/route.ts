@@ -17,7 +17,7 @@ export const GET = withAuth(async (req, session) => {
   }
 
   const connection = await prisma.connection.findFirst({
-    where: { id: connectionId, userId: session.user.id, type: "NETSUITE" },
+    where: { id: connectionId, userId: session.user.id, tenantId: session.tenantId, type: "NETSUITE" },
   });
 
   if (!connection) {

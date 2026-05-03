@@ -98,9 +98,15 @@ export const DELETE = withAuth(async (req, session) => {
   });
   if (!existing) return NextResponse.json({ error: "Storage target not found" }, { status: 404 });
 
-  const activePolicyCount = await prisma.postgresBackupPolicy.count({
-    where: { storageTargetId: id, enabled: true, userId: session.userId, tenantId: session.tenantId },
-  });
+  const [activePostgresPolicyCount, activeMssqlPolicyCount] = await Promise.all([
+    prisma.postgresBackupPolicy.count({
+      where: { storageTargetId: id, enabled: true, userId: session.userId, tenantId: session.tenantId },
+    }),
+    prisma.mssqlBackupPolicy.count({
+      where: { storageTargetId: id, status: { not: "DISABLED" }, userId: session.userId, tenantId: session.tenantId },
+    }),
+  ]);
+  const activePolicyCount = activePostgresPolicyCount + activeMssqlPolicyCount;
   if (activePolicyCount > 0) {
     return NextResponse.json(
       { error: `Cannot delete: ${activePolicyCount} active backup policy/policies use this storage target` },
@@ -108,9 +114,15 @@ export const DELETE = withAuth(async (req, session) => {
     );
   }
 
-  const totalPolicyCount = await prisma.postgresBackupPolicy.count({
-    where: { storageTargetId: id, userId: session.userId, tenantId: session.tenantId },
-  });
+  const [totalPostgresPolicyCount, totalMssqlPolicyCount] = await Promise.all([
+    prisma.postgresBackupPolicy.count({
+      where: { storageTargetId: id, userId: session.userId, tenantId: session.tenantId },
+    }),
+    prisma.mssqlBackupPolicy.count({
+      where: { storageTargetId: id, userId: session.userId, tenantId: session.tenantId },
+    }),
+  ]);
+  const totalPolicyCount = totalPostgresPolicyCount + totalMssqlPolicyCount;
   const force = new URL(req.url).searchParams.get("force") === "true";
   if (totalPolicyCount > 0 && !force) {
     return NextResponse.json(
@@ -123,6 +135,9 @@ export const DELETE = withAuth(async (req, session) => {
     await prisma.$transaction([
       prisma.postgresBackupPolicy.deleteMany({
         where: { storageTargetId: id, enabled: false, userId: session.userId, tenantId: session.tenantId },
+      }),
+      prisma.mssqlBackupPolicy.deleteMany({
+        where: { storageTargetId: id, status: "DISABLED", userId: session.userId, tenantId: session.tenantId },
       }),
       prisma.backupStorageTarget.delete({ where: { id } }),
     ]);

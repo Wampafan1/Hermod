@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
+import { canManageApiCatalog } from "@/lib/alfheim/catalog-admin";
 import {
   catalogSearchSchema,
   createCatalogConnectorSchema,
@@ -70,6 +71,10 @@ export const GET = withAuth(async (req) => {
 
 // POST /api/alfheim/catalog — create a new catalog connector
 export const POST = withAuth(async (req, session) => {
+  if (!canManageApiCatalog(session.userId)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const body = await req.json();
   const parsed = createCatalogConnectorSchema.safeParse(body);
 

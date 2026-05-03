@@ -118,6 +118,7 @@ export const POST = withAuth(async (req, session) => {
       copyOnly: data.copyOnly,
       verifyAfterBackup: data.verifyAfterBackup,
       retentionDays: data.retentionDays,
+      storageLayout: data.storageLayout,
       userId: session.userId,
       tenantId: session.tenantId,
     },

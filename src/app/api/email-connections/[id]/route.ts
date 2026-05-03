@@ -6,6 +6,7 @@ import {
   createEmailConnectionSchema,
   updateEmailConnectionSchema,
 } from "@/lib/validations/email-connections";
+import { serializeEmailConnection } from "@/lib/credential-response";
 
 // PUT /api/email-connections/[id] — update email connection
 export const PUT = withAuth(async (req, session) => {
@@ -89,7 +90,7 @@ export const PUT = withAuth(async (req, session) => {
     },
   });
 
-  return NextResponse.json(updated);
+  return NextResponse.json(serializeEmailConnection(updated));
 });
 
 // DELETE /api/email-connections/[id]

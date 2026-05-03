@@ -26,7 +26,7 @@ describe("Helheim dead-letter persistence", () => {
       "log_1",
       0,
       [{ id: 1 }],
-      new Error("load failed"),
+      new Error("load failed password=secret"),
       "tenant_1"
     );
 
@@ -37,6 +37,7 @@ describe("Helheim dead-letter persistence", () => {
         tenantId: "tenant_1",
         jobId: "log_1",
         rowCount: 1,
+        errorMessage: "load failed password=[redacted]",
       }),
     }));
   });

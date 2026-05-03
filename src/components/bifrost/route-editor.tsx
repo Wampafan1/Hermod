@@ -743,7 +743,7 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
             className="accent-gold"
           />
           <span className="text-text-dim text-xs tracking-wider">
-            Auto-create destination table if it doesn't exist
+            Auto-create destination table if it doesn&apos;t exist
           </span>
         </label>
       </Section>

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { encrypt } from "@/lib/crypto";
 import { createSftpConnectionSchema } from "@/lib/validations/sftp-connections";
+import { serializeSftpConnection } from "@/lib/credential-response";
 import {
   slugifyUsername,
   generateSftpPassword,
@@ -13,7 +14,7 @@ import {
 // GET /api/sftp-connections — list user's SFTP connections
 export const GET = withAuth(async (_req, session) => {
   const connections = await prisma.sftpConnection.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, tenantId: session.tenantId },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -37,7 +38,7 @@ export const GET = withAuth(async (_req, session) => {
       // Never return sftpPassword in list
     },
   });
-  return NextResponse.json(connections);
+  return NextResponse.json(connections.map(serializeSftpConnection));
 });
 
 // POST /api/sftp-connections — create SFTP connection
@@ -92,6 +93,7 @@ export const POST = withAuth(async (req, session) => {
       loadMode: data.loadMode,
       notificationEmails: data.notificationEmails,
       userId: session.user.id,
+      tenantId: session.tenantId,
     },
     select: {
       id: true,

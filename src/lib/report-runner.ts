@@ -2,6 +2,7 @@ import { BlueprintStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getTierConfig } from "@/lib/tiers";
 import { getProvider, toConnectionLike } from "@/lib/providers";
+import type { ProviderConnection } from "@/lib/providers/types";
 import { sendReportEmail, toEmailConfig, resolveEmailTransport } from "@/lib/email";
 import type { EmailConnectionConfig } from "@/lib/email";
 import ExcelJS from "exceljs";
@@ -16,6 +17,7 @@ import {
   formatFileSize,
   type HermodEmailModel,
 } from "@/lib/email-templates";
+import { buildLimitedSqlQuery, MSSQL_RESET_ROWCOUNT_SQL } from "@/lib/query-limits";
 import { executeBlueprint, validateInputSchema } from "@/lib/mjolnir";
 import type { ForgeStep, BlueprintData, BlueprintFormatting, CapturedCellStyle, StepMetric } from "@/lib/mjolnir";
 
@@ -64,6 +66,17 @@ const THEME_COLORS: Record<number, string> = {
 
 /** Maximum rows a report can include. Rows beyond this are truncated with a warning. */
 export const REPORT_ROW_LIMIT = 500_000;
+
+async function resetMssqlRowLimitAfterError(
+  provider: { query?: (conn: ProviderConnection, sql: string) => Promise<unknown> },
+  conn: ProviderConnection
+): Promise<void> {
+  try {
+    await provider.query?.(conn, MSSQL_RESET_ROWCOUNT_SQL);
+  } catch {
+    // Preserve the original query error; the caller closes the connection next.
+  }
+}
 
 // ─── Shared Pipeline ────────────────────────────────
 
@@ -114,8 +127,14 @@ export async function executeReportPipeline(input: PipelineInput): Promise<Pipel
   const connLike = toConnectionLike(connection);
   const conn = await provider.connect(connLike);
   let result;
+  const limitedQuery = buildLimitedSqlQuery(input.sqlQuery, connection.type, REPORT_ROW_LIMIT + 1);
   try {
-    result = await provider.query(conn, input.sqlQuery);
+    result = await provider.query(conn, limitedQuery.sql);
+  } catch (error) {
+    if (limitedQuery.usesSessionRowLimit) {
+      await resetMssqlRowLimitAfterError(provider, conn);
+    }
+    throw error;
   } finally {
     await conn.close();
   }
@@ -123,7 +142,7 @@ export async function executeReportPipeline(input: PipelineInput): Promise<Pipel
   // Enforce row limit — truncate with warning if exceeded
   let rowLimitWarning: string | null = null;
   if (result.rows.length > REPORT_ROW_LIMIT) {
-    rowLimitWarning = `Query returned ${result.rows.length.toLocaleString()} rows — truncated to ${REPORT_ROW_LIMIT.toLocaleString()} row limit`;
+    rowLimitWarning = `Query returned more than ${REPORT_ROW_LIMIT.toLocaleString()} rows — truncated to ${REPORT_ROW_LIMIT.toLocaleString()} row limit`;
     result.rows = result.rows.slice(0, REPORT_ROW_LIMIT);
   }
 

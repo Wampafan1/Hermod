@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+const httpUrlTemplate = z.string().min(1).refine(
+  (value) => /^https?:\/\//i.test(value.trim()),
+  "URL must start with http:// or https://"
+);
+
 // ─── Catalog search query params ───────────────────────────────
 
 export const catalogSearchSchema = z.object({
@@ -22,7 +27,7 @@ export const createCatalogConnectorSchema = z.object({
   popularity: z.number().int().min(0).default(0),
   enabled: z.boolean().default(true),
   authType: z.enum(["API_KEY", "BEARER", "BASIC", "OAUTH2", "CUSTOM"]),
-  baseUrl: z.string().min(1),
+  baseUrl: httpUrlTemplate,
   authConfig: z.record(z.unknown()),
   pagination: z.record(z.unknown()),
   rateLimiting: z.record(z.unknown()).optional(),

@@ -447,4 +447,26 @@ describe("MysqlProvider", () => {
       expect(chunks[0]).toEqual(rows);
     });
   });
+
+  describe("load()", () => {
+    it("passes bulk insert parameter values to mysql2", async () => {
+      mockMysqlPoolConn.execute.mockResolvedValue([[], []]);
+      const conn = await provider.connect(mysqlConnection);
+
+      const result = await provider.load!(conn, [
+        { id: 1, name: "Alice" },
+        { id: 2, name: "Bob" },
+      ], {
+        dataset: "warehouse",
+        table: "people",
+        writeDisposition: "WRITE_APPEND",
+      });
+
+      expect(result).toEqual({ rowsLoaded: 2, errors: [] });
+      expect(mockMysqlPoolConn.execute).toHaveBeenCalledWith(expect.objectContaining({
+        sql: "INSERT INTO `warehouse`.`people` (`id`, `name`) VALUES (?, ?), (?, ?)",
+        values: [1, "Alice", 2, "Bob"],
+      }));
+    });
+  });
 });

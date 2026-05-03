@@ -3,11 +3,12 @@ import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { encrypt } from "@/lib/crypto";
 import { createEmailConnectionSchema } from "@/lib/validations/email-connections";
+import { serializeEmailConnection } from "@/lib/credential-response";
 
 // GET /api/email-connections — list user's email connections (password excluded)
 export const GET = withAuth(async (_req, session) => {
   const connections = await prisma.emailConnection.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, tenantId: session.tenantId },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -22,7 +23,7 @@ export const GET = withAuth(async (_req, session) => {
       updatedAt: true,
     },
   });
-  return NextResponse.json(connections);
+  return NextResponse.json(connections.map(serializeEmailConnection));
 });
 
 // POST /api/email-connections — create email connection
@@ -49,6 +50,7 @@ export const POST = withAuth(async (req, session) => {
       password: data.password ? encrypt(data.password) : null,
       fromAddress: data.fromAddress,
       userId: session.user.id,
+      tenantId: session.tenantId,
     },
     select: {
       id: true,
@@ -63,5 +65,5 @@ export const POST = withAuth(async (req, session) => {
     },
   });
 
-  return NextResponse.json(connection, { status: 201 });
+  return NextResponse.json(serializeEmailConnection(connection), { status: 201 });
 });

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { updateSftpConnectionSchema } from "@/lib/validations/sftp-connections";
 import { removeSftpUser } from "@/lib/sftp-utils";
+import { serializeSftpConnection } from "@/lib/credential-response";
 
 // GET /api/sftp-connections/[id] — get single SFTP connection (with credentials)
 export const GET = withAuth(async (req, session) => {
@@ -12,15 +13,14 @@ export const GET = withAuth(async (req, session) => {
   }
 
   const connection = await prisma.sftpConnection.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!connection) {
     return NextResponse.json({ error: "Connection not found" }, { status: 404 });
   }
 
   // Never return the actual password — it's only shown once on creation
-  const { sftpPassword: _omit, ...safe } = connection;
-  return NextResponse.json(safe);
+  return NextResponse.json(serializeSftpConnection(connection));
 });
 
 // PUT /api/sftp-connections/[id] — update SFTP connection
@@ -31,7 +31,7 @@ export const PUT = withAuth(async (req, session) => {
   }
 
   const existing = await prisma.sftpConnection.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!existing) {
     return NextResponse.json({ error: "Connection not found" }, { status: 404 });
@@ -81,7 +81,7 @@ export const PUT = withAuth(async (req, session) => {
     },
   });
 
-  return NextResponse.json(updated);
+  return NextResponse.json(serializeSftpConnection(updated));
 });
 
 // DELETE /api/sftp-connections/[id] — delete SFTP connection
@@ -92,7 +92,7 @@ export const DELETE = withAuth(async (req, session) => {
   }
 
   const existing = await prisma.sftpConnection.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!existing) {
     return NextResponse.json({ error: "Connection not found" }, { status: 404 });

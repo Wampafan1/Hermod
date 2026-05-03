@@ -212,6 +212,23 @@ describe("MSSQL backup SQL and validation", () => {
       urlCredentialName: "HermodCredential",
     }).success).toBe(true);
   });
+
+  it("validates and preserves SQL Server backup storage layout", () => {
+    const parsed = createMssqlBackupPolicySchema.safeParse({
+      name: "SQL",
+      sourceConnectionId: "conn_1",
+      destinationMode: "BACKUP_TO_URL",
+      selectedDatabases: ["app"],
+      urlBase: "https://account.blob.core.windows.net/container",
+      urlCredentialName: "HermodCredential",
+      storageLayout: "TYPE_CENTERED",
+    });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.storageLayout).toBe("TYPE_CENTERED");
+    }
+  });
 });
 
 describe("MSSQL backup coverage", () => {

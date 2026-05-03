@@ -20,7 +20,8 @@ export interface AuthContext {
 
 type AuthHandler = (
   req: Request,
-  ctx: AuthContext
+  ctx: AuthContext,
+  routeContext?: unknown
 ) => Promise<NextResponse>;
 
 export function withAuth(
@@ -48,7 +49,7 @@ export function withAuth(
     };
 
     try {
-      return await handler(req, ctx);
+      return await handler(req, ctx, routeContext);
     } catch (error) {
       console.error("API error:", error instanceof Error ? error.message : error);
       return NextResponse.json(

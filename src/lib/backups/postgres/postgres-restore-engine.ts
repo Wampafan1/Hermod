@@ -162,6 +162,16 @@ function databaseName(connection: ConnectionLike): string {
     : config.database ?? "postgres";
 }
 
+function storagePrefixFromPolicy(policy: LoadedRestoreJob["policy"]): string | null {
+  if (policy.storagePrefix?.trim()) return policy.storagePrefix;
+  const config = policy.storageTarget.config;
+  if (config && typeof config === "object") {
+    const prefix = (config as { prefix?: unknown }).prefix;
+    if (typeof prefix === "string" && prefix.trim()) return prefix;
+  }
+  return null;
+}
+
 function restoreOptions(options: Prisma.JsonValue): {
   clean: boolean;
   ifExists: boolean;
@@ -348,7 +358,7 @@ export class PostgresRestoreEngine {
       }
 
       const storage = this.storageResolver(restoreJob.policy.storageTarget);
-      const storagePrefix = restoreJob.policy.storagePrefix;
+      const storagePrefix = storagePrefixFromPolicy(restoreJob.policy);
       const serverSlug = serverSlugFromConfig(restoreJob.policy.sourceConnection.config, restoreJob.policy.sourceConnection.name);
       const walPrefix = buildPostgresWalPrefix({ storagePrefix, serverSlug });
       const walObjects = await storage.list(walPrefix);

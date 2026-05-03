@@ -11,7 +11,7 @@ export const POST = withAuth(async (req, session) => {
   }
 
   const existing = await prisma.schedule.findFirst({
-    where: { id, report: { userId: session.user.id } },
+    where: { id, report: { userId: session.user.id, tenantId: session.tenantId } },
   });
   if (!existing) {
     return NextResponse.json({ error: "Schedule not found" }, { status: 404 });

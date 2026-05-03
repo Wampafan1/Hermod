@@ -361,6 +361,8 @@ export class PostgresBackupEngine {
             createdAt: createdAt.toISOString(),
             checksumSha256,
           });
+          totalBytes += uploaded.bytes || fileStat.size;
+          checksums.push(checksumSha256);
           const manifestObjectKey = buildManifestObjectKey({
             storagePrefix,
             engine: "postgres",
@@ -369,6 +371,14 @@ export class PostgresBackupEngine {
             backupType: "manifest",
             timestamp: createdAt,
             runId: run.id,
+          });
+          objectKeys.push({
+            key: uploaded.key,
+            manifestObjectKey,
+            database,
+            bytes: uploaded.bytes,
+            etag: uploaded.etag,
+            checksumSha256,
           });
           const completedAt = new Date();
           const manifest = {
@@ -404,16 +414,6 @@ export class PostgresBackupEngine {
             sourceConnectionId: policy.sourceConnectionId,
             database,
             createdAt: completedAt.toISOString(),
-            checksumSha256,
-          });
-          totalBytes += uploaded.bytes || fileStat.size;
-          checksums.push(checksumSha256);
-          objectKeys.push({
-            key: uploaded.key,
-            manifestObjectKey,
-            database,
-            bytes: uploaded.bytes,
-            etag: uploaded.etag,
             checksumSha256,
           });
         } catch (databaseError) {
@@ -650,19 +650,27 @@ export class PostgresBackupEngine {
         };
         const manifestPath = path.join(tempDir, `${run.id}-wal-manifest.json`);
         await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-        await storage.uploadFile(manifestPath, manifestObjectKey, {
-          policyId: policy.id,
-          runId: run.id,
-          type: "WAL_MANIFEST",
-          sourceConnectionId: policy.sourceConnectionId,
-          createdAt: createdAt.toISOString(),
-          checksumSha256: checksumSha256 ?? undefined,
-        });
-        objectKeys.push({
-          key: manifestObjectKey,
-          manifest: true,
-          bytes: 0,
-        });
+        try {
+          await storage.uploadFile(manifestPath, manifestObjectKey, {
+            policyId: policy.id,
+            runId: run.id,
+            type: "WAL_MANIFEST",
+            sourceConnectionId: policy.sourceConnectionId,
+            createdAt: createdAt.toISOString(),
+            checksumSha256: checksumSha256 ?? undefined,
+          });
+          objectKeys.push({
+            key: manifestObjectKey,
+            manifest: true,
+            bytes: 0,
+          });
+        } catch (manifestError) {
+          uploadErrors.push(
+            manifestError instanceof Error
+              ? `manifest: ${manifestError.message}`
+              : `manifest: ${String(manifestError)}`
+          );
+        }
       }
       const status =
         uploadErrors.length > 0

@@ -7,12 +7,18 @@
 
 import { gzip, gunzip } from "zlib";
 import { promisify } from "util";
+import { REDACTED, SENSITIVE_KEY_PATTERN, redactSecretText } from "@/lib/secret-redaction";
 
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
 import { prisma } from "@/lib/db";
 import type { HelheimErrorType } from "../types";
 import { DEFAULT_MAX_RETRIES, RETRY_DELAYS_SEC } from "../types";
+
+const MAX_SANITIZE_DEPTH = 4;
+const MAX_PREVIEW_FIELDS = 25;
+
+export { redactSecretText };
 
 // ─── Error Classification ────────────────────────────
 
@@ -58,6 +64,30 @@ export async function decompressPayload(payload: string): Promise<Record<string,
     .map((line: string) => JSON.parse(line));
 }
 
+function sanitizeRecord(record: Record<string, unknown>, depth: number): Record<string, unknown> {
+  const safe: Record<string, unknown> = {};
+  for (const key of Object.keys(record).slice(0, MAX_PREVIEW_FIELDS)) {
+    safe[key] = SENSITIVE_KEY_PATTERN.test(key)
+      ? REDACTED
+      : sanitizeHelheimValue(record[key], depth + 1);
+  }
+  return safe;
+}
+
+export function sanitizeHelheimValue(value: unknown, depth = 0): unknown {
+  if (depth > MAX_SANITIZE_DEPTH) return "[truncated]";
+  if (typeof value === "string") return redactSecretText(value);
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    return value.slice(0, MAX_PREVIEW_FIELDS).map((item) => sanitizeHelheimValue(item, depth + 1));
+  }
+  return sanitizeRecord(value as Record<string, unknown>, depth);
+}
+
+export function sanitizePayloadPreviewRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  return rows.map((row) => sanitizeRecord(row, 0));
+}
+
 // ─── Enqueue ─────────────────────────────────────────
 
 export async function enqueueDeadLetter(
@@ -78,7 +108,7 @@ export async function enqueueDeadLetter(
       chunkIndex,
       rowCount: rows.length,
       errorType: classifyError(error),
-      errorMessage: errorObj.message,
+      errorMessage: redactSecretText(errorObj.message),
       errorDetails: extractErrorDetails(error) as any,
       payload: await compressPayload(rows),
       retryCount: 0,
@@ -139,7 +169,7 @@ export async function markRetryFailed(
       status: exhausted ? "dead" : "pending",
       retryCount: newCount,
       nextRetryAt: exhausted ? null : getNextRetryAt(newCount),
-      errorMessage: errorObj.message,
+      errorMessage: redactSecretText(errorObj.message),
       lastRetriedAt: new Date(),
     },
   });
@@ -185,7 +215,7 @@ function extractErrorDetails(error: unknown): Record<string, unknown> | null {
 
   // BigQuery errors often have a response property with detailed info
   if ("errors" in error && Array.isArray((error as Record<string, unknown>).errors)) {
-    details.errors = (error as Record<string, unknown>).errors;
+    details.errors = sanitizeHelheimValue((error as Record<string, unknown>).errors);
   }
 
   if ("code" in error) {
@@ -193,8 +223,10 @@ function extractErrorDetails(error: unknown): Record<string, unknown> | null {
   }
 
   if (error.stack) {
-    details.stack = error.stack.split("\n").slice(0, 5).join("\n");
+    details.stack = redactSecretText(error.stack.split("\n").slice(0, 5).join("\n"));
   }
 
-  return Object.keys(details).length > 0 ? details : null;
+  return Object.keys(details).length > 0
+    ? sanitizeHelheimValue(details) as Record<string, unknown>
+    : null;
 }

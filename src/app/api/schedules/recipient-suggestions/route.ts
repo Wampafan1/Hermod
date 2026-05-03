@@ -24,7 +24,7 @@ export const GET = withAuth(async (req, session) => {
   }
 
   const recipients = await prisma.recipient.findMany({
-    where: { schedule: { report: { userId: session.user.id } } },
+    where: { schedule: { report: { userId: session.user.id, tenantId: session.tenantId } } },
     select: { email: true },
     distinct: ["email"],
     orderBy: { email: "asc" },

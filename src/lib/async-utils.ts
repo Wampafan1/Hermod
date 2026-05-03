@@ -1,3 +1,5 @@
+import { redactSecretText } from "@/lib/secret-redaction";
+
 /** Race a promise against a timeout, cleaning up the timer on completion. */
 export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -36,6 +38,6 @@ export async function mapWithConcurrency<T>(
 
 /** Extract a safe error message without leaking credentials or internals. */
 export function safeErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
+  if (error instanceof Error) return redactSecretText(error.message);
+  return redactSecretText(String(error));
 }

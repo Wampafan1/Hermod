@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { updateCatalogConnectorSchema } from "@/lib/validations/alfheim";
+import { canManageApiCatalog } from "@/lib/alfheim/catalog-admin";
 
 function extractSlug(url: string): string {
   return url.split("/catalog/")[1]?.split("/")[0]?.split("?")[0] ?? "";
@@ -25,7 +26,11 @@ export const GET = withAuth(async (req) => {
 });
 
 // PUT /api/alfheim/catalog/[slug] — update connector
-export const PUT = withAuth(async (req) => {
+export const PUT = withAuth(async (req, session) => {
+  if (!canManageApiCatalog(session.userId)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const slug = extractSlug(req.url);
 
   const existing = await prisma.apiCatalogConnector.findUnique({
@@ -67,7 +72,11 @@ export const PUT = withAuth(async (req) => {
 });
 
 // DELETE /api/alfheim/catalog/[slug] — hard delete (removes connector and its objects)
-export const DELETE = withAuth(async (req) => {
+export const DELETE = withAuth(async (req, session) => {
+  if (!canManageApiCatalog(session.userId)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const slug = extractSlug(req.url);
 
   const existing = await prisma.apiCatalogConnector.findUnique({

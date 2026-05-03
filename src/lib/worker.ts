@@ -23,6 +23,15 @@ import {
 import { inferSchemaFromRows, normalizeRowDates, getDateColumns } from "./bifrost/engine";
 import { getProvider, toConnectionLike } from "./providers";
 import { mapWithConcurrency, withTimeout, safeErrorMessage } from "./async-utils";
+import {
+  buildJobSingletonKey,
+  dueEnabledWhere,
+  staleStartedBefore,
+  STALE_MSSQL_BACKUP_RUN_MS,
+  STALE_POSTGRES_BACKUP_RUN_MS,
+  STALE_POSTGRES_RESTORE_JOB_MS,
+  STALE_ROUTE_LOG_MS,
+} from "./worker-guardrails";
 
 const prisma = new PrismaClient();
 const POLL_INTERVAL = 60_000; // 60 seconds
@@ -37,12 +46,13 @@ interface SendReportJob {
 
 async function main() {
   console.log("[Worker] Starting Hermod worker...");
+  const startupCleanupNow = new Date();
 
   // Clean up stale "running" route logs from previous crashed runs
   const staleResult = await prisma.routeLog.updateMany({
     where: {
       status: "running",
-      startedAt: { lt: new Date(Date.now() - 15 * 60_000) },
+      startedAt: { lt: staleStartedBefore(startupCleanupNow, STALE_ROUTE_LOG_MS) },
     },
     data: {
       status: "failed",
@@ -58,7 +68,7 @@ async function main() {
   const staleBackups = await prisma.postgresBackupRun.updateMany({
     where: {
       status: "RUNNING",
-      startedAt: { lt: new Date(Date.now() - 75 * 60_000) },
+      startedAt: { lt: staleStartedBefore(startupCleanupNow, STALE_POSTGRES_BACKUP_RUN_MS) },
     },
     data: {
       status: "FAILED",
@@ -73,7 +83,7 @@ async function main() {
   const staleMssqlBackups = await prisma.mssqlBackupRun.updateMany({
     where: {
       status: "RUNNING",
-      startedAt: { lt: new Date(Date.now() - 125 * 60_000) },
+      startedAt: { lt: staleStartedBefore(startupCleanupNow, STALE_MSSQL_BACKUP_RUN_MS) },
     },
     data: {
       status: "FAILED",
@@ -88,7 +98,7 @@ async function main() {
   const staleRestores = await prisma.postgresRestoreJob.updateMany({
     where: {
       status: "RUNNING",
-      startedAt: { lt: new Date(Date.now() - 75 * 60_000) },
+      startedAt: { lt: staleStartedBefore(startupCleanupNow, STALE_POSTGRES_RESTORE_JOB_MS) },
     },
     data: {
       status: "FAILED",
@@ -153,10 +163,7 @@ async function main() {
 
       // ─── Report Schedules ───────────────────────────
       const dueSchedules = await prisma.schedule.findMany({
-        where: {
-          enabled: true,
-          nextRunAt: { lte: now },
-        },
+        where: dueEnabledWhere("nextRunAt", now),
         orderBy: { nextRunAt: "asc" },
         take: DUE_WORK_BATCH_SIZE,
         include: {
@@ -187,7 +194,7 @@ async function main() {
           reportId: schedule.reportId,
           scheduleId: schedule.id,
         }, {
-          singletonKey: `report-${schedule.reportId}`,
+          singletonKey: buildJobSingletonKey("report", schedule.reportId),
         });
 
         await prisma.schedule.update({
@@ -204,10 +211,7 @@ async function main() {
 
       // ─── Bifrost Routes ──────────────────────────────
       const dueRoutes = await prisma.bifrostRoute.findMany({
-        where: {
-          enabled: true,
-          nextRunAt: { lte: now },
-        },
+        where: dueEnabledWhere("nextRunAt", now),
         orderBy: { nextRunAt: "asc" },
         take: DUE_WORK_BATCH_SIZE,
         select: {
@@ -229,7 +233,7 @@ async function main() {
         async (route) => {
           console.log(`[Worker] Enqueuing Bifrost route: ${route.name} (route=${route.id})`);
           await boss.send("run-route", { routeId: route.id, triggeredBy: "schedule" }, {
-            singletonKey: route.id,
+            singletonKey: buildJobSingletonKey("route", route.id),
           });
           await advanceRouteNextRun(route);
         }
@@ -242,10 +246,7 @@ async function main() {
       // ─── Helheim Retries (batched by destination) ────
       // Niflheim full PostgreSQL backups
       const dueFullBackups = await prisma.postgresBackupPolicy.findMany({
-        where: {
-          enabled: true,
-          nextFullRunAt: { lte: now },
-        },
+        where: dueEnabledWhere("nextFullRunAt", now),
         orderBy: { nextFullRunAt: "asc" },
         take: DUE_WORK_BATCH_SIZE,
         select: {
@@ -275,7 +276,7 @@ async function main() {
           await boss.send(
             "postgres-backup-full",
             { policyId: policy.id, triggeredBy: "schedule" },
-            { singletonKey: `backup-full-${policy.id}` }
+            { singletonKey: buildJobSingletonKey("postgres-full", policy.id) }
           );
           await prisma.postgresBackupPolicy.update({
             where: { id: policy.id },
@@ -291,9 +292,8 @@ async function main() {
       // Niflheim WAL/PITR archives
       const dueWalBackups = await prisma.postgresBackupPolicy.findMany({
         where: {
-          enabled: true,
+          ...dueEnabledWhere("nextWalRunAt", now),
           walEnabled: true,
-          nextWalRunAt: { lte: now },
         },
         orderBy: { nextWalRunAt: "asc" },
         take: DUE_WORK_BATCH_SIZE,
@@ -324,7 +324,7 @@ async function main() {
           await boss.send(
             "postgres-backup-wal",
             { policyId: policy.id, triggeredBy: "schedule" },
-            { singletonKey: `backup-wal-${policy.id}` }
+            { singletonKey: buildJobSingletonKey("postgres-wal", policy.id) }
           );
           await prisma.postgresBackupPolicy.update({
             where: { id: policy.id },
@@ -339,10 +339,7 @@ async function main() {
 
       // Niflheim SQL Server full backups
       const dueMssqlFullBackups = await prisma.mssqlBackupPolicy.findMany({
-        where: {
-          enabled: true,
-          nextFullRunAt: { lte: now },
-        },
+        where: dueEnabledWhere("nextFullRunAt", now),
         orderBy: { nextFullRunAt: "asc" },
         take: DUE_WORK_BATCH_SIZE,
         select: {
@@ -372,7 +369,7 @@ async function main() {
           await boss.send(
             "mssql-backup-full",
             { policyId: policy.id, triggeredBy: "schedule" },
-            { singletonKey: `mssql-full-${policy.id}` }
+            { singletonKey: buildJobSingletonKey("mssql-full", policy.id) }
           );
           await prisma.mssqlBackupPolicy.update({
             where: { id: policy.id },
@@ -388,9 +385,8 @@ async function main() {
       // Niflheim SQL Server differential backups
       const dueMssqlDiffBackups = await prisma.mssqlBackupPolicy.findMany({
         where: {
-          enabled: true,
+          ...dueEnabledWhere("nextDifferentialRunAt", now),
           differentialFrequency: { not: null },
-          nextDifferentialRunAt: { lte: now },
         },
         orderBy: { nextDifferentialRunAt: "asc" },
         take: DUE_WORK_BATCH_SIZE,
@@ -421,7 +417,7 @@ async function main() {
           await boss.send(
             "mssql-backup-differential",
             { policyId: policy.id, triggeredBy: "schedule" },
-            { singletonKey: `mssql-diff-${policy.id}` }
+            { singletonKey: buildJobSingletonKey("mssql-differential", policy.id) }
           );
           await prisma.mssqlBackupPolicy.update({
             where: { id: policy.id },
@@ -437,9 +433,8 @@ async function main() {
       // Niflheim SQL Server transaction log backups
       const dueMssqlLogBackups = await prisma.mssqlBackupPolicy.findMany({
         where: {
-          enabled: true,
+          ...dueEnabledWhere("nextLogRunAt", now),
           logFrequency: { not: null },
-          nextLogRunAt: { lte: now },
         },
         orderBy: { nextLogRunAt: "asc" },
         take: DUE_WORK_BATCH_SIZE,
@@ -470,7 +465,7 @@ async function main() {
           await boss.send(
             "mssql-backup-log",
             { policyId: policy.id, triggeredBy: "schedule" },
-            { singletonKey: `mssql-log-${policy.id}` }
+            { singletonKey: buildJobSingletonKey("mssql-log", policy.id) }
           );
           await prisma.mssqlBackupPolicy.update({
             where: { id: policy.id },

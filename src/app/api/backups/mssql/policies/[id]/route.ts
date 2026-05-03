@@ -134,6 +134,7 @@ export const PUT = withAuth(async (req, session) => {
   if (data.copyOnly !== undefined) updateData.copyOnly = data.copyOnly;
   if (data.verifyAfterBackup !== undefined) updateData.verifyAfterBackup = data.verifyAfterBackup;
   if (data.retentionDays !== undefined) updateData.retentionDays = data.retentionDays;
+  if (data.storageLayout !== undefined) updateData.storageLayout = data.storageLayout;
   if (data.enabled !== undefined && data.status === undefined) {
     updateData.status = data.enabled ? MssqlBackupPolicyStatus.ACTIVE : MssqlBackupPolicyStatus.DISABLED;
   }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { testCatalogConnectionSchema } from "@/lib/validations/alfheim";
+import { fetchWithSsrfProtection } from "@/lib/ssrf";
 
 function extractSlug(url: string): string {
   return url.split("/catalog/")[1]?.split("/")[0]?.split("?")[0] ?? "";
@@ -163,7 +164,7 @@ export const POST = withAuth(async (req) => {
       }
     }
 
-    const response = await fetch(finalTestUrl, fetchInit);
+    const response = await fetchWithSsrfProtection(finalTestUrl, fetchInit);
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");

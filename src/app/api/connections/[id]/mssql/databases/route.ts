@@ -29,7 +29,7 @@ export const GET = withAuth(async (req, session) => {
   }
 
   const connection = await prisma.connection.findFirst({
-    where: { id, userId: session.userId },
+    where: { id, userId: session.userId, tenantId: session.tenantId },
     select: {
       id: true,
       type: true,

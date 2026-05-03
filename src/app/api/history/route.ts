@@ -12,7 +12,7 @@ export const GET = withAuth(async (req, session) => {
   const reportId = url.searchParams.get("reportId");
 
   const where: Record<string, unknown> = {
-    report: { userId: session.user.id },
+    report: { userId: session.user.id, tenantId: session.tenantId },
   };
   if (status && status !== "all") where.status = status;
   if (reportId) where.reportId = reportId;

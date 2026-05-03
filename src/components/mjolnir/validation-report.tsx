@@ -106,7 +106,7 @@ export function ValidationReport({ result }: ValidationReportProps) {
             {result.columnValidations.length} columns.
             {result.rowMatchMode === "key" && result.keyColumn && (
               <span className="text-frost ml-1">
-                (rows matched by "{result.keyColumn}")
+                (rows matched by &quot;{result.keyColumn}&quot;)
               </span>
             )}
           </>

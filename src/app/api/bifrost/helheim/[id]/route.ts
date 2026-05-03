@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
-import { decompressPayload } from "@/lib/bifrost/helheim/dead-letter";
+import {
+  decompressPayload,
+  redactSecretText,
+  sanitizeHelheimValue,
+  sanitizePayloadPreviewRows,
+} from "@/lib/bifrost/helheim/dead-letter";
 
 // GET /api/bifrost/helheim/[id] — Single entry with payload preview
 export const GET = withAuth(async (req, session) => {
@@ -10,7 +15,7 @@ export const GET = withAuth(async (req, session) => {
   const entry = await prisma.helheimEntry.findFirst({
     where: {
       id,
-      route: { userId: session.user.id },
+      route: { userId: session.user.id, tenantId: session.tenantId },
     },
     include: {
       route: { select: { id: true, name: true } },
@@ -26,7 +31,7 @@ export const GET = withAuth(async (req, session) => {
   try {
     const allRows = await decompressPayload(entry.payload);
     totalRows = allRows.length;
-    payloadPreview = allRows.slice(0, 10);
+    payloadPreview = sanitizePayloadPreviewRows(allRows.slice(0, 10));
   } catch {
     // If decompression fails, return empty preview
   }
@@ -39,8 +44,8 @@ export const GET = withAuth(async (req, session) => {
     chunkIndex: entry.chunkIndex,
     rowCount: entry.rowCount,
     errorType: entry.errorType,
-    errorMessage: entry.errorMessage,
-    errorDetails: entry.errorDetails,
+    errorMessage: redactSecretText(entry.errorMessage),
+    errorDetails: sanitizeHelheimValue(entry.errorDetails),
     retryCount: entry.retryCount,
     maxRetries: entry.maxRetries,
     status: entry.status,
@@ -62,7 +67,7 @@ export const PATCH = withAuth(async (req, session) => {
   }
 
   const entry = await prisma.helheimEntry.findFirst({
-    where: { id, route: { userId: session.user.id } },
+    where: { id, route: { userId: session.user.id, tenantId: session.tenantId } },
   });
 
   if (!entry) {

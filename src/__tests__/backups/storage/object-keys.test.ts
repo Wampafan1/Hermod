@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildDatabaseBackupPrefix,
+  buildDatabaseBackupTypePrefix,
   buildBackupObjectKey,
   buildManifestObjectKey,
+  buildPostgresWalPrefix,
   normalizeStoragePrefix,
   sanitizeObjectKeySegment,
 } from "@/lib/backups/storage/object-keys";
@@ -105,5 +108,55 @@ describe("database-centered backup object keys", () => {
       timestamp: date,
       runId: "run123",
     })).toBe("backups/mssql/prod-sql-01/Accounting/manifests/2026/05/03/run123.json");
+  });
+
+  it("never emits path traversal segments after sanitization", () => {
+    const key = buildBackupObjectKey({
+      storagePrefix: "../../root/backups",
+      engine: "postgres",
+      serverSlug: "../prod/pg",
+      databaseName: "../../app",
+      backupType: "full-logical",
+      timestamp: date,
+      runId: "../run123",
+    });
+
+    expect(key).toBe("root/backups/postgres/prod_pg/databases/app/full-logical/2026/05/03/app_FULL_20260503_020000_run123.dump");
+    expect(key.split("/")).not.toContain("..");
+  });
+
+  it("builds database and type prefixes consistently", () => {
+    expect(buildDatabaseBackupPrefix({
+      storagePrefix: "backups",
+      engine: "postgres",
+      serverSlug: "prod-pg-01",
+      databaseName: "app",
+    })).toBe("backups/postgres/prod-pg-01/databases/app");
+
+    expect(buildDatabaseBackupTypePrefix({
+      storagePrefix: "backups",
+      engine: "mssql",
+      serverSlug: "prod-sql-01",
+      databaseName: "Accounting",
+      backupType: "log",
+      date,
+    })).toBe("backups/mssql/prod-sql-01/Accounting/log/2026/05/03");
+  });
+
+  it("builds Postgres WAL prefixes and WAL manifest keys at server level", () => {
+    expect(buildPostgresWalPrefix({
+      storagePrefix: "backups",
+      serverSlug: "prod-pg-01",
+      date,
+    })).toBe("backups/postgres/prod-pg-01/wal/2026/05/03");
+
+    expect(buildManifestObjectKey({
+      storagePrefix: "backups",
+      engine: "postgres",
+      serverSlug: "prod-pg-01",
+      backupType: "wal-manifest",
+      timestamp: date,
+      runId: "run123",
+    })).toBe("backups/postgres/prod-pg-01/wal-manifests/2026/05/03/run123.json");
   });
 });

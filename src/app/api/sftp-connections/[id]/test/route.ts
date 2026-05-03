@@ -11,7 +11,7 @@ export const POST = withAuth(async (req, session) => {
   }
 
   const connection = await prisma.sftpConnection.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!connection) {
     return NextResponse.json({ error: "Connection not found" }, { status: 404 });

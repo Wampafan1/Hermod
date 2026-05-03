@@ -16,7 +16,7 @@ export const GET = withAuth(async (req, session) => {
   }
 
   const report = await prisma.report.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
     include: { connection: true },
   });
   if (!report) {

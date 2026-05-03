@@ -17,7 +17,7 @@ export const POST = withAuth(async (req, session) => {
   const data = parsed.data;
 
   const connection = await prisma.connection.findFirst({
-    where: { id: data.connectionId, userId: session.user.id },
+    where: { id: data.connectionId, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!connection) {
     return NextResponse.json({ error: "Connection not found" }, { status: 404 });

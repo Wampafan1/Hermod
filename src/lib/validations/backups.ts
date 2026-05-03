@@ -21,6 +21,7 @@ export const fullBackupFrequencySchema = z.enum(["DAILY", "WEEKLY", "MONTHLY"]);
 export const walBackupFrequencySchema = z.enum(["HOURLY", "EVERY_4_HOURS", "EVERY_12_HOURS", "DAILY"]);
 export const restoreModeSchema = z.enum(["LOGICAL_PG_RESTORE", "PHYSICAL_PITR_PREPARE"]);
 export const databaseSelectionModeSchema = z.enum(["SINGLE", "MULTIPLE", "ALL_NON_TEMPLATE", "PATTERN"]);
+export const backupStorageLayoutSchema = z.enum(["DATABASE_CENTERED", "TYPE_CENTERED"]);
 
 const databaseName = z.string().trim().min(1).max(128).regex(/^[^/\0]+$/, "Database name cannot contain slash or null characters");
 const databaseNames = z.array(databaseName).default([]);
@@ -56,6 +57,7 @@ export const createBackupPolicySchema = z.object({
   timezone: z.string().min(1).default("America/Chicago"),
   retentionDays: z.coerce.number().int().min(1).max(3650).default(30),
   storagePrefix,
+  storageLayout: backupStorageLayoutSchema.default("DATABASE_CENTERED"),
   databaseSelectionMode: databaseSelectionModeSchema.default("SINGLE"),
   selectedDatabases: databaseNames,
   excludedDatabases: databaseNames,
@@ -106,6 +108,7 @@ export const updateBackupPolicySchema = z.object({
   timezone: z.string().min(1).optional(),
   retentionDays: z.coerce.number().int().min(1).max(3650).optional(),
   storagePrefix,
+  storageLayout: backupStorageLayoutSchema.optional(),
   databaseSelectionMode: databaseSelectionModeSchema.optional(),
   selectedDatabases: z.array(databaseName).optional(),
   excludedDatabases: z.array(databaseName).optional(),

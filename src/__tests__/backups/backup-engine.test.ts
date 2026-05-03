@@ -135,6 +135,54 @@ describe("PostgresBackupEngine", () => {
     }));
   });
 
+  it("keeps the uploaded full backup artifact when manifest upload fails", async () => {
+    const uploadFile = vi.fn(async (_filePath: string, objectKey: string, metadata?: { type?: string }) => {
+      if (metadata?.type === "MANIFEST") {
+        throw new Error("manifest upload failed");
+      }
+      return {
+        key: objectKey,
+        bytes: 9,
+        etag: "etag",
+      };
+    });
+    const processRunner = vi.fn(async (_binary, args: string[]) => {
+      const fileArg = args[args.indexOf("--file") + 1];
+      await writeFile(fileArg, "dump-data");
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    });
+    const engine = new PostgresBackupEngine({
+      processRunner,
+      storageResolver: () => ({
+        uploadFile,
+        downloadFile: vi.fn(),
+        list: vi.fn(),
+        delete: vi.fn(),
+        test: vi.fn(),
+      }),
+    });
+
+    const result = await engine.runFullBackup({
+      policyId: "policy_1",
+      triggeredBy: "manual",
+      timeoutMs: 1000,
+    });
+
+    expect(result.status).toBe("PARTIAL");
+    expect(result.objectKeys).toHaveLength(1);
+    expect(result.objectKeys[0].key).toContain("/databases/erp/full-logical/");
+    expect(mockRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "run_1" },
+      data: expect.objectContaining({
+        status: "PARTIAL",
+        objectKeys: expect.arrayContaining([
+          expect.objectContaining({ key: expect.stringContaining("/databases/erp/full-logical/") }),
+        ]),
+        error: expect.stringContaining("manifest upload failed"),
+      }),
+    }));
+  });
+
   it("marks a run failed and cleans temp files when pg_dump fails", async () => {
     let tempDir: string | null = null;
     const processRunner = vi.fn(async (_binary, args: string[]) => {
@@ -295,5 +343,72 @@ describe("PostgresBackupEngine", () => {
       }),
     }));
     listSpy.mockRestore();
+  });
+
+  it("keeps uploaded WAL artifacts when WAL manifest upload fails", async () => {
+    mockPolicyFindUnique.mockResolvedValue({
+      ...makePolicy(),
+      walEnabled: true,
+      replicationSlot: "hermod_slot",
+      sourceConnection: {
+        id: "conn_1",
+        name: "Prod PG",
+        type: "POSTGRES",
+        config: {
+          host: "db.example.com",
+          port: 5432,
+          scope: "SERVER",
+          maintenanceDatabase: "postgres",
+          username: "backup",
+          ssl: false,
+        },
+        credentials: "encrypted",
+      },
+    });
+    const uploadFile = vi.fn(async (_filePath: string, objectKey: string, metadata?: { type?: string }) => {
+      if (metadata?.type === "WAL_MANIFEST") {
+        throw new Error("wal manifest upload failed");
+      }
+      return {
+        key: objectKey,
+        bytes: 16,
+        etag: "etag",
+      };
+    });
+    const processRunner = vi.fn(async (_binary, args: string[]) => {
+      const walDir = args[args.indexOf("--directory") + 1];
+      await writeFile(path.join(walDir, "000000010000000000000001"), "wal-data");
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    });
+    const engine = new PostgresBackupEngine({
+      processRunner,
+      storageResolver: () => ({
+        uploadFile,
+        downloadFile: vi.fn(),
+        list: vi.fn(),
+        delete: vi.fn(),
+        test: vi.fn(),
+      }),
+    });
+
+    const result = await engine.runWalArchive({
+      policyId: "policy_1",
+      triggeredBy: "manual",
+      timeoutMs: 1000,
+    });
+
+    expect(result.status).toBe("PARTIAL");
+    expect(result.objectKeys).toHaveLength(1);
+    expect(result.objectKeys[0].key).toContain("/wal/");
+    expect(mockRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "run_1" },
+      data: expect.objectContaining({
+        status: "PARTIAL",
+        objectKeys: expect.arrayContaining([
+          expect.objectContaining({ key: expect.stringContaining("/wal/") }),
+        ]),
+        error: expect.stringContaining("wal manifest upload failed"),
+      }),
+    }));
   });
 });

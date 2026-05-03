@@ -13,6 +13,7 @@ export const GET = withAuth(async (req, session) => {
     where: {
       report: {
         userId: session.user.id,
+        tenantId: session.tenantId,
         ...(reportId ? { id: reportId } : {}),
       },
     },
@@ -42,7 +43,7 @@ export const POST = withAuth(async (req, session) => {
 
   // Verify user owns the report
   const report = await prisma.report.findFirst({
-    where: { id: data.reportId, userId: session.user.id },
+    where: { id: data.reportId, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!report) {
     return NextResponse.json({ error: "Report not found" }, { status: 404 });
@@ -50,7 +51,7 @@ export const POST = withAuth(async (req, session) => {
 
   // Verify user owns the email connection
   const emailConn = await prisma.emailConnection.findFirst({
-    where: { id: data.emailConnectionId, userId: session.user.id },
+    where: { id: data.emailConnectionId, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!emailConn) {
     return NextResponse.json({ error: "Email connection not found" }, { status: 404 });
@@ -58,7 +59,7 @@ export const POST = withAuth(async (req, session) => {
 
   // Check if report already has a schedule
   const existing = await prisma.schedule.findUnique({
-    where: { reportId: data.reportId },
+    where: { reportId: report.id },
   });
   if (existing) {
     return NextResponse.json(

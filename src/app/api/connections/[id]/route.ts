@@ -8,6 +8,7 @@ import {
   connectionCredentialsSchemas,
 } from "@/lib/validations/unified-connections";
 import type { ConnectionType } from "@/lib/providers/types";
+import { serializeConnection } from "@/lib/connections/api-helpers";
 
 /** Extract the connection ID from the request URL. */
 function extractId(url: string): string | null {
@@ -43,7 +44,7 @@ export const GET = withAuth(async (req, session) => {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json(connection);
+  return NextResponse.json(serializeConnection(connection));
 });
 
 // ─── PUT /api/connections/[id] — update connection ───────────
@@ -118,7 +119,7 @@ export const PUT = withAuth(async (req, session) => {
     select: connectionSelect,
   });
 
-  return NextResponse.json(updated);
+  return NextResponse.json(serializeConnection(updated));
 });
 
 // ─── DELETE /api/connections/[id] — delete connection ────────

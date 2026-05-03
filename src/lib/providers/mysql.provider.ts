@@ -21,7 +21,7 @@ type MysqlPool = {
   end(): Promise<void>;
 };
 type MysqlPoolConnection = {
-  execute(opts: { sql: string; timeout: number }): Promise<[unknown[], unknown[]]>;
+  execute(opts: { sql: string; timeout: number; values?: unknown[] }): Promise<[unknown[], unknown[]]>;
   release(): void;
 };
 
@@ -236,6 +236,7 @@ export class MysqlProvider implements ConnectionProvider {
         await mysqlConn.connection.execute({
           sql: `INSERT INTO ${fullTable} (${colList}) VALUES ${rowPlaceholders.join(", ")}`,
           timeout: QUERY_TIMEOUT,
+          values,
         });
         totalLoaded += batch.length;
       } catch (err) {

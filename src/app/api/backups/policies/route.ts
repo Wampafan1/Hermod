@@ -137,6 +137,7 @@ export const POST = withAuth(async (req, session) => {
       nextWalRunAt,
       retentionDays: data.retentionDays,
       storagePrefix: data.storagePrefix ?? null,
+      storageLayout: data.storageLayout,
       databaseSelectionMode: databaseSelection.databaseSelectionMode,
       selectedDatabases: databaseSelection.selectedDatabases,
       excludedDatabases: databaseSelection.excludedDatabases,

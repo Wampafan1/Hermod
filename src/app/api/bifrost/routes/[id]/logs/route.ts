@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
+import { serializeRouteLog } from "@/lib/bifrost/api-helpers";
 
 // GET /api/bifrost/routes/[id]/logs — Run history
 export const GET = withAuth(async (req, session) => {
@@ -44,5 +45,5 @@ export const GET = withAuth(async (req, session) => {
   const items = hasMore ? logs.slice(0, PAGE_SIZE) : logs;
   const nextCursor = hasMore ? items[items.length - 1].id : null;
 
-  return NextResponse.json({ items, nextCursor });
+  return NextResponse.json({ items: items.map(serializeRouteLog), nextCursor });
 });

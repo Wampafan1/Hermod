@@ -7,14 +7,14 @@ export const GET = withAuth(async (_req, session) => {
   const [statusCounts, errorTypeCounts, recentActivity] = await Promise.all([
     prisma.helheimEntry.groupBy({
       by: ["status"],
-      where: { route: { userId: session.user.id } },
+      where: { route: { userId: session.user.id, tenantId: session.tenantId } },
       _count: true,
     }),
 
     prisma.helheimEntry.groupBy({
       by: ["errorType"],
       where: {
-        route: { userId: session.user.id },
+        route: { userId: session.user.id, tenantId: session.tenantId },
         status: { in: ["pending", "retrying"] },
       },
       _count: true,
@@ -22,7 +22,7 @@ export const GET = withAuth(async (_req, session) => {
 
     prisma.helheimEntry.count({
       where: {
-        route: { userId: session.user.id },
+        route: { userId: session.user.id, tenantId: session.tenantId },
         createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
       },
     }),

@@ -3,6 +3,8 @@ import {
   compressPayload,
   decompressPayload,
   classifyError,
+  redactSecretText,
+  sanitizePayloadPreviewRows,
 } from "@/lib/bifrost/helheim/dead-letter";
 
 // Only test the pure functions that don't need DB mocking.
@@ -101,6 +103,27 @@ describe("Helheim — pure functions", () => {
       expect(classifyError("string error")).toBe("load_failure");
       expect(classifyError(42)).toBe("load_failure");
       expect(classifyError(null)).toBe("load_failure");
+    });
+  });
+
+  describe("redaction helpers", () => {
+    it("redacts secret-looking text in error messages", () => {
+      expect(redactSecretText("failed password=supersecret token: abc123 Bearer xyz")).toBe(
+        "failed password=[redacted] token: [redacted] Bearer [redacted]"
+      );
+    });
+
+    it("redacts sensitive payload preview fields and caps field count", () => {
+      const row: Record<string, unknown> = { id: 1, password: "secret", nested: { apiKey: "abc", keep: "ok" } };
+      for (let i = 0; i < 30; i += 1) {
+        row[`field_${i}`] = i;
+      }
+
+      const [safe] = sanitizePayloadPreviewRows([row]);
+
+      expect(safe.password).toBe("[redacted]");
+      expect(safe.nested).toEqual({ apiKey: "[redacted]", keep: "ok" });
+      expect(Object.keys(safe)).toHaveLength(25);
     });
   });
 });

@@ -20,7 +20,7 @@ export const POST = withAuth(async (req, session) => {
   }
 
   const schedule = await prisma.schedule.findFirst({
-    where: { id, report: { userId: session.user.id } },
+    where: { id, report: { userId: session.user.id, tenantId: session.tenantId } },
     include: {
       recipients: true,
       emailConnection: true,

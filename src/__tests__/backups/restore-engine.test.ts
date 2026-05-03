@@ -231,6 +231,7 @@ describe("PostgresRestoreEngine", () => {
 
   it("creates a PITR manifest without running pg_restore", async () => {
     const uploadFile = vi.fn().mockResolvedValue({ key: "niflheim/policy_1/restore-manifests/restore_1.json", bytes: 100 });
+    const list = vi.fn().mockResolvedValue([{ key: "niflheim/policy_1/wal/000000010000000000000001" }]);
     mockRestoreFindUnique.mockResolvedValue(makeRestoreJob({
       mode: "PHYSICAL_PITR_PREPARE",
       objectKey: "niflheim/policy_1/full-physical/base.tar",
@@ -252,7 +253,7 @@ describe("PostgresRestoreEngine", () => {
       storageResolver: () => ({
         uploadFile,
         downloadFile: vi.fn(),
-        list: vi.fn().mockResolvedValue([{ key: "niflheim/policy_1/wal/000000010000000000000001" }]),
+        list,
         delete: vi.fn(),
         test: vi.fn(),
       }),
@@ -265,6 +266,57 @@ describe("PostgresRestoreEngine", () => {
     expect(uploadFile).toHaveBeenCalledWith(
       expect.any(String),
       expect.stringContaining("niflheim/postgres/Source/wal-manifests/"),
+      expect.objectContaining({ type: "PHYSICAL_PITR_PREPARE" })
+    );
+    expect(list).toHaveBeenCalledWith("niflheim/postgres/Source/wal");
+  });
+
+  it("uses the storage target prefix for PITR WAL lookup when policy prefix is empty", async () => {
+    const uploadFile = vi.fn().mockResolvedValue({ key: "target-prefix/postgres/Source/wal-manifests/restore_1.json", bytes: 100 });
+    const list = vi.fn().mockResolvedValue([{ key: "target-prefix/postgres/Source/wal/000000010000000000000001" }]);
+    mockRestoreFindUnique.mockResolvedValue(makeRestoreJob({
+      mode: "PHYSICAL_PITR_PREPARE",
+      policy: {
+        ...(makeRestoreJob().policy as Record<string, unknown>),
+        storagePrefix: null,
+        storageTarget: {
+          id: "target_1",
+          provider: "AWS_S3",
+          accessMode: "AWS_ACCESS_KEY",
+          config: { bucket: "backups", region: "us-east-1", prefix: "target-prefix" },
+          credentials: "encrypted",
+        },
+      },
+      backupRun: {
+        id: "run_1",
+        type: "FULL_PHYSICAL_BASE",
+        status: "SUCCESS",
+        objectKeys: [{ key: "target-prefix/postgres/Source/full-physical/base.tar" }],
+        checksumSha256: null,
+      },
+      options: {
+        confirmation: "PREPARE PITR restoredb",
+        pointInTime: "2026-05-02T20:00:00.000Z",
+      },
+    }));
+    const engine = new PostgresRestoreEngine({
+      processRunner: vi.fn(),
+      storageResolver: () => ({
+        uploadFile,
+        downloadFile: vi.fn(),
+        list,
+        delete: vi.fn(),
+        test: vi.fn(),
+      }),
+    });
+
+    const result = await engine.runRestore({ restoreJobId: "restore_1", timeoutMs: 1000 });
+
+    expect(result.status).toBe("SUCCESS");
+    expect(list).toHaveBeenCalledWith("target-prefix/postgres/Source/wal");
+    expect(uploadFile).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("target-prefix/postgres/Source/wal-manifests/"),
       expect.objectContaining({ type: "PHYSICAL_PITR_PREPARE" })
     );
   });

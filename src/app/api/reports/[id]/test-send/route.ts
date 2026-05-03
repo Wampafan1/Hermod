@@ -33,7 +33,7 @@ export const POST = withAuth(async (req, session) => {
 
   // Verify user owns the email connection
   const emailConn = await prisma.emailConnection.findFirst({
-    where: { id: emailConnectionId, userId: session.user.id },
+    where: { id: emailConnectionId, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!emailConn) {
     return NextResponse.json({ error: "Email connection not found" }, { status: 404 });
@@ -41,7 +41,7 @@ export const POST = withAuth(async (req, session) => {
   const emailConfig = toEmailConfig(emailConn);
 
   const report = await prisma.report.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
     include: { connection: true },
   });
   if (!report) {

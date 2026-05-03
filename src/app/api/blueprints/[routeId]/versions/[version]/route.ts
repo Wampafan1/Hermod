@@ -13,7 +13,7 @@ export const GET = withAuth(async (req, session) => {
   }
 
   const blueprint = await prisma.forgeBlueprint.findFirst({
-    where: { routeId, route: { userId: session.user.id } },
+    where: { routeId, route: { userId: session.user.id, tenantId: session.tenantId } },
   });
 
   if (!blueprint) {
@@ -75,7 +75,7 @@ export const POST = withAuth(async (req, session) => {
   }
 
   const blueprint = await prisma.forgeBlueprint.findFirst({
-    where: { routeId, route: { userId: session.user.id } },
+    where: { routeId, route: { userId: session.user.id, tenantId: session.tenantId } },
   });
 
   if (!blueprint) {

@@ -25,7 +25,7 @@ export const GET = withAuth(async (req, session) => {
   const { status, routeId, limit, offset } = parsed.data;
 
   const where = {
-    route: { userId: session.user.id },
+    route: { userId: session.user.id, tenantId: session.tenantId },
     ...(status && { status }),
     ...(routeId && { routeId }),
   };
