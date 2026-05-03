@@ -76,6 +76,9 @@ describe("backup storage target API safety", () => {
     const data = await res.json();
 
     expect(data[0]).not.toHaveProperty("credentials");
+    expect(mockFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: "user_1", tenantId: "tenant_1" },
+    }));
   });
 
   it("PUT does not erase credentials unless new credentials are provided", async () => {
@@ -96,6 +99,9 @@ describe("backup storage target API safety", () => {
     }));
 
     expect(res.status).toBe(200);
+    expect(mockFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "target_1", userId: "user_1", tenantId: "tenant_1" },
+    }));
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.not.objectContaining({ credentials: expect.anything() }),
     }));

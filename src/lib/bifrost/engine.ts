@@ -677,14 +677,14 @@ export class BifrostEngine {
               const projectId = (route.dest.config as Record<string, unknown>).projectId as string;
               (destProvider as any).invalidateSchema(projectId, route.destConfig.dataset, route.destConfig.table);
             }
-            await enqueueDeadLetter(route.id, routeLog!.id, loadBatchIndex, rows, err);
+            await enqueueDeadLetter(route.id, routeLog!.id, loadBatchIndex, rows, err, route.tenantId);
             errorCount += rows.length;
             throw err;
           }
           console.error(
             `[Bifrost] flushBatch error (dead-lettering batch): ${errMsg}`
           );
-          await enqueueDeadLetter(route.id, routeLog!.id, loadBatchIndex, rows, err);
+          await enqueueDeadLetter(route.id, routeLog!.id, loadBatchIndex, rows, err, route.tenantId);
           errorCount += rows.length;
           // batchMax is intentionally NOT promoted — those rows failed to load
         }
@@ -711,7 +711,7 @@ export class BifrostEngine {
             const result = executeBlueprint(blueprintSteps as any, { columns, rows: chunk });
             transformed = result.rows;
           } catch (err) {
-            await enqueueDeadLetter(route.id, routeLog.id, loadBatchIndex, chunk, err);
+            await enqueueDeadLetter(route.id, routeLog.id, loadBatchIndex, chunk, err, route.tenantId);
             errorCount += chunk.length;
             continue;
           }

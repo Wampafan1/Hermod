@@ -30,10 +30,8 @@ export const GET = withAuth(async (req, session) => {
   const target = await prisma.backupStorageTarget.findFirst({
     where: {
       id,
-      OR: [
-        { tenantId: session.tenantId },
-        { userId: session.userId },
-      ],
+      userId: session.userId,
+      tenantId: session.tenantId,
     },
     select: storageTargetSelect,
   });
@@ -49,10 +47,8 @@ export const PUT = withAuth(async (req, session) => {
   const existing = await prisma.backupStorageTarget.findFirst({
     where: {
       id,
-      OR: [
-        { tenantId: session.tenantId },
-        { userId: session.userId },
-      ],
+      userId: session.userId,
+      tenantId: session.tenantId,
     },
     select: { id: true },
   });
@@ -95,17 +91,15 @@ export const DELETE = withAuth(async (req, session) => {
   const existing = await prisma.backupStorageTarget.findFirst({
     where: {
       id,
-      OR: [
-        { tenantId: session.tenantId },
-        { userId: session.userId },
-      ],
+      userId: session.userId,
+      tenantId: session.tenantId,
     },
     select: { id: true },
   });
   if (!existing) return NextResponse.json({ error: "Storage target not found" }, { status: 404 });
 
   const activePolicyCount = await prisma.postgresBackupPolicy.count({
-    where: { storageTargetId: id, enabled: true },
+    where: { storageTargetId: id, enabled: true, userId: session.userId, tenantId: session.tenantId },
   });
   if (activePolicyCount > 0) {
     return NextResponse.json(
@@ -115,7 +109,7 @@ export const DELETE = withAuth(async (req, session) => {
   }
 
   const totalPolicyCount = await prisma.postgresBackupPolicy.count({
-    where: { storageTargetId: id },
+    where: { storageTargetId: id, userId: session.userId, tenantId: session.tenantId },
   });
   const force = new URL(req.url).searchParams.get("force") === "true";
   if (totalPolicyCount > 0 && !force) {
@@ -128,7 +122,7 @@ export const DELETE = withAuth(async (req, session) => {
   if (totalPolicyCount > 0) {
     await prisma.$transaction([
       prisma.postgresBackupPolicy.deleteMany({
-        where: { storageTargetId: id, enabled: false },
+        where: { storageTargetId: id, enabled: false, userId: session.userId, tenantId: session.tenantId },
       }),
       prisma.backupStorageTarget.delete({ where: { id } }),
     ]);

@@ -8,8 +8,8 @@ import {
   type DatabaseSelectionMode,
 } from "@/lib/backups/postgres/database-selection";
 
-export function userScopedWhere(ctx: AuthContext): { userId: string } {
-  return { userId: ctx.userId };
+export function userScopedWhere(ctx: AuthContext): { userId: string; tenantId: string } {
+  return { userId: ctx.userId, tenantId: ctx.tenantId };
 }
 
 export async function validateBackupPolicyReferences(
@@ -28,6 +28,7 @@ export async function validateBackupPolicyReferences(
     where: {
       id: data.sourceConnectionId,
       userId: ctx.userId,
+      tenantId: ctx.tenantId,
     },
     select: { id: true, type: true, config: true },
   });
@@ -62,10 +63,8 @@ export async function validateBackupPolicyReferences(
   const target = await prisma.backupStorageTarget.findFirst({
     where: {
       id: data.storageTargetId,
-      OR: [
-        { tenantId: ctx.tenantId },
-        { userId: ctx.userId },
-      ],
+      userId: ctx.userId,
+      tenantId: ctx.tenantId,
     },
     select: { id: true },
   });
@@ -247,7 +246,7 @@ export async function validateRestoreReferences(
   | { ok: false; status: number; error: string }
 > {
   const policy = await prisma.postgresBackupPolicy.findFirst({
-    where: { id: data.policyId, userId: ctx.userId },
+    where: { id: data.policyId, userId: ctx.userId, tenantId: ctx.tenantId },
     include: {
       sourceConnection: { select: { id: true, name: true, type: true, config: true } },
       storageTarget: { select: { id: true, provider: true, config: true } },
@@ -270,7 +269,7 @@ export async function validateRestoreReferences(
   }
 
   const targetConnection = await prisma.connection.findFirst({
-    where: { id: data.targetConnectionId, userId: ctx.userId },
+    where: { id: data.targetConnectionId, userId: ctx.userId, tenantId: ctx.tenantId },
     select: { id: true, name: true, type: true, config: true },
   });
   if (!targetConnection) return { ok: false, status: 404, error: "Target PostgreSQL connection not found" };

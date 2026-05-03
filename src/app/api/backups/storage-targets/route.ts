@@ -22,10 +22,8 @@ const storageTargetSelect = {
 export const GET = withAuth(async (_req, session) => {
   const targets = await prisma.backupStorageTarget.findMany({
     where: {
-      OR: [
-        { tenantId: session.tenantId },
-        { userId: session.userId },
-      ],
+      userId: session.userId,
+      tenantId: session.tenantId,
     },
     select: storageTargetSelect,
     orderBy: { createdAt: "desc" },

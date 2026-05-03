@@ -15,10 +15,8 @@ export const POST = withAuth(async (req, session) => {
   const target = await prisma.backupStorageTarget.findFirst({
     where: {
       id,
-      OR: [
-        { tenantId: session.tenantId },
-        { userId: session.userId },
-      ],
+      userId: session.userId,
+      tenantId: session.tenantId,
     },
     select: { id: true, provider: true, accessMode: true, config: true, credentials: true },
   });

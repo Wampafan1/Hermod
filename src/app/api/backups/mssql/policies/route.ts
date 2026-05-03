@@ -13,7 +13,7 @@ import {
 
 export const GET = withAuth(async (_req, session) => {
   const policies = await prisma.mssqlBackupPolicy.findMany({
-    where: { userId: session.userId },
+    where: { userId: session.userId, tenantId: session.tenantId },
     include: {
       sourceConnection: { select: { id: true, name: true, type: true, config: true } },
       storageTarget: { select: { id: true, name: true, provider: true, config: true, status: true } },

@@ -11,7 +11,7 @@ export const POST = withAuth(async (req, session) => {
   }
 
   const report = await prisma.report.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
     include: {
       connection: true,
       schedule: { include: { recipients: true } },
@@ -31,8 +31,10 @@ export const POST = withAuth(async (req, session) => {
     const runLog = await runReport(report.id, report.schedule.id);
     return NextResponse.json(runLog);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Report send failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[ReportSend] Report send failed", {
+      reportId: report.id,
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+    return NextResponse.json({ error: "Report send failed" }, { status: 500 });
   }
 });

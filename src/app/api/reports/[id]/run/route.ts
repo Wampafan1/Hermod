@@ -11,7 +11,7 @@ export const POST = withAuth(async (req, session) => {
   }
 
   const report = await prisma.report.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
     include: { connection: true },
   });
   if (!report) {
@@ -39,9 +39,12 @@ export const POST = withAuth(async (req, session) => {
       executionTime,
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Query execution failed";
-    return NextResponse.json({ error: message }, { status: 422 });
+    console.error("[ReportRun] Query execution failed", {
+      reportId: report.id,
+      connectionType: report.connection.type,
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+    return NextResponse.json({ error: "Query execution failed" }, { status: 422 });
   } finally {
     await conn.close();
   }

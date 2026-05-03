@@ -12,7 +12,7 @@ export async function validateMssqlBackupPolicyReferences(
   ctx: AuthContext
 ): Promise<{ ok: true; sourceConfig: unknown } | { ok: false; status: number; error: string }> {
   const source = await prisma.connection.findFirst({
-    where: { id: data.sourceConnectionId, userId: ctx.userId },
+    where: { id: data.sourceConnectionId, userId: ctx.userId, tenantId: ctx.tenantId },
     select: { id: true, type: true, config: true },
   });
   if (!source) return { ok: false, status: 404, error: "SQL Server source connection not found" };
@@ -37,7 +37,8 @@ export async function validateMssqlBackupPolicyReferences(
     const target = await prisma.backupStorageTarget.findFirst({
       where: {
         id: data.storageTargetId,
-        OR: [{ tenantId: ctx.tenantId }, { userId: ctx.userId }],
+        userId: ctx.userId,
+        tenantId: ctx.tenantId,
       },
       select: { id: true },
     });

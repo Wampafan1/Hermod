@@ -142,6 +142,8 @@ async function main() {
 
   console.log("[Worker] Job handlers registered");
 
+  let schedulerTickRunning = false;
+
   // Scheduler tick loop
   async function schedulerTick() {
     try {
@@ -163,7 +165,6 @@ async function main() {
           `[Worker] Enqueuing report: ${schedule.report.name} (schedule=${schedule.id})`
         );
 
-        // Advance nextRunAt FIRST to prevent re-enqueue on crash
         const nextRun = advanceNextRun(
           {
             frequency: schedule.frequency,
@@ -177,17 +178,17 @@ async function main() {
           now
         );
 
-        await prisma.schedule.update({
-          where: { id: schedule.id },
-          data: { nextRunAt: nextRun },
-        });
-
-        // THEN enqueue the job (if crash here, we miss one run — safer than duplicate)
+        // Enqueue before advancing nextRunAt so send failures leave the schedule due for retry.
         await boss.send("send-report", {
           reportId: schedule.reportId,
           scheduleId: schedule.id,
         }, {
           singletonKey: `report-${schedule.reportId}`,
+        });
+
+        await prisma.schedule.update({
+          where: { id: schedule.id },
+          data: { nextRunAt: nextRun },
         });
 
         console.log(`[Worker] Next run for ${schedule.report.name}: ${nextRun.toISOString()}`);
@@ -219,11 +220,10 @@ async function main() {
       await Promise.all(
         dueRoutes.map(async (route) => {
           console.log(`[Worker] Enqueuing Bifrost route: ${route.name} (route=${route.id})`);
-          // Advance nextRunAt FIRST to prevent re-enqueue on crash
-          await advanceRouteNextRun(route);
           await boss.send("run-route", { routeId: route.id, triggeredBy: "schedule" }, {
             singletonKey: route.id,
           });
+          await advanceRouteNextRun(route);
         })
       );
 
@@ -260,15 +260,15 @@ async function main() {
             },
             now
           );
-          await prisma.postgresBackupPolicy.update({
-            where: { id: policy.id },
-            data: { nextFullRunAt },
-          });
           await boss.send(
             "postgres-backup-full",
             { policyId: policy.id, triggeredBy: "schedule" },
             { singletonKey: `backup-full-${policy.id}` }
           );
+          await prisma.postgresBackupPolicy.update({
+            where: { id: policy.id },
+            data: { nextFullRunAt },
+          });
         })
       );
 
@@ -305,15 +305,15 @@ async function main() {
             },
             now
           );
-          await prisma.postgresBackupPolicy.update({
-            where: { id: policy.id },
-            data: { nextWalRunAt },
-          });
           await boss.send(
             "postgres-backup-wal",
             { policyId: policy.id, triggeredBy: "schedule" },
             { singletonKey: `backup-wal-${policy.id}` }
           );
+          await prisma.postgresBackupPolicy.update({
+            where: { id: policy.id },
+            data: { nextWalRunAt },
+          });
         })
       );
 
@@ -349,15 +349,15 @@ async function main() {
             },
             now
           );
-          await prisma.mssqlBackupPolicy.update({
-            where: { id: policy.id },
-            data: { nextFullRunAt },
-          });
           await boss.send(
             "mssql-backup-full",
             { policyId: policy.id, triggeredBy: "schedule" },
             { singletonKey: `mssql-full-${policy.id}` }
           );
+          await prisma.mssqlBackupPolicy.update({
+            where: { id: policy.id },
+            data: { nextFullRunAt },
+          });
         })
       );
 
@@ -394,15 +394,15 @@ async function main() {
             },
             now
           );
-          await prisma.mssqlBackupPolicy.update({
-            where: { id: policy.id },
-            data: { nextDifferentialRunAt },
-          });
           await boss.send(
             "mssql-backup-differential",
             { policyId: policy.id, triggeredBy: "schedule" },
             { singletonKey: `mssql-diff-${policy.id}` }
           );
+          await prisma.mssqlBackupPolicy.update({
+            where: { id: policy.id },
+            data: { nextDifferentialRunAt },
+          });
         })
       );
 
@@ -439,15 +439,15 @@ async function main() {
             },
             now
           );
-          await prisma.mssqlBackupPolicy.update({
-            where: { id: policy.id },
-            data: { nextLogRunAt },
-          });
           await boss.send(
             "mssql-backup-log",
             { policyId: policy.id, triggeredBy: "schedule" },
             { singletonKey: `mssql-log-${policy.id}` }
           );
+          await prisma.mssqlBackupPolicy.update({
+            where: { id: policy.id },
+            data: { nextLogRunAt },
+          });
         })
       );
 
@@ -458,6 +458,20 @@ async function main() {
       await processHelheimRetries();
     } catch (error) {
       console.error("[Worker] Scheduler tick error:", safeErrorMessage(error));
+    }
+  }
+
+  async function runSchedulerTickWithGuard(label: string) {
+    if (schedulerTickRunning) {
+      console.warn(`[Worker] Skipping ${label}; previous scheduler tick is still running`);
+      return;
+    }
+
+    schedulerTickRunning = true;
+    try {
+      await withTimeout(schedulerTick(), TICK_TIMEOUT_MS, label);
+    } finally {
+      schedulerTickRunning = false;
     }
   }
 
@@ -541,7 +555,7 @@ async function main() {
 
   // Initial tick (with timeout protection)
   try {
-    await withTimeout(schedulerTick(), TICK_TIMEOUT_MS, "Initial scheduler tick");
+    await runSchedulerTickWithGuard("Initial scheduler tick");
   } catch (err) {
     console.error("[Worker] Initial tick error:", safeErrorMessage(err));
   }
@@ -549,7 +563,7 @@ async function main() {
   // Poll every 60 seconds (with timeout per tick)
   setInterval(async () => {
     try {
-      await withTimeout(schedulerTick(), TICK_TIMEOUT_MS, "Scheduler tick");
+      await runSchedulerTickWithGuard("Scheduler tick");
     } catch (err) {
       console.error("[Worker] Tick error:", safeErrorMessage(err));
     }

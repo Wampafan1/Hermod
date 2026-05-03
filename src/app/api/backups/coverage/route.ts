@@ -5,7 +5,7 @@ import { computeBackupCoverage } from "@/lib/backups/coverage";
 
 export const GET = withAuth(async (_req, session) => {
   const policies = await prisma.postgresBackupPolicy.findMany({
-    where: { userId: session.userId },
+    where: { userId: session.userId, tenantId: session.tenantId },
     include: {
       runs: {
         take: 1,
@@ -29,12 +29,14 @@ export const GET = withAuth(async (_req, session) => {
     prisma.postgresBackupRun.count({
       where: {
         userId: session.userId,
+        tenantId: session.tenantId,
         status: { in: ["SUCCESS", "PARTIAL"] },
       },
     }),
     prisma.postgresBackupRun.aggregate({
       where: {
         userId: session.userId,
+        tenantId: session.tenantId,
         status: { in: ["SUCCESS", "PARTIAL"] },
       },
       _sum: { bytesWritten: true },

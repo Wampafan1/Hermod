@@ -65,13 +65,15 @@ export async function enqueueDeadLetter(
   jobId: string,
   chunkIndex: number,
   rows: Record<string, unknown>[],
-  error: unknown
+  error: unknown,
+  tenantId?: string | null
 ): Promise<string> {
   const errorObj = error instanceof Error ? error : new Error(String(error));
 
   const entry = await prisma.helheimEntry.create({
     data: {
       routeId,
+      tenantId: tenantId ?? null,
       jobId,
       chunkIndex,
       rowCount: rows.length,

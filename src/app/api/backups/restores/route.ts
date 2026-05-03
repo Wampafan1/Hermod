@@ -63,6 +63,7 @@ export const POST = withAuth(async (req, session) => {
   const runningOnTarget = await prisma.postgresRestoreJob.findFirst({
     where: {
       targetConnectionId: parsed.data.targetConnectionId,
+      tenantId: session.tenantId,
       status: PostgresRestoreStatus.RUNNING,
     },
     select: { id: true },

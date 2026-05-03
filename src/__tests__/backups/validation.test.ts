@@ -158,6 +158,28 @@ describe("backup API validation", () => {
     });
   });
 
+  it("scopes PostgreSQL backup source and storage target references to the active tenant", async () => {
+    mockConnectionFindFirst.mockResolvedValue({
+      id: "conn_1",
+      type: "POSTGRES",
+      config: { scope: "DATABASE", database: "prod" },
+    });
+    mockTargetFindFirst.mockResolvedValue({ id: "target_1" });
+
+    const result = await validateBackupPolicyReferences(
+      { sourceConnectionId: "conn_1", storageTargetId: "target_1" },
+      { userId: "user_1", tenantId: "tenant_1" } as any
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(mockConnectionFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "conn_1", userId: "user_1", tenantId: "tenant_1" },
+    }));
+    expect(mockTargetFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "target_1", userId: "user_1", tenantId: "tenant_1" },
+    }));
+  });
+
   it("rejects WAL coverage on database-scoped PostgreSQL source connections", async () => {
     mockConnectionFindFirst.mockResolvedValue({
       id: "conn_1",

@@ -5,7 +5,7 @@ import { computeMssqlBackupCoverage } from "@/lib/backups/mssql/mssql-coverage";
 
 export const GET = withAuth(async (_req, session) => {
   const policies = await prisma.mssqlBackupPolicy.findMany({
-    where: { userId: session.userId },
+    where: { userId: session.userId, tenantId: session.tenantId },
     include: {
       runs: {
         take: 1,
@@ -23,10 +23,10 @@ export const GET = withAuth(async (_req, session) => {
 
   const [artifactCount, byteSummary] = await Promise.all([
     prisma.mssqlBackupRun.count({
-      where: { userId: session.userId, status: "SUCCESS" },
+      where: { userId: session.userId, tenantId: session.tenantId, status: "SUCCESS" },
     }),
     prisma.mssqlBackupRun.aggregate({
-      where: { userId: session.userId, status: "SUCCESS" },
+      where: { userId: session.userId, tenantId: session.tenantId, status: "SUCCESS" },
       _sum: { bytesWritten: true },
     }),
   ]);

@@ -399,3 +399,106 @@ Scope: stabilization-only pass against the highest-priority findings. Changes we
 - P2 nullable tenant columns: requires data inventory, backfill plan, and reviewed migration.
 - P2 route param parsing: requires a `withAuth` route-context signature change across many dynamic routes.
 - P2 plaintext credential fallback: compatibility behavior remains and needs migration/flag planning before removal.
+
+## Fix Pass 2 Results
+
+Fix pass date: 2026-05-03
+
+Scope: continued stabilization pass for the remaining safe P1/P2 findings. This pass avoided schema migrations, broad route-context rewrites, UI restyling, and feature work. The prior "intentionally not fixed" list is superseded for P1-2, P1-3, P1-7, P1-8, P2-3, P2-4, and P2-5.
+
+### Fixed: P1-2 Worker shutdown marks all running logs failed globally
+
+- Files changed: `src/lib/worker-shutdown.ts`, `src/__tests__/worker-shutdown.test.ts`.
+- Summary of fix: Shutdown cleanup no longer updates every `RUNNING` report/route log. It accepts explicit owned `runLogIds`/`routeLogIds`, deduplicates them, and only marks those rows failed. If no owned IDs are provided, cleanup is a no-op.
+- Why minimal: Avoided adding schema/runtime worker ownership in this pass; removed the dangerous global write while preserving a path for owned cleanup.
+- Tests/commands run: `npm run test -- src/__tests__/worker-shutdown.test.ts`.
+- Result: Passed, 4 tests.
+- Remaining risk: Current worker shutdown does not yet pass owned log IDs, so stale owned logs rely on existing startup/list repair paths rather than graceful-shutdown marking.
+
+### Fixed With Remaining Risk: P1-3 Scheduler ticks can overlap and advance schedules before enqueue succeeds
+
+- Files changed: `src/lib/worker.ts`.
+- Summary of fix: Added an in-process scheduler tick guard to skip overlapping ticks in the same worker. Report, Bifrost, PostgreSQL backup, and SQL Server backup scheduler paths now enqueue with pg-boss before advancing `nextRunAt`/`next*RunAt`.
+- Why minimal: Kept the existing scheduler architecture and pg-boss job names/singleton keys; only reordered the risky update/send sequence and added local overlap protection.
+- Tests/commands run: `npm run build`.
+- Result: Passed.
+- Remaining risk: This is not a distributed scheduler lease. Multiple worker processes can still race unless deployment ensures a single scheduler or adds a durable lease. A crash after enqueue but before advancing may cause a retry/duplicate attempt later, but this is safer than silently skipping a due run.
+
+### Fixed: P1-7 Backup APIs mix `userId` and `OR tenantId/userId` scoping
+
+- Files changed: `src/lib/backups/api-helpers.ts`, `src/lib/backups/mssql/api-helpers.ts`, `src/app/api/backups/coverage/route.ts`, `src/app/api/backups/mssql/coverage/route.ts`, `src/app/api/backups/policies/route.ts`, `src/app/api/backups/policies/[id]/route.ts`, `src/app/api/backups/policies/[id]/preflight/route.ts`, `src/app/api/backups/policies/[id]/run-full/route.ts`, `src/app/api/backups/policies/[id]/run-wal/route.ts`, `src/app/api/backups/policies/[id]/runs/route.ts`, `src/app/api/backups/mssql/policies/route.ts`, `src/app/api/backups/mssql/policies/[id]/route.ts`, `src/app/api/backups/mssql/policies/preflight/route.ts`, `src/app/api/backups/mssql/policies/[id]/preflight/route.ts`, `src/app/api/backups/mssql/policies/[id]/run-full/route.ts`, `src/app/api/backups/mssql/policies/[id]/run-differential/route.ts`, `src/app/api/backups/mssql/policies/[id]/run-log/route.ts`, `src/app/api/backups/mssql/policies/[id]/runs/route.ts`, `src/app/api/backups/restore-points/route.ts`, `src/app/api/backups/restores/route.ts`, `src/app/api/backups/storage-targets/route.ts`, `src/app/api/backups/storage-targets/[id]/route.ts`, `src/app/api/backups/storage-targets/[id]/test/route.ts`, `src/__tests__/backups/validation.test.ts`, `src/__tests__/backups/storage-api.test.ts`.
+- Summary of fix: Backup source/target validation, policy/runs/coverage/manual-run/preflight/restore-point/storage-target APIs now require both `userId` and active `tenantId` where those models have tenant scope. Storage target `OR tenantId/userId` lookups were replaced with strict active-tenant ownership.
+- Why minimal: Only tightened existing Prisma `where` clauses and reference checks; no schema changes or destructive backup behavior changes.
+- Tests/commands run: `npm run test -- src/__tests__/backups/validation.test.ts src/__tests__/backups/storage-api.test.ts`.
+- Result: Passed, 13 tests.
+- Remaining risk: Legacy backup rows with `NULL tenantId` may become hidden until a reviewed backfill migration assigns ownership. That migration is still intentionally not done.
+
+### Fixed: P1-8 Query execution and report APIs return raw provider errors and execute user-only scoped connections
+
+- Files changed: `src/app/api/query/execute/route.ts`, `src/app/api/query/estimate/route.ts`, `src/app/api/reports/[id]/run/route.ts`, `src/app/api/reports/[id]/send/route.ts`, `src/__tests__/query-api.test.ts`.
+- Summary of fix: Query execute/estimate and report run/send now scope lookups to active `tenantId`. Provider failures return generic user-facing errors while logging non-secret identifiers and error type server-side.
+- Why minimal: Preserved response shapes (`{ error: string }`) and avoided changing provider execution semantics.
+- Tests/commands run: `npm run test -- src/__tests__/query-api.test.ts`.
+- Result: Passed, 2 tests.
+- Remaining risk: Some connection test/discovery endpoints still return detailed provider errors for debugging. Those should be reviewed separately with a product decision on user-facing diagnostics.
+
+### Fixed: P2-3 Dead-letter entries do not store tenant IDs
+
+- Files changed: `src/lib/bifrost/helheim/dead-letter.ts`, `src/lib/bifrost/engine.ts`, `src/lib/bifrost/jobs/raven-resume.handler.ts`, `src/__tests__/bifrost/helheim-dead-letter.test.ts`.
+- Summary of fix: `enqueueDeadLetter` now accepts and persists the route tenant ID. Engine and Raven resume call sites pass `route.tenantId`.
+- Why minimal: Used the existing nullable `HelheimEntry.tenantId` column; no migration or API shape change.
+- Tests/commands run: `npm run test -- src/__tests__/bifrost/helheim-dead-letter.test.ts src/__tests__/bifrost/helheim.test.ts`.
+- Result: Passed, 12 tests.
+- Remaining risk: Existing Helheim entries still need a data backfill if tenant-level cleanup/stats should include historical rows.
+
+### Fixed With Compatibility Guard: P2-4 Plaintext credential fallback remains accepted
+
+- Files changed: `src/lib/providers/helpers.ts`, `src/__tests__/providers/registry.test.ts`.
+- Summary of fix: Plaintext fallback remains available for non-production/local compatibility and can be explicitly enabled with `HERMOD_ALLOW_PLAINTEXT_CREDENTIALS=true`. In production without that flag, saved credentials that cannot be decrypted now throw instead of silently accepting plaintext. Invalid non-JSON fallback now throws instead of returning empty credentials.
+- Why minimal: Did not change connection create/update encryption or add a migration; only gated the risky fallback path.
+- Tests/commands run: `npm run test -- src/__tests__/providers/registry.test.ts src/__tests__/providers/helpers.test.ts`.
+- Result: Passed, 15 tests.
+- Remaining risk: A production deployment with legacy plaintext credential rows needs a migration/re-encryption plan or a temporary explicit compatibility flag during migration.
+
+### Hardened: P2-5 SQL query parameter fallback uses string interpolation
+
+- Files changed: `src/lib/providers/helpers.ts`, `src/__tests__/providers/helpers.test.ts`.
+- Summary of fix: Fallback interpolation now rejects invalid parameter names before constructing regexes, rejects arrays/objects/undefined and NUL bytes, escapes scalar values consistently, and renders `null` as SQL `NULL`.
+- Why minimal: Hardened the existing fallback without rewriting provider extraction to native parameter APIs.
+- Tests/commands run: `npm run test -- src/__tests__/providers/helpers.test.ts`.
+- Result: Passed, 4 tests.
+- Remaining risk: This is still string interpolation. Provider-native parameterization remains the better long-term fix for Postgres/MSSQL/MySQL extraction.
+
+### Final Validation Pass 2
+
+- Command: `npx prisma validate`
+  - Exit code: 0
+  - Result: `The schema at prisma\schema.prisma is valid`
+- Command: `npx prisma generate`
+  - First exit code: 1
+  - First exact failure: `EPERM: operation not permitted, rename 'C:\Users\JDelg\Hermod\node_modules\.prisma\client\query_engine-windows.dll.node.tmp310320' -> 'C:\Users\JDelg\Hermod\node_modules\.prisma\client\query_engine-windows.dll.node'`
+  - Follow-up: Used the repo-documented Windows workaround and moved `node_modules\.prisma` to `node_modules\.prisma_old_20260502222406`.
+  - Rerun exit code: 0
+  - Result: Prisma Client generated successfully.
+- Command: `npm run test`
+  - Exit code: 0
+  - Result: `Test Files 59 passed (59)`, `Tests 990 passed (990)`, `Duration 5.98s`
+- Command: `npm run build`
+  - Exit code: 0
+  - Result: Next.js 14.2.35 compiled successfully, type validity passed, static generation completed `106/106`.
+- Command: `npm run lint`
+  - Exit code: 1
+  - Result: `next lint` prompted interactively for ESLint setup: `Strict (recommended) / Base / Cancel`.
+- Targeted tests run during this pass:
+  - `npm run test -- src/__tests__/worker-shutdown.test.ts`: passed, 4 tests.
+  - `npm run test -- src/__tests__/backups/validation.test.ts src/__tests__/backups/storage-api.test.ts`: passed, 13 tests.
+  - `npm run test -- src/__tests__/query-api.test.ts`: passed, 2 tests.
+  - `npm run test -- src/__tests__/bifrost/helheim-dead-letter.test.ts src/__tests__/bifrost/helheim.test.ts`: passed, 12 tests.
+  - `npm run test -- src/__tests__/providers/helpers.test.ts`: passed, 4 tests.
+  - `npm run test -- src/__tests__/providers/registry.test.ts src/__tests__/providers/helpers.test.ts`: passed, 15 tests.
+
+### Issues Intentionally Not Fixed In Pass 2
+
+- P2-1 nullable tenant columns: still requires data inventory, tenant backfill, and reviewed migrations before changing nullability or indexes.
+- P2-2 route parameter parsing: many dynamic API handlers still parse `req.url`. A safe fix requires passing App Router route context through `withAuth`/`withRavenAuth` and migrating route families deliberately.
+- P2-6 UI destructive action confirmation tests: not changed because this pass focused on backend stabilization and no e2e/browser test harness was added.

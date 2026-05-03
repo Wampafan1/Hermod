@@ -11,7 +11,7 @@ export const GET = withAuth(async (req, session) => {
   if (!id) return NextResponse.json({ error: "Missing backup policy ID" }, { status: 400 });
 
   const policy = await prisma.postgresBackupPolicy.findFirst({
-    where: { id, userId: session.userId },
+    where: { id, userId: session.userId, tenantId: session.tenantId },
     select: { id: true },
   });
   if (!policy) return NextResponse.json({ error: "Backup policy not found" }, { status: 404 });

@@ -19,7 +19,7 @@ export const POST = withAuth(async (req, session) => {
   const { connectionId, sql } = parsed.data;
 
   const connection = await prisma.connection.findFirst({
-    where: { id: connectionId, userId: session.user.id },
+    where: { id: connectionId, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!connection) {
     return NextResponse.json(
@@ -52,9 +52,11 @@ export const POST = withAuth(async (req, session) => {
       cacheHit: estimate.cacheHit,
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Estimation failed";
-    return NextResponse.json({ error: message }, { status: 422 });
+    console.error("[QueryEstimate] Estimation failed", {
+      connectionId,
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+    return NextResponse.json({ error: "Estimation failed" }, { status: 422 });
   } finally {
     await conn.close();
   }

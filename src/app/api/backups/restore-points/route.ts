@@ -11,7 +11,7 @@ export const GET = withAuth(async (req, session) => {
   }
 
   const policy = await prisma.postgresBackupPolicy.findFirst({
-    where: { id: policyId, userId: session.userId },
+    where: { id: policyId, userId: session.userId, tenantId: session.tenantId },
     select: {
       id: true,
       name: true,

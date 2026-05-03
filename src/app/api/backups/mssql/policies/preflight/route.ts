@@ -16,7 +16,7 @@ export const POST = withAuth(async (req, session) => {
   const checks: Array<{ name: string; status: "passed" | "failed" | "warning"; message?: string }> = [];
 
   const connection = await prisma.connection.findFirst({
-    where: { id: data.sourceConnectionId, userId: session.userId },
+    where: { id: data.sourceConnectionId, userId: session.userId, tenantId: session.tenantId },
     select: { id: true, type: true, config: true, credentials: true },
   });
   if (!connection || connection.type !== "MSSQL") {

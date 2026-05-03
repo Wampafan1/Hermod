@@ -11,7 +11,10 @@ export const GET = withAuth(async (req, session) => {
   const id = extractId(req.url);
   if (!id) return NextResponse.json({ error: "Missing SQL Server backup policy ID" }, { status: 400 });
 
-  const policy = await prisma.mssqlBackupPolicy.findFirst({ where: { id, userId: session.userId }, select: { id: true } });
+  const policy = await prisma.mssqlBackupPolicy.findFirst({
+    where: { id, userId: session.userId, tenantId: session.tenantId },
+    select: { id: true },
+  });
   if (!policy) return NextResponse.json({ error: "SQL Server backup policy not found" }, { status: 404 });
 
   await prisma.mssqlBackupRun.updateMany({

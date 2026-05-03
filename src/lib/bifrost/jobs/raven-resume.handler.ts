@@ -162,7 +162,7 @@ export async function handleRavenResume(job: {
             `[Bifrost/Raven] Load batch #${batchIndex} failed:`,
             err instanceof Error ? err.message : err
           );
-          await enqueueDeadLetter(route.id, routeLogId, batchIndex, batch, err);
+          await enqueueDeadLetter(route.id, routeLogId, batchIndex, batch, err, route.tenantId);
           errorCount += batch.length;
         }
       }

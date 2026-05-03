@@ -45,7 +45,7 @@ export const GET = withAuth(async (req, session) => {
   if (!id) return NextResponse.json({ error: "Missing backup policy ID" }, { status: 400 });
 
   const policy = await prisma.postgresBackupPolicy.findFirst({
-    where: { id, userId: session.userId },
+    where: { id, userId: session.userId, tenantId: session.tenantId },
     include: policyInclude,
   });
   if (!policy) return NextResponse.json({ error: "Backup policy not found" }, { status: 404 });
@@ -84,7 +84,7 @@ export const PUT = withAuth(async (req, session) => {
   if (!id) return NextResponse.json({ error: "Missing backup policy ID" }, { status: 400 });
 
   const existing = await prisma.postgresBackupPolicy.findFirst({
-    where: { id, userId: session.userId },
+    where: { id, userId: session.userId, tenantId: session.tenantId },
   });
   if (!existing) return NextResponse.json({ error: "Backup policy not found" }, { status: 404 });
 
@@ -110,7 +110,7 @@ export const PUT = withAuth(async (req, session) => {
   };
 
   const source = await prisma.connection.findFirst({
-    where: { id: merged.sourceConnectionId, userId: session.userId },
+    where: { id: merged.sourceConnectionId, userId: session.userId, tenantId: session.tenantId },
     select: { config: true },
   });
   if (!source) {
@@ -206,7 +206,7 @@ export const DELETE = withAuth(async (req, session) => {
   if (!id) return NextResponse.json({ error: "Missing backup policy ID" }, { status: 400 });
 
   const existing = await prisma.postgresBackupPolicy.findFirst({
-    where: { id, userId: session.userId },
+    where: { id, userId: session.userId, tenantId: session.tenantId },
     select: { id: true },
   });
   if (!existing) return NextResponse.json({ error: "Backup policy not found" }, { status: 404 });

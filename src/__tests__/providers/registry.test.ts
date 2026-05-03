@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ─── Mock Variables (hoisted) ───────────────────────────
 const mockDecrypt = vi.hoisted(() => vi.fn());
@@ -63,6 +63,10 @@ describe("toConnectionLike", () => {
     mockDecrypt.mockReset();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("decrypts credentials JSON and parses config", () => {
     // decrypt returns the plaintext JSON
     mockDecrypt.mockReturnValue('{"password":"secret"}');
@@ -113,17 +117,29 @@ describe("toConnectionLike", () => {
     expect(result.credentials.password).toBe("plain");
   });
 
-  it("returns empty credentials if both decrypt and JSON.parse fail", () => {
+  it("throws if both decrypt and JSON.parse fail", () => {
     mockDecrypt.mockImplementation(() => {
       throw new Error("decrypt failed");
     });
 
-    const result = toConnectionLike({
+    expect(() => toConnectionLike({
       type: "POSTGRES",
       config: {},
       credentials: "not-json-not-encrypted",
+    })).toThrow("neither encrypted nor valid JSON");
+  });
+
+  it("rejects plaintext credential fallback in production unless explicitly enabled", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    mockDecrypt.mockImplementation(() => {
+      throw new Error("decrypt failed");
     });
-    expect(result.credentials).toEqual({});
+
+    expect(() => toConnectionLike({
+      type: "POSTGRES",
+      config: {},
+      credentials: '{"password":"plain"}',
+    })).toThrow("could not be decrypted");
   });
 
   it("preserves the connection type as-is", () => {
