@@ -196,8 +196,8 @@ export function EntryList({ entries, selectedId, onSelect, onRefresh, refreshKey
                     onClick={() => onSelect(entry.id)}
                     className={`border-b border-border/30 cursor-pointer transition-colors ${
                       isSelected
-                        ? "bg-gold-dim border-l-2 border-l-gold"
-                        : "hover:bg-scroll/50 border-l-2 border-l-transparent"
+                        ? "bg-gold-dim shadow-[inset_2px_0_0_var(--gold-leaf)]"
+                        : "hover:bg-scroll/50"
                     }`}
                   >
                     <td className="px-3 py-2.5">

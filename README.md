@@ -18,6 +18,10 @@
 - **Dark theme** — Consistent dark UI throughout
 - **Docker ready** — Single `docker-compose up` to run everything
 
+## Backups
+
+Hermod Niflheim can schedule PostgreSQL backups, SQL Server full/differential/log backups, and guide administrators through AWS S3 or Google Cloud Storage setup. See [docs/backups.md](docs/backups.md), [docs/mssql-backups.md](docs/mssql-backups.md), and [docs/backup-storage-setup.md](docs/backup-storage-setup.md) for engine behavior, storage target setup, permissions, and credential safety notes.
+
 ## Quick Start (Docker)
 
 ```bash

@@ -33,42 +33,78 @@ interface MssqlProviderConnection extends ProviderConnection {
   pool: MssqlPool;
 }
 
+interface MssqlConfig {
+  host: string;
+  port: number;
+  database?: string;
+  maintenanceDatabase?: string;
+  username: string;
+  scope?: "DATABASE" | "SERVER";
+  encrypt?: boolean;
+  trustServerCertificate?: boolean;
+  ssl?: boolean;
+  requestTimeoutMs?: number;
+}
+
+export interface MssqlDatabaseInfo {
+  name: string;
+  databaseId?: number;
+  state: string;
+  recoveryModel: string;
+  createDate?: Date | string;
+  sizeBytes?: string;
+  canConnect?: boolean;
+}
+
+function targetDatabase(cfg: MssqlConfig): string {
+  return cfg.scope === "SERVER"
+    ? cfg.maintenanceDatabase || "master"
+    : cfg.database || "master";
+}
+
+function poolConfig(connection: ConnectionLike, database?: string) {
+  const cfg = connection.config as unknown as MssqlConfig;
+  const creds = connection.credentials as { password: string };
+  const db = database || targetDatabase(cfg);
+  return {
+    cfg,
+    creds,
+    database: db,
+    options: {
+      server: cfg.host,
+      port: cfg.port,
+      database: db,
+      user: cfg.username,
+      password: creds.password,
+      options: {
+        encrypt: cfg.encrypt ?? cfg.ssl ?? false,
+        trustServerCertificate: cfg.trustServerCertificate ?? true,
+      },
+      connectionTimeout: CONNECTION_TIMEOUT,
+      requestTimeout: cfg.requestTimeoutMs ?? QUERY_TIMEOUT,
+    },
+  };
+}
+
 export class MssqlProvider implements ConnectionProvider {
   readonly type = "MSSQL";
 
   async connect(connection: ConnectionLike): Promise<MssqlProviderConnection> {
-    const cfg = connection.config as {
-      host: string;
-      port: number;
-      database: string;
-      username: string;
-      encrypt?: boolean;
-      trustServerCertificate?: boolean;
-    };
-    const creds = connection.credentials as { password: string };
+    const { cfg, creds, database, options } = poolConfig(connection);
 
     const key = PoolManager.buildKey({
       host: cfg.host,
       port: cfg.port,
-      database: cfg.database,
+      database,
       user: cfg.username,
       password: creds.password,
+      requestTimeout: cfg.requestTimeoutMs ?? QUERY_TIMEOUT,
     });
 
     const pool = await poolManager.getOrCreate(key, async () => {
       const mssql = await import("mssql");
       return (await mssql.default.connect({
-        server: cfg.host,
-        port: cfg.port,
-        database: cfg.database,
-        user: cfg.username,
-        password: creds.password,
-        options: {
-          encrypt: cfg.encrypt ?? false,
-          trustServerCertificate: cfg.trustServerCertificate ?? true,
-        },
-        connectionTimeout: CONNECTION_TIMEOUT,
-        requestTimeout: QUERY_TIMEOUT,
+        ...options,
         pool: {
           max: POOL_MAX_CONNECTIONS,
           min: 0,
@@ -90,29 +126,11 @@ export class MssqlProvider implements ConnectionProvider {
     // Bypass pool for test — avoid caching bad credentials
     let pool: MssqlPool | null = null;
     try {
-      const cfg = connection.config as {
-        host: string;
-        port: number;
-        database: string;
-        username: string;
-        encrypt?: boolean;
-        trustServerCertificate?: boolean;
-      };
-      const creds = connection.credentials as { password: string };
+      const { options } = poolConfig(connection);
 
       const mssql = await import("mssql");
       pool = (await mssql.default.connect({
-        server: cfg.host,
-        port: cfg.port,
-        database: cfg.database,
-        user: cfg.username,
-        password: creds.password,
-        options: {
-          encrypt: cfg.encrypt ?? false,
-          trustServerCertificate: cfg.trustServerCertificate ?? true,
-        },
-        connectionTimeout: CONNECTION_TIMEOUT,
-        requestTimeout: QUERY_TIMEOUT,
+        ...options,
       })) as unknown as MssqlPool;
       await pool.request().query("SELECT 1");
       return true;
@@ -121,6 +139,50 @@ export class MssqlProvider implements ConnectionProvider {
     } finally {
       if (pool) await pool.close();
     }
+  }
+
+  async listDatabases(connection: ConnectionLike): Promise<MssqlDatabaseInfo[]> {
+    const conn = await this.connect(connection);
+    try {
+      const result = await conn.pool.request().query(`
+        SELECT
+          d.name,
+          d.database_id AS databaseId,
+          d.state_desc AS state,
+          d.recovery_model_desc AS recoveryModel,
+          d.create_date AS createDate,
+          CAST(COALESCE(SUM(mf.size), 0) * 8 * 1024 AS BIGINT) AS sizeBytes
+        FROM sys.databases d
+        LEFT JOIN sys.master_files mf ON mf.database_id = d.database_id
+        WHERE d.database_id > 4
+          AND d.state_desc = 'ONLINE'
+        GROUP BY d.name, d.database_id, d.state_desc, d.recovery_model_desc, d.create_date
+        ORDER BY d.name;
+      `) as { recordset: Array<Record<string, unknown>> };
+
+      return result.recordset.map((row) => ({
+        name: String(row.name),
+        databaseId: row.databaseId == null ? undefined : Number(row.databaseId),
+        state: String(row.state ?? "UNKNOWN"),
+        recoveryModel: String(row.recoveryModel ?? "UNKNOWN"),
+        createDate: row.createDate instanceof Date ? row.createDate : row.createDate ? String(row.createDate) : undefined,
+        sizeBytes: row.sizeBytes == null ? undefined : String(row.sizeBytes),
+        canConnect: true,
+      }));
+    } finally {
+      await conn.close();
+    }
+  }
+
+  async connectToDatabase(connection: ConnectionLike, databaseName: string): Promise<MssqlProviderConnection> {
+    return this.connect({
+      ...connection,
+      config: {
+        ...(connection.config as Record<string, unknown>),
+        scope: "DATABASE",
+        database: databaseName,
+      },
+    });
   }
 
   async query(conn: ProviderConnection, sql: string): Promise<QueryResult> {

@@ -6,6 +6,7 @@
  */
 
 import { createHash } from "crypto";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import type { ForgeStep } from "./types";
 import type {
@@ -169,7 +170,7 @@ export async function createBlueprintVersion(
       data: {
         blueprintId: input.blueprintId,
         version: nextVersion,
-        steps: stepsWithIds as unknown as Record<string, unknown>[],
+        steps: stepsWithIds as unknown as Prisma.InputJsonValue,
         stepsHash,
         source: input.source,
         beforeFileHash: input.beforeFileHash,
@@ -178,7 +179,9 @@ export async function createBlueprintVersion(
         aiConfidence: input.aiConfidence,
         changeReason:
           input.changeReason ?? autoGenerateChangeReason(input.source, changeSummary),
-        changeSummary: changeSummary as unknown as Record<string, unknown>,
+        changeSummary: changeSummary
+          ? (changeSummary as unknown as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
         createdBy: input.userId,
       },
     });

@@ -35,6 +35,31 @@
   --border-mid: #C4B48A;        /* stronger border — deeper parchment */
   --burnt: #D4C49E;             /* alias for decorative use */
 
+  /* Marketing / landing parchment surfaces — lighter, cleaner */
+  --lp-surface: #fbf9f6;
+  --lp-surface-container-low: #f5f3f0;
+  --lp-surface-container: #efeeeb;
+  --lp-surface-container-high: #eae8e5;
+  --lp-surface-dim: #dbdad7;
+  --lp-primary: #76570a;
+  --on-surface: #1b1c1a;
+  --on-surface-variant: #4e4638;
+  --outline: #807666;
+  --outline-variant: #d1c5b3;
+  --stone-950: #1b1c1a;
+  --gold-37: #D4AF37;
+
+  /* Realm accents — one per realm */
+  --realm-asgard: #b8922f;
+  --realm-vanaheim: #4a9fc4;
+  --realm-midgard: #4a9e4e;
+  --realm-alfheim: #9a6ab5;
+  --realm-jotunheim: #8a7060;
+  --realm-nidavellir: #c48a2e;
+  --realm-muspelheim: #c44d1a;
+  --realm-niflheim: #4a9a90;
+  --realm-helheim: #5a6a72;
+
   /* Status — natural Viking palette */
   --ember: #B8450E;             /* warm ember for alerts */
   --frost: #2D5F7E;             /* fjord blue for info */
@@ -344,11 +369,38 @@
 
   /* ── Cards — Vellum surfaces ── */
   .card-norse {
+    position: relative;
     background: var(--deep);
     border: 1px solid var(--border);
-    border-left: 3px solid var(--gold-dim);
     padding: 1.5rem;
-    transition: background 0.3s, border-color 0.3s;
+    transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+  }
+  /* Corner mark — a small gold seal in lieu of the old left rail */
+  .card-norse::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 10px;
+    height: 10px;
+    background: linear-gradient(135deg, var(--gold-leaf) 0%, var(--gold) 50%, transparent 50%);
+    opacity: 0.55;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .card-norse:hover::before { opacity: 1; }
+  /* Semantic seal variants — status wax seal in top-left corner */
+  .card-norse.is-error::before {
+    background: linear-gradient(135deg, var(--error) 0%, #5c1515 50%, transparent 50%);
+    opacity: 1;
+  }
+  .card-norse.is-warning::before {
+    background: linear-gradient(135deg, var(--warning) 0%, #7a5908 50%, transparent 50%);
+    opacity: 1;
+  }
+  .card-norse.is-success::before {
+    background: linear-gradient(135deg, var(--success) 0%, #1e4829 50%, transparent 50%);
+    opacity: 1;
   }
   .card-norse:hover {
     background: var(--scroll);
@@ -480,6 +532,27 @@
     height: 1px;
     margin-top: 0.5rem;
     opacity: 0.2;
+  }
+
+  /* ── Eyebrow — gold tracking label above a headline ── */
+  .eyebrow {
+    font-family: var(--font-inconsolata), 'Inconsolata', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: var(--lp-primary);
+  }
+
+  /* ── Editorial display — broadsheet-scale small-caps serif ── */
+  .display-editorial {
+    font-family: var(--font-eb-garamond), 'EB Garamond', serif;
+    font-weight: 500;
+    font-size: clamp(40px, 6vw, 88px);
+    line-height: 1.02;
+    letter-spacing: -0.01em;
+    font-variant: small-caps;
+    text-wrap: balance;
   }
 }
 

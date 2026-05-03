@@ -3,7 +3,7 @@
  * Run with: npx tsx scripts/migrate-add-stepid-to-blueprints.ts
  */
 
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { createHash } from "crypto";
 
 const prisma = new PrismaClient();
@@ -88,7 +88,7 @@ async function backfillStepIds() {
       await prisma.forgeBlueprintVersion.update({
         where: { id: version.id },
         data: {
-          steps: patchedSteps as unknown as Record<string, unknown>[],
+          steps: patchedSteps as unknown as Prisma.InputJsonValue,
           stepsHash,
         },
       });

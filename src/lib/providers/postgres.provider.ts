@@ -6,6 +6,7 @@
  */
 
 import { lookup } from "dns/promises";
+import type { Pool, PoolClient } from "pg";
 import type { ConnectionProvider } from "./provider";
 import type {
   ConnectionLike,
@@ -16,10 +17,29 @@ import type { SourceConfig, DestConfig, LoadResult, SchemaDefinition } from "@/l
 import { CONNECTION_TIMEOUT, QUERY_TIMEOUT } from "./provider";
 import { PoolManager, POOL_MAX_CONNECTIONS } from "./pool-manager";
 
-type PgPool = InstanceType<typeof import("pg").Pool>;
+type PgPool = Pool;
 
 interface PgProviderConnection extends ProviderConnection {
-  client: InstanceType<typeof import("pg").PoolClient>;
+  client: PoolClient;
+}
+
+export type PostgresConnectionScope = "DATABASE" | "SERVER";
+
+export interface PostgresConfig {
+  host: string;
+  port?: number;
+  database?: string;
+  maintenanceDatabase?: string;
+  scope?: PostgresConnectionScope;
+  username: string;
+  ssl?: boolean;
+}
+
+export interface PostgresDatabaseInfo {
+  name: string;
+  owner?: string;
+  sizeBytes?: string;
+  canConnect?: boolean;
 }
 
 // Shared pool manager — lives for the process lifetime
@@ -50,19 +70,14 @@ export class PostgresProvider implements ConnectionProvider {
   readonly type = "POSTGRES";
 
   async connect(connection: ConnectionLike): Promise<PgProviderConnection> {
-    const cfg = connection.config as {
-      host: string;
-      port: number;
-      database: string;
-      username: string;
-      ssl?: boolean;
-    };
+    const cfg = connection.config as unknown as PostgresConfig;
     const creds = connection.credentials as { password: string };
+    const database = effectiveDatabase(cfg);
 
     const key = PoolManager.buildKey({
       host: cfg.host,
-      port: cfg.port,
-      database: cfg.database,
+      port: cfg.port ?? 5432,
+      database,
       user: cfg.username,
       password: creds.password,
     });
@@ -72,8 +87,8 @@ export class PostgresProvider implements ConnectionProvider {
       const { default: pg } = await import("pg");
       return new pg.Pool({
         host: resolvedHost,
-        port: cfg.port,
-        database: cfg.database,
+        port: cfg.port ?? 5432,
+        database,
         user: cfg.username,
         password: creds.password,
         ssl: cfg.ssl !== false ? { rejectUnauthorized: false } : undefined,
@@ -99,21 +114,16 @@ export class PostgresProvider implements ConnectionProvider {
     // Test connections bypass the pool — use a direct client to avoid
     // caching pools with potentially bad credentials.
     try {
-      const cfg = connection.config as {
-        host: string;
-        port: number;
-        database: string;
-        username: string;
-        ssl?: boolean;
-      };
+      const cfg = connection.config as unknown as PostgresConfig;
       const creds = connection.credentials as { password: string };
+      const database = effectiveDatabase(cfg);
 
       const resolvedHost = await resolveHost(cfg.host);
       const { default: pg } = await import("pg");
       const client = new pg.Client({
         host: resolvedHost,
-        port: cfg.port,
-        database: cfg.database,
+        port: cfg.port ?? 5432,
+        database,
         user: cfg.username,
         password: creds.password,
         ssl: cfg.ssl !== false ? { rejectUnauthorized: false } : undefined,
@@ -131,6 +141,46 @@ export class PostgresProvider implements ConnectionProvider {
       console.error("[PG testConnection]", err instanceof Error ? err.message : err);
       return false;
     }
+  }
+
+  async listDatabases(connection: ConnectionLike): Promise<PostgresDatabaseInfo[]> {
+    const conn = await this.connect(connection);
+    try {
+      const result = await (conn as PgProviderConnection).client.query(
+        `SELECT d.datname AS name,
+                r.rolname AS owner,
+                pg_database_size(d.datname)::text AS "sizeBytes",
+                has_database_privilege(d.datname, 'CONNECT') AS "canConnect"
+         FROM pg_database d
+         LEFT JOIN pg_roles r ON r.oid = d.datdba
+         WHERE d.datallowconn = true
+           AND d.datistemplate = false
+         ORDER BY d.datname`
+      );
+      return result.rows.map((row: Record<string, unknown>) => ({
+        name: String(row.name),
+        owner: typeof row.owner === "string" ? row.owner : undefined,
+        sizeBytes: typeof row.sizeBytes === "string" ? row.sizeBytes : undefined,
+        canConnect: typeof row.canConnect === "boolean" ? row.canConnect : undefined,
+      }));
+    } catch {
+      const result = await (conn as PgProviderConnection).client.query(
+        `SELECT datname AS name
+         FROM pg_database
+         WHERE datallowconn = true
+           AND datistemplate = false
+         ORDER BY datname`
+      );
+      return result.rows.map((row: Record<string, unknown>) => ({
+        name: String(row.name),
+      }));
+    } finally {
+      await conn.close();
+    }
+  }
+
+  connectToDatabase(connection: ConnectionLike, databaseName: string): Promise<PgProviderConnection> {
+    return this.connect(connectionForDatabase(connection, databaseName));
   }
 
   async query(conn: ProviderConnection, sql: string): Promise<QueryResult> {
@@ -261,6 +311,24 @@ export class PostgresProvider implements ConnectionProvider {
 }
 
 // ─── Helpers ──────────────────────────────────────────
+
+export function effectiveDatabase(config: PostgresConfig): string {
+  if (config.scope === "SERVER") {
+    return config.maintenanceDatabase || "postgres";
+  }
+  return config.database || "postgres";
+}
+
+export function connectionForDatabase(connection: ConnectionLike, databaseName: string): ConnectionLike {
+  return {
+    ...connection,
+    config: {
+      ...connection.config,
+      scope: "DATABASE",
+      database: databaseName,
+    },
+  };
+}
 
 function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;

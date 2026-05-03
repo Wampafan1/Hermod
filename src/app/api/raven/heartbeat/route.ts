@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { withRavenAuth } from "@/lib/raven/auth";
@@ -72,9 +73,9 @@ export const POST = withRavenAuth(async (req, ctx) => {
     data: {
       lastHeartbeatAt: new Date(),
       status: "active",
-      metadata: heartbeatMeta as Record<string, unknown>,
+      metadata: heartbeatMeta as Prisma.InputJsonValue,
       ...(connections && {
-        connections: connections as unknown as Record<string, unknown>[],
+        connections: connections as unknown as Prisma.InputJsonValue,
       }),
       ...(version && { version }),
       ...(hostname && { hostname }),

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { analyzeFile, FileAnalysisError } from "@/lib/duckdb/file-analyzer";
@@ -69,7 +70,7 @@ export const POST = withAuth(async (req, ctx) => {
   }
 
   // Schema validation
-  const savedColumns = gate.savedSchema as SavedColumn[];
+  const savedColumns = gate.savedSchema as unknown as SavedColumn[];
   const { hasDrift, diff } = computeSchemaDiff(savedColumns, analysis.columns);
 
   // Save temp file (needed for both validation confirmation and drift resolution)
@@ -86,7 +87,7 @@ export const POST = withAuth(async (req, ctx) => {
         fileMimeType: file.type || null,
         status: "SCHEMA_DRIFT",
         rowCount: analysis.rowCount,
-        schemaDiff: diff,
+        schemaDiff: diff as unknown as Prisma.InputJsonValue,
         tempFileId,
       },
     });

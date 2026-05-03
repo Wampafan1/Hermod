@@ -190,6 +190,7 @@ export const POST = withAuth(async (req, ctx) => {
       }
       const credentials = connection.credentials ? JSON.parse(decrypt(connection.credentials)) : {};
       const providerConn = await provider.connect({
+        type: connection.type,
         config: connection.config as Record<string, unknown>,
         credentials,
       });

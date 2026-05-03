@@ -245,7 +245,7 @@ export function WizardDestination({
                   onClick={() => handleSelectConnection(conn.id)}
                   className={`card-norse w-full text-left flex items-center gap-3 transition-colors cursor-pointer ${
                     isSelected
-                      ? "border-l-2 border-l-gold bg-gold/[0.04]"
+                      ? "bg-gold/[0.06] border-gold/50 shadow-[0_0_0_1px_var(--gold-dim)]"
                       : ""
                   }`}
                 >

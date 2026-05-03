@@ -203,7 +203,7 @@ describe("BigQueryProvider", () => {
       const conn = await provider.connect(bqConnection);
       await provider.query!(conn, "SELECT 1");
       expect(mockQuery).toHaveBeenCalledWith(
-        expect.objectContaining({ jobTimeoutMs: "120000" })
+        expect.objectContaining({ jobTimeoutMs: 120000 })
       );
     });
   });

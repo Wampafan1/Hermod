@@ -1,10 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
+import { RuneH } from "@/components/rune-h";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-void" />}>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
+function LoginContent() {
   const [signingIn, setSigningIn] = useState<"google" | "azure-ad" | null>(null);
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
@@ -21,24 +30,33 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-void flex flex-col items-center justify-center px-4">
-      {/* Logo */}
+      {/* Logo — Rune + ERMOD */}
       <div
-        className="animate-fade-up"
+        className="animate-fade-up flex items-center"
         style={{
-          fontFamily: "var(--font-cinzel), 'Cinzel', serif",
-          fontSize: "clamp(48px, 10vw, 80px)",
-          fontWeight: 900,
-          lineHeight: 1,
-          letterSpacing: "0.06em",
-          background:
-            "linear-gradient(180deg, var(--gold-bright) 0%, var(--gold) 50%, #7a5520 100%)",
-          WebkitBackgroundClip: "text",
-          WebkitTextFillColor: "transparent",
-          backgroundClip: "text",
+          gap: "0.4rem",
+          color: "var(--gold-leaf)",
           filter: "drop-shadow(0 0 40px rgba(201,147,58,0.25))",
         }}
       >
-        HERMOD
+        <RuneH size={72} />
+        <span
+          style={{
+            fontFamily: "var(--font-cinzel), 'Cinzel', serif",
+            fontSize: "clamp(42px, 9vw, 68px)",
+            fontWeight: 900,
+            lineHeight: 1,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            background:
+              "linear-gradient(180deg, var(--gold-bright) 0%, var(--gold) 50%, #7a5520 100%)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+          }}
+        >
+          ermod
+        </span>
       </div>
 
       {/* Subtitle */}

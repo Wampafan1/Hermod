@@ -72,7 +72,7 @@ describe("REPORT_ROW_LIMIT", () => {
 // ─── Task 35: PREVIEW_ROW_LIMIT ─────────────────────
 describe("PREVIEW_ROW_LIMIT", () => {
   it("exports a positive integer constant", async () => {
-    const { PREVIEW_ROW_LIMIT } = await import("@/app/api/query/execute/route");
+    const { PREVIEW_ROW_LIMIT } = await import("@/lib/query-limits");
     expect(PREVIEW_ROW_LIMIT).toBe(10_000);
     expect(Number.isInteger(PREVIEW_ROW_LIMIT)).toBe(true);
   });

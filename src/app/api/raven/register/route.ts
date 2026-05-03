@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { withRavenAuth } from "@/lib/raven/auth";
@@ -70,7 +71,7 @@ export const POST = withRavenAuth(async (req, ctx) => {
         version,
         platform,
         hostname,
-        connections: connections as unknown as Record<string, unknown>[],
+        connections: connections as unknown as Prisma.InputJsonValue,
         lastHeartbeatAt: new Date(),
       },
     });
@@ -93,7 +94,7 @@ export const POST = withRavenAuth(async (req, ctx) => {
       version,
       platform,
       hostname,
-      connections: connections as unknown as Record<string, unknown>[],
+      connections: connections as unknown as Prisma.InputJsonValue,
       lastHeartbeatAt: new Date(),
     },
   });

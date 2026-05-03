@@ -88,7 +88,7 @@ export class ExcelProvider implements ConnectionProvider {
 
       for (let c = 0; c < headers.length; c++) {
         const cell = row.getCell(c + 1);
-        let val = cell.value;
+        let val: unknown = cell.value;
         if (val instanceof Date) {
           val = val.toISOString();
         } else if (typeof val === "object" && val !== null && "result" in val) {

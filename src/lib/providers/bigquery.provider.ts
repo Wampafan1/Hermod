@@ -108,12 +108,13 @@ export class BigQueryProvider implements ConnectionProvider {
 
   async query(conn: ProviderConnection, sql: string): Promise<QueryResult> {
     const bqConn = conn as BigQueryProviderConnection;
-    const [rows] = await bqConn.client.query({
+    const queryResponse = await bqConn.client.query({
       query: sql,
       useLegacySql: false,
       maximumBytesBilled: DEFAULT_MAX_BYTES_BILLED,
-      jobTimeoutMs: String(QUERY_TIMEOUT),
-    });
+      jobTimeoutMs: QUERY_TIMEOUT,
+    }) as unknown as [Record<string, unknown>[]];
+    const [rows] = queryResponse;
     const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
     return { columns, rows };
   }
@@ -123,11 +124,12 @@ export class BigQueryProvider implements ConnectionProvider {
     sql: string
   ): Promise<{ totalBytesProcessed: number; cacheHit: boolean }> {
     const bqConn = conn as BigQueryProviderConnection;
-    const [, , response] = await bqConn.client.query({
+    const dryRunResponse = await bqConn.client.query({
       query: sql,
       useLegacySql: false,
       dryRun: true,
-    });
+    }) as unknown as [unknown, unknown, unknown];
+    const [, , response] = dryRunResponse;
 
     const stats = (response as Record<string, unknown>)?.statistics as
       | { totalBytesProcessed?: string; query?: { cacheHit?: boolean } }
@@ -150,7 +152,7 @@ export class BigQueryProvider implements ConnectionProvider {
       query: config.query,
       useLegacySql: false,
       maximumBytesBilled: DEFAULT_MAX_BYTES_BILLED,
-      jobTimeoutMs: String(EXTRACT_JOB_TIMEOUT_MS),
+      jobTimeoutMs: EXTRACT_JOB_TIMEOUT_MS,
     };
 
     // Use BigQuery's native parameterized query support for @param placeholders

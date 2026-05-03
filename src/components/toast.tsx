@@ -31,16 +31,10 @@ const RUNE_ICONS: Record<ToastType, string> = {
   info: "ᛁ",
 };
 
-const TOAST_STYLES: Record<ToastType, string> = {
-  success: "border-l-2 border-l-success",
-  error: "border-l-2 border-l-error",
-  info: "border-l-2 border-l-frost",
-};
-
-const RUNE_COLORS: Record<ToastType, string> = {
-  success: "text-success",
-  error: "text-error",
-  info: "text-frost",
+const SEAL_STYLES: Record<ToastType, { bg: string; ring: string }> = {
+  success: { bg: "var(--success)", ring: "rgba(45,107,63,0.35)" },
+  error: { bg: "var(--error)", ring: "rgba(139,32,32,0.35)" },
+  info: { bg: "var(--frost)", ring: "rgba(45,95,126,0.35)" },
 };
 
 let nextId = 0;
@@ -76,9 +70,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`flex items-center gap-3 px-4 py-3 bg-surface-raised border border-border-mid text-sm animate-toast-in ${TOAST_STYLES[toast.type]}`}
+            className="flex items-center gap-3 px-4 py-3 bg-surface-raised border border-border-mid text-sm animate-toast-in shadow-[0_2px_8px_rgba(45,42,36,0.08)]"
           >
-            <span className={`text-base ${RUNE_COLORS[toast.type]}`}>
+            <span
+              className="flex items-center justify-center font-cinzel text-[13px] text-[color:var(--void)] select-none"
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 9999,
+                background: SEAL_STYLES[toast.type].bg,
+                boxShadow: `inset 0 1px 0 rgba(255,255,255,0.25), 0 0 0 2px ${SEAL_STYLES[toast.type].ring}`,
+              }}
+              aria-hidden
+            >
               {RUNE_ICONS[toast.type]}
             </span>
             <span className="text-text flex-1">{toast.message}</span>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { RuneH } from "@/components/rune-h";
 
 type InviteState =
   | { status: "loading" }
@@ -49,21 +50,31 @@ export default function InviteAcceptPage() {
   return (
     <div className="min-h-screen bg-void flex flex-col items-center justify-center px-4">
       <div
+        className="flex items-center"
         style={{
-          fontFamily: "var(--font-cinzel), 'Cinzel', serif",
-          fontSize: "clamp(36px, 8vw, 56px)",
-          fontWeight: 900,
-          lineHeight: 1,
-          letterSpacing: "0.06em",
-          background:
-            "linear-gradient(180deg, var(--gold-bright) 0%, var(--gold) 50%, #7a5520 100%)",
-          WebkitBackgroundClip: "text",
-          WebkitTextFillColor: "transparent",
-          backgroundClip: "text",
+          gap: "0.35rem",
+          color: "var(--gold-leaf)",
           marginBottom: "2rem",
         }}
       >
-        HERMOD
+        <RuneH size={50} />
+        <span
+          style={{
+            fontFamily: "var(--font-cinzel), 'Cinzel', serif",
+            fontSize: "clamp(30px, 7vw, 48px)",
+            fontWeight: 900,
+            lineHeight: 1,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            background:
+              "linear-gradient(180deg, var(--gold-bright) 0%, var(--gold) 50%, #7a5520 100%)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+          }}
+        >
+          ermod
+        </span>
       </div>
 
       <div

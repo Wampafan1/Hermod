@@ -45,19 +45,20 @@ export const PUT = withAuth(async (req) => {
   }
 
   const data = parsed.data;
+  const { authConfig, pagination, rateLimiting, ...scalarData } = data;
 
   const connector = await prisma.apiCatalogConnector.update({
     where: { slug },
     data: {
-      ...data,
-      ...(data.authConfig !== undefined && {
-        authConfig: data.authConfig as Prisma.InputJsonValue,
+      ...scalarData,
+      ...(authConfig !== undefined && {
+        authConfig: authConfig as Prisma.InputJsonValue,
       }),
-      ...(data.pagination !== undefined && {
-        pagination: data.pagination as Prisma.InputJsonValue,
+      ...(pagination !== undefined && {
+        pagination: pagination as Prisma.InputJsonValue,
       }),
-      ...(data.rateLimiting !== undefined && {
-        rateLimiting: data.rateLimiting as Prisma.InputJsonValue | undefined,
+      ...(rateLimiting !== undefined && {
+        rateLimiting: rateLimiting as Prisma.InputJsonValue | undefined,
       }),
     },
   });

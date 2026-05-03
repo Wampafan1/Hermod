@@ -16,7 +16,10 @@ export const POST = withAuth(async (req) => {
   }
 
   try {
-    const results = await probeEndpoints(parsed.data);
+    const results = await probeEndpoints({
+      ...parsed.data,
+      endpoints: parsed.data.endpoints ?? [],
+    });
     return NextResponse.json({ results });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to probe endpoints";

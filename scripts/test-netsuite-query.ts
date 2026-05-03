@@ -19,6 +19,10 @@ async function main() {
     include: { source: true },
   });
 
+  if (!route.source) {
+    throw new Error(`Route ${ROUTE_ID} has no direct source connection`);
+  }
+
   const connLike = toConnectionLike(route.source);
   const provider = new NetSuiteProvider();
   const conn = await provider.connect(connLike);

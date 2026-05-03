@@ -48,6 +48,8 @@ export function calculateNextRun(
       return nextInterval(nowInTz, 60, timezone);
     case "EVERY_4_HOURS":
       return nextInterval(nowInTz, 240, timezone);
+    case "EVERY_6_HOURS":
+      return nextInterval(nowInTz, 360, timezone);
     case "EVERY_12_HOURS":
       return nextInterval(nowInTz, 720, timezone);
     case "DAILY":
@@ -219,4 +221,3 @@ export function advanceNextRun(
   }
   return calculateNextRun(schedule, lastRun);
 }
-

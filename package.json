@@ -23,8 +23,12 @@
   "dependencies": {
     "@apidevtools/swagger-parser": "^12.1.0",
     "@auth/prisma-adapter": "^2.4.0",
+    "@aws-sdk/client-iam": "^3.1041.0",
+    "@aws-sdk/client-s3": "^3.1041.0",
+    "@aws-sdk/client-sts": "^3.1041.0",
     "@duckdb/node-api": "^1.5.1-r.1",
     "@google-cloud/bigquery": "^7.8.0",
+    "@google-cloud/storage": "^7.19.0",
     "@monaco-editor/react": "^4.7.0",
     "@prisma/client": "^5.18.0",
     "@univerjs/preset-sheets-core": "^0.15.5",

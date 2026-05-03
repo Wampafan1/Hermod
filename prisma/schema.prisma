@@ -50,6 +50,10 @@ model User {
   blueprints       Blueprint[]
   bifrostRoutes    BifrostRoute[]
   connections      Connection[]
+  backupStorageTargets BackupStorageTarget[]
+  postgresBackupPolicies PostgresBackupPolicy[]
+  postgresRestoreJobs PostgresRestoreJob[]
+  mssqlBackupPolicies MssqlBackupPolicy[]
 
   // Multi-tenant
   memberships      TenantMembership[]
@@ -122,6 +126,10 @@ model Tenant {
   // Raven (on-prem agents)
   ravenApiKeys      RavenApiKey[]
   ravenSatellites   RavenSatellite[]
+  backupStorageTargets BackupStorageTarget[]
+  postgresBackupPolicies PostgresBackupPolicy[]
+  postgresRestoreJobs PostgresRestoreJob[]
+  mssqlBackupPolicies MssqlBackupPolicy[]
 }
 
 model TenantMembership {
@@ -302,6 +310,7 @@ enum ScheduleFrequency {
   EVERY_30_MIN
   HOURLY
   EVERY_4_HOURS
+  EVERY_6_HOURS
   EVERY_12_HOURS
   DAILY
   WEEKLY
@@ -513,12 +522,340 @@ model Connection {
   fileEntries    FileEntry[]
   routesAsSource BifrostRoute[] @relation("routeSource")
   routesAsDest   BifrostRoute[] @relation("routeDest")
+  postgresBackupPolicies PostgresBackupPolicy[]
+  postgresRestoreJobs PostgresRestoreJob[]
+  mssqlBackupPolicies MssqlBackupPolicy[]
   realmGates     RealmGate[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
   @@index([tenantId])
   @@index([folderId])
+}
+
+// Niflheim Backups
+
+enum BackupStorageProvider {
+  AWS_S3
+  GCP_GCS
+  AZURE_BLOB
+}
+
+enum BackupStorageStatus {
+  ACTIVE
+  ERROR
+  DISABLED
+}
+
+enum BackupStorageAccessMode {
+  AWS_ASSUME_ROLE
+  AWS_ACCESS_KEY
+  AWS_RUNTIME_ROLE
+  GCP_SERVICE_ACCOUNT_JSON
+  GCP_WORKLOAD_IDENTITY
+  GCP_APPLICATION_DEFAULT
+}
+
+enum BackupPolicyStatus {
+  ACTIVE
+  DISABLED
+  DEGRADED
+  ERROR
+}
+
+enum BackupRunType {
+  FULL_LOGICAL
+  FULL_PHYSICAL_BASE
+  WAL_ARCHIVE
+}
+
+enum BackupRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  PARTIAL
+}
+
+enum PostgresRestoreStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum PostgresRestoreMode {
+  LOGICAL_PG_RESTORE
+  PHYSICAL_PITR_PREPARE
+}
+
+enum DatabaseEngine {
+  POSTGRES
+  MSSQL
+}
+
+enum MssqlBackupType {
+  FULL
+  DIFFERENTIAL
+  LOG
+}
+
+enum MssqlBackupRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  PARTIAL
+}
+
+enum MssqlBackupDestinationMode {
+  BACKUP_TO_URL
+  BACKUP_TO_DISK_SHARED_PATH
+  BACKUP_TO_DISK_SERVER_ONLY
+  RAVEN_AGENT_BACKUP
+}
+
+enum MssqlBackupPolicyStatus {
+  ACTIVE
+  DISABLED
+  ERROR
+}
+
+enum DatabaseSelectionMode {
+  SINGLE
+  MULTIPLE
+  ALL_USER_DATABASES
+  PATTERN
+}
+
+model BackupStorageTarget {
+  id          String                @id @default(cuid())
+  name        String
+  provider    BackupStorageProvider
+  accessMode  BackupStorageAccessMode @default(AWS_ACCESS_KEY)
+  config      Json
+  credentials String?               @db.Text
+  status      BackupStorageStatus   @default(ACTIVE)
+  lastTestedAt DateTime?
+  lastTestResult Json?
+  userId      String
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId    String?
+  tenant      Tenant?               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  policies    PostgresBackupPolicy[]
+  mssqlPolicies MssqlBackupPolicy[]
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([provider])
+}
+
+model PostgresBackupPolicy {
+  id                   String              @id @default(cuid())
+  name                 String
+  enabled              Boolean             @default(true)
+
+  sourceConnectionId   String
+  sourceConnection     Connection          @relation(fields: [sourceConnectionId], references: [id], onDelete: Restrict)
+
+  storageTargetId      String
+  storageTarget        BackupStorageTarget @relation(fields: [storageTargetId], references: [id], onDelete: Restrict)
+
+  backupMode           String              @default("LOGICAL_WITH_OPTIONAL_WAL")
+  fullFrequency        String              @default("DAILY")
+  walFrequency         String?             @default("HOURLY")
+  timeHour             Int                 @default(2)
+  timeMinute           Int                 @default(0)
+  timezone             String              @default("America/Chicago")
+  nextFullRunAt        DateTime?
+  nextWalRunAt         DateTime?
+
+  retentionDays        Int                 @default(30)
+  storagePrefix        String?
+  databaseSelectionMode String             @default("SINGLE")
+  selectedDatabases    String[]            @default([])
+  excludedDatabases    String[]            @default([])
+  databasePattern      String?
+  walEnabled           Boolean             @default(false)
+  replicationSlot      String?
+  lastSuccessfulFullAt DateTime?
+  lastSuccessfulWalAt  DateTime?
+  lastError            String?             @db.Text
+  status               BackupPolicyStatus  @default(ACTIVE)
+
+  userId               String
+  user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId             String?
+  tenant               Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  runs                 PostgresBackupRun[]
+  restoreJobs          PostgresRestoreJob[]
+
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([enabled, nextFullRunAt])
+  @@index([enabled, nextWalRunAt])
+}
+
+model PostgresBackupRun {
+  id             String               @id @default(cuid())
+  policyId       String
+  policy         PostgresBackupPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  type           BackupRunType
+  status         BackupRunStatus      @default(RUNNING)
+  triggeredBy    String
+
+  objectKeys     Json?
+  bytesWritten   BigInt?
+  checksumSha256 String?
+  durationMs     Int?
+  error          String?              @db.Text
+
+  startedAt      DateTime             @default(now())
+  completedAt    DateTime?
+
+  tenantId       String?
+  userId         String?
+  restoreJobs    PostgresRestoreJob[]
+
+  @@index([policyId, startedAt])
+  @@index([tenantId])
+  @@index([status])
+}
+
+model PostgresRestoreJob {
+  id                  String                @id @default(cuid())
+
+  policyId            String
+  policy              PostgresBackupPolicy  @relation(fields: [policyId], references: [id], onDelete: Restrict)
+
+  backupRunId         String?
+  backupRun           PostgresBackupRun?    @relation(fields: [backupRunId], references: [id], onDelete: SetNull)
+
+  targetConnectionId  String
+  targetConnection    Connection            @relation(fields: [targetConnectionId], references: [id], onDelete: Restrict)
+
+  mode                PostgresRestoreMode   @default(LOGICAL_PG_RESTORE)
+  status              PostgresRestoreStatus @default(RUNNING)
+
+  options             Json
+  objectKey           String
+  checksumSha256      String?
+  checksumVerified    Boolean               @default(false)
+  bytesDownloaded     BigInt?
+  durationMs          Int?
+  error               String?               @db.Text
+
+  triggeredByUserId   String
+  triggeredByUser     User                  @relation(fields: [triggeredByUserId], references: [id], onDelete: Cascade)
+  tenantId            String?
+  tenant              Tenant?               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  startedAt           DateTime              @default(now())
+  completedAt         DateTime?
+
+  @@index([policyId])
+  @@index([backupRunId])
+  @@index([targetConnectionId])
+  @@index([tenantId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model MssqlBackupPolicy {
+  id                    String                     @id @default(cuid())
+  name                  String
+  enabled               Boolean                    @default(true)
+  status                MssqlBackupPolicyStatus    @default(ACTIVE)
+
+  sourceConnectionId    String
+  sourceConnection      Connection                 @relation(fields: [sourceConnectionId], references: [id], onDelete: Restrict)
+
+  storageTargetId       String?
+  storageTarget         BackupStorageTarget?       @relation(fields: [storageTargetId], references: [id], onDelete: SetNull)
+
+  destinationMode       MssqlBackupDestinationMode
+
+  databaseSelectionMode DatabaseSelectionMode       @default(SINGLE)
+  selectedDatabases     String[]                   @default([])
+  excludedDatabases     String[]                   @default([])
+  databasePattern       String?
+
+  fullFrequency         String                     @default("DAILY")
+  differentialFrequency String?                    @default("EVERY_6_HOURS")
+  logFrequency          String?                    @default("HOURLY")
+
+  fullTimeHour          Int                        @default(2)
+  fullTimeMinute        Int                        @default(0)
+  timezone              String                     @default("America/Chicago")
+
+  nextFullRunAt         DateTime?
+  nextDifferentialRunAt DateTime?
+  nextLogRunAt          DateTime?
+
+  backupPath            String?
+  hermodReadablePath    String?
+  urlCredentialName     String?
+  urlBase               String?
+
+  compressionEnabled    Boolean                    @default(true)
+  checksumEnabled       Boolean                    @default(true)
+  copyOnly              Boolean                    @default(false)
+  verifyAfterBackup     Boolean                    @default(true)
+
+  retentionDays         Int                        @default(30)
+
+  lastSuccessfulFullAt  DateTime?
+  lastSuccessfulDiffAt  DateTime?
+  lastSuccessfulLogAt   DateTime?
+  lastError             String?                    @db.Text
+
+  userId                String
+  user                  User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId              String?
+  tenant                Tenant?                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  runs                  MssqlBackupRun[]
+
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([enabled, nextFullRunAt])
+  @@index([enabled, nextDifferentialRunAt])
+  @@index([enabled, nextLogRunAt])
+}
+
+model MssqlBackupRun {
+  id                  String                 @id @default(cuid())
+  policyId            String
+  policy              MssqlBackupPolicy      @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  type                MssqlBackupType
+  status              MssqlBackupRunStatus   @default(RUNNING)
+  triggeredBy         String
+
+  databaseName        String?
+  artifactMetadata    Json?
+  bytesWritten        BigInt?
+  checksumSha256      String?
+  durationMs          Int?
+  error               String?                @db.Text
+
+  startedAt           DateTime               @default(now())
+  completedAt         DateTime?
+
+  tenantId            String?
+  userId              String?
+
+  @@index([policyId, startedAt])
+  @@index([tenantId])
+  @@index([status])
+  @@index([databaseName])
 }
 
 // ─── Connection Folders ──────────────────────────────

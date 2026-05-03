@@ -486,6 +486,7 @@ export class NetSuiteProvider implements ConnectionProvider {
         format?: string;
         enum?: string[];
         nullable?: boolean;
+        properties?: Record<string, unknown>;
         "x-ns-custom-field"?: boolean;
       }>;
     };

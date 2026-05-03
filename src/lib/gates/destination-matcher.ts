@@ -81,6 +81,7 @@ export async function findDestinationMatches(
         ? JSON.parse(decrypt(conn.credentials))
         : {};
       const providerConn = await provider.connect({
+        type: conn.type,
         config: conn.config as Record<string, unknown>,
         credentials,
       });

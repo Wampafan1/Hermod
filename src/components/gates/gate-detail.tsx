@@ -444,7 +444,7 @@ export function GateDetail({ gate: initialGate }: { gate: GateData }) {
       )}
 
       {pushState === "failed" && (
-        <div className="card-norse p-6 space-y-3 border-l-2 border-l-red-500">
+        <div className="card-norse is-error p-6 space-y-3">
           <h3 className="text-red-400 text-sm font-cinzel uppercase tracking-wider">Push Failed</h3>
           <p className="text-text-dim text-xs font-inconsolata">{error}</p>
           <button onClick={resetPush} className="btn-ghost text-xs">

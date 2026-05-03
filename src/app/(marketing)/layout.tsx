@@ -1,4 +1,5 @@
 import { NavBar } from "@/components/marketing/nav-bar";
+import { RuneH } from "@/components/rune-h";
 
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -12,7 +13,10 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
       <footer className="bg-slate-50">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 px-12 py-16 max-w-7xl mx-auto">
           <div className="md:col-span-1">
-            <div className="text-xl font-serif font-black text-amber-900 mb-6">&#x16BA; HERMOD</div>
+            <div className="text-xl font-serif font-black text-amber-900 mb-6 tracking-[0.18em] uppercase inline-flex items-center gap-2">
+              <RuneH size={24} />
+              ermod
+            </div>
             <p className="font-mono text-[10px] tracking-widest text-slate-500 uppercase leading-loose">
               Automated report delivery from any database to any inbox.
             </p>

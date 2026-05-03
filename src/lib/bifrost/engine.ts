@@ -274,6 +274,9 @@ export class BifrostEngine {
 
     let routeLog: { id: string } | null = null;
     let forgeExecutionId: string | null = null;
+    let totalExtracted = 0;
+    let totalLoaded = 0;
+    let errorCount = 0;
 
     try {
       // 1. Schema validation — also tells us if the target table exists
@@ -360,9 +363,6 @@ export class BifrostEngine {
         throw new Error(`Destination provider "${route.dest.type}" does not support load`);
       }
 
-      let totalExtracted = 0;
-      let totalLoaded = 0;
-      let errorCount = 0;
       let firstBatchForHash: Record<string, unknown>[] | null = null;
       let lastBatchForHash: Record<string, unknown>[] | null = null;
       let loadBatchIndex = 0;
@@ -405,7 +405,7 @@ export class BifrostEngine {
           if (catalogObject) {
             effectiveSourceConfig.endpoint = catalogObject.endpoint;
             effectiveSourceConfig.responseRoot = catalogObject.responseRoot;
-            effectiveSourceConfig.schema = catalogObject.schema as SourceConfig["schema"];
+            effectiveSourceConfig.schema = catalogObject.schema as unknown as SourceConfig["schema"];
             console.log(`[Bifrost REST] Resolved ${objectSlug} → endpoint=${catalogObject.endpoint}`);
           } else {
             console.warn(`[Bifrost REST] No catalog object found for ${catalogSlug}/${objectSlug}`);
@@ -646,7 +646,7 @@ export class BifrostEngine {
             if (!runningMaxWatermark) {
               runningMaxWatermark = batchMax;
             } else {
-              const combined = [
+              const combined: Record<string, unknown>[] = [
                 { [cursorConfig!.cursorColumn!]: runningMaxWatermark },
                 { [cursorConfig!.cursorColumn!]: batchMax },
               ];
@@ -738,7 +738,7 @@ export class BifrostEngine {
             if (!pendingBatchMax) {
               pendingBatchMax = chunkMax;
             } else {
-              const combined = [
+              const combined: Record<string, unknown>[] = [
                 { [cursorConfig.cursorColumn]: pendingBatchMax },
                 { [cursorConfig.cursorColumn]: chunkMax },
               ];

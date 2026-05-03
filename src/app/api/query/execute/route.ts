@@ -3,9 +3,7 @@ import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { executeQuerySchema } from "@/lib/validations/reports";
 import { getProvider, toConnectionLike } from "@/lib/providers";
-
-/** Maximum rows returned by the preview endpoint. */
-export const PREVIEW_ROW_LIMIT = 10_000;
+import { PREVIEW_ROW_LIMIT } from "@/lib/query-limits";
 
 // POST /api/query/execute — run ad-hoc SQL query
 export const POST = withAuth(async (req, session) => {

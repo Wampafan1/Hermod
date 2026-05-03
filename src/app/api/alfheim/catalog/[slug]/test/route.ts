@@ -137,7 +137,33 @@ export const POST = withAuth(async (req) => {
       };
     }
 
-    const response = await fetch(testUrl, fetchInit);
+    // Apply minimal pagination to the GET test URL so we don't ask the upstream API
+    // for a default full-fat page (e.g. ShipStation v1 /orders with no params can
+    // take well over 15s to return). Only done when the connector declares
+    // page_number or offset pagination — cursor/none paths are left alone.
+    let finalTestUrl = testUrl;
+    if (!isPost) {
+      const paginationType = paginationConfig.type as string | undefined;
+      if (paginationType === "page_number" || paginationType === "offset") {
+        const pageParam = (paginationConfig.pageParam as string) || "page";
+        const limitParam = (paginationConfig.limitParam as string) || "limit";
+        const startPage = (paginationConfig.startPage as number | undefined) ?? 1;
+        try {
+          const u = new URL(finalTestUrl);
+          if (paginationType === "page_number") {
+            u.searchParams.set(pageParam, String(startPage));
+          } else {
+            u.searchParams.set("offset", "0");
+          }
+          u.searchParams.set(limitParam, "1");
+          finalTestUrl = u.toString();
+        } catch {
+          // fall back to the unqualified URL if URL construction fails
+        }
+      }
+    }
+
+    const response = await fetch(finalTestUrl, fetchInit);
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");

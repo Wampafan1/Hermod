@@ -11,6 +11,7 @@ import type { UCCResult } from "@/lib/ucc/discovery";
 interface ProfileColumn {
   name: string;
   type: string;
+  duckdbType?: string;
   hermodType: string;
   nullable: boolean;
   uniqueCount: number;

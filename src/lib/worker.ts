@@ -6,6 +6,13 @@ import { startSftpWatcher } from "./sftp-watcher";
 import { handleRouteJob } from "./bifrost/jobs/route-job.handler";
 import { handleRavenResume } from "./bifrost/jobs/raven-resume.handler";
 import { advanceRouteNextRun } from "./bifrost/engine";
+import { advanceBackupRun } from "./backups/schedule";
+import { handleFullBackupJob } from "./backups/jobs/full-backup.handler";
+import { handleWalBackupJob } from "./backups/jobs/wal-backup.handler";
+import { handlePostgresRestoreJob } from "./backups/jobs/postgres-restore.handler";
+import { handleMssqlFullBackupJob } from "./backups/jobs/mssql-full-backup.handler";
+import { handleMssqlDifferentialBackupJob } from "./backups/jobs/mssql-differential-backup.handler";
+import { handleMssqlLogBackupJob } from "./backups/jobs/mssql-log-backup.handler";
 import {
   getDueRetries,
   decompressPayload,
@@ -45,6 +52,52 @@ async function main() {
     console.log(`[Worker] Cleaned up ${staleResult.count} stale "running" route log(s)`);
   }
 
+  // Clean up stale backup runs from previous crashed workers.
+  const staleBackups = await prisma.postgresBackupRun.updateMany({
+    where: {
+      status: "RUNNING",
+      startedAt: { lt: new Date(Date.now() - 75 * 60_000) },
+    },
+    data: {
+      status: "FAILED",
+      error: "Timed out - worker crashed or hung before completion",
+      completedAt: new Date(),
+    },
+  });
+  if (staleBackups.count > 0) {
+    console.log(`[Worker] Cleaned up ${staleBackups.count} stale backup run(s)`);
+  }
+
+  const staleMssqlBackups = await prisma.mssqlBackupRun.updateMany({
+    where: {
+      status: "RUNNING",
+      startedAt: { lt: new Date(Date.now() - 125 * 60_000) },
+    },
+    data: {
+      status: "FAILED",
+      error: "Timed out - worker crashed or hung before completion",
+      completedAt: new Date(),
+    },
+  });
+  if (staleMssqlBackups.count > 0) {
+    console.log(`[Worker] Cleaned up ${staleMssqlBackups.count} stale SQL Server backup run(s)`);
+  }
+
+  const staleRestores = await prisma.postgresRestoreJob.updateMany({
+    where: {
+      status: "RUNNING",
+      startedAt: { lt: new Date(Date.now() - 75 * 60_000) },
+    },
+    data: {
+      status: "FAILED",
+      error: "Timed out - worker crashed or hung before completion",
+      completedAt: new Date(),
+    },
+  });
+  if (staleRestores.count > 0) {
+    console.log(`[Worker] Cleaned up ${staleRestores.count} stale restore job(s)`);
+  }
+
   const boss = getBoss();
   await boss.start();
   console.log("[Worker] pg-boss connected");
@@ -69,6 +122,14 @@ async function main() {
 
   // Register Raven pipeline resumption handler
   await boss.work("resume-raven-route", { teamSize: 2, teamConcurrency: 1 }, handleRavenResume as any);
+
+  // Register Niflheim backup handlers
+  await boss.work("postgres-backup-full", { teamSize: 1, teamConcurrency: 1 }, handleFullBackupJob as any);
+  await boss.work("postgres-backup-wal", { teamSize: 1, teamConcurrency: 1 }, handleWalBackupJob as any);
+  await boss.work("postgres-restore", { teamSize: 1, teamConcurrency: 1 }, handlePostgresRestoreJob as any);
+  await boss.work("mssql-backup-full", { teamSize: 1, teamConcurrency: 1 }, handleMssqlFullBackupJob as any);
+  await boss.work("mssql-backup-differential", { teamSize: 1, teamConcurrency: 1 }, handleMssqlDifferentialBackupJob as any);
+  await boss.work("mssql-backup-log", { teamSize: 1, teamConcurrency: 1 }, handleMssqlLogBackupJob as any);
 
   // Blueprint version pruning — runs asynchronously after new versions are created
   await boss.work("prune-blueprint-versions", async (job: { data: { blueprintId: string } }) => {
@@ -171,6 +232,229 @@ async function main() {
       }
 
       // ─── Helheim Retries (batched by destination) ────
+      // Niflheim full PostgreSQL backups
+      const dueFullBackups = await prisma.postgresBackupPolicy.findMany({
+        where: {
+          enabled: true,
+          nextFullRunAt: { lte: now },
+        },
+        select: {
+          id: true,
+          name: true,
+          fullFrequency: true,
+          timeHour: true,
+          timeMinute: true,
+          timezone: true,
+        },
+      });
+
+      await Promise.all(
+        dueFullBackups.map(async (policy) => {
+          console.log(`[Worker] Enqueuing Niflheim full backup: ${policy.name} (policy=${policy.id})`);
+          const nextFullRunAt = advanceBackupRun(
+            {
+              frequency: policy.fullFrequency as any,
+              timeHour: policy.timeHour,
+              timeMinute: policy.timeMinute,
+              timezone: policy.timezone,
+            },
+            now
+          );
+          await prisma.postgresBackupPolicy.update({
+            where: { id: policy.id },
+            data: { nextFullRunAt },
+          });
+          await boss.send(
+            "postgres-backup-full",
+            { policyId: policy.id, triggeredBy: "schedule" },
+            { singletonKey: `backup-full-${policy.id}` }
+          );
+        })
+      );
+
+      if (dueFullBackups.length > 0) {
+        console.log(`[Worker] Enqueued ${dueFullBackups.length} full backup(s)`);
+      }
+
+      // Niflheim WAL/PITR archives
+      const dueWalBackups = await prisma.postgresBackupPolicy.findMany({
+        where: {
+          enabled: true,
+          walEnabled: true,
+          nextWalRunAt: { lte: now },
+        },
+        select: {
+          id: true,
+          name: true,
+          walFrequency: true,
+          timeHour: true,
+          timeMinute: true,
+          timezone: true,
+        },
+      });
+
+      await Promise.all(
+        dueWalBackups.map(async (policy) => {
+          console.log(`[Worker] Enqueuing Niflheim WAL archive: ${policy.name} (policy=${policy.id})`);
+          const nextWalRunAt = advanceBackupRun(
+            {
+              frequency: (policy.walFrequency ?? "HOURLY") as any,
+              timeHour: policy.timeHour,
+              timeMinute: policy.timeMinute,
+              timezone: policy.timezone,
+            },
+            now
+          );
+          await prisma.postgresBackupPolicy.update({
+            where: { id: policy.id },
+            data: { nextWalRunAt },
+          });
+          await boss.send(
+            "postgres-backup-wal",
+            { policyId: policy.id, triggeredBy: "schedule" },
+            { singletonKey: `backup-wal-${policy.id}` }
+          );
+        })
+      );
+
+      if (dueWalBackups.length > 0) {
+        console.log(`[Worker] Enqueued ${dueWalBackups.length} WAL archive(s)`);
+      }
+
+      // Niflheim SQL Server full backups
+      const dueMssqlFullBackups = await prisma.mssqlBackupPolicy.findMany({
+        where: {
+          enabled: true,
+          nextFullRunAt: { lte: now },
+        },
+        select: {
+          id: true,
+          name: true,
+          fullFrequency: true,
+          fullTimeHour: true,
+          fullTimeMinute: true,
+          timezone: true,
+        },
+      });
+
+      await Promise.all(
+        dueMssqlFullBackups.map(async (policy) => {
+          console.log(`[Worker] Enqueuing SQL Server full backup: ${policy.name} (policy=${policy.id})`);
+          const nextFullRunAt = advanceBackupRun(
+            {
+              frequency: policy.fullFrequency as any,
+              timeHour: policy.fullTimeHour,
+              timeMinute: policy.fullTimeMinute,
+              timezone: policy.timezone,
+            },
+            now
+          );
+          await prisma.mssqlBackupPolicy.update({
+            where: { id: policy.id },
+            data: { nextFullRunAt },
+          });
+          await boss.send(
+            "mssql-backup-full",
+            { policyId: policy.id, triggeredBy: "schedule" },
+            { singletonKey: `mssql-full-${policy.id}` }
+          );
+        })
+      );
+
+      if (dueMssqlFullBackups.length > 0) {
+        console.log(`[Worker] Enqueued ${dueMssqlFullBackups.length} SQL Server full backup(s)`);
+      }
+
+      // Niflheim SQL Server differential backups
+      const dueMssqlDiffBackups = await prisma.mssqlBackupPolicy.findMany({
+        where: {
+          enabled: true,
+          differentialFrequency: { not: null },
+          nextDifferentialRunAt: { lte: now },
+        },
+        select: {
+          id: true,
+          name: true,
+          differentialFrequency: true,
+          fullTimeHour: true,
+          fullTimeMinute: true,
+          timezone: true,
+        },
+      });
+
+      await Promise.all(
+        dueMssqlDiffBackups.map(async (policy) => {
+          console.log(`[Worker] Enqueuing SQL Server differential backup: ${policy.name} (policy=${policy.id})`);
+          const nextDifferentialRunAt = advanceBackupRun(
+            {
+              frequency: (policy.differentialFrequency ?? "EVERY_6_HOURS") as any,
+              timeHour: policy.fullTimeHour,
+              timeMinute: policy.fullTimeMinute,
+              timezone: policy.timezone,
+            },
+            now
+          );
+          await prisma.mssqlBackupPolicy.update({
+            where: { id: policy.id },
+            data: { nextDifferentialRunAt },
+          });
+          await boss.send(
+            "mssql-backup-differential",
+            { policyId: policy.id, triggeredBy: "schedule" },
+            { singletonKey: `mssql-diff-${policy.id}` }
+          );
+        })
+      );
+
+      if (dueMssqlDiffBackups.length > 0) {
+        console.log(`[Worker] Enqueued ${dueMssqlDiffBackups.length} SQL Server differential backup(s)`);
+      }
+
+      // Niflheim SQL Server transaction log backups
+      const dueMssqlLogBackups = await prisma.mssqlBackupPolicy.findMany({
+        where: {
+          enabled: true,
+          logFrequency: { not: null },
+          nextLogRunAt: { lte: now },
+        },
+        select: {
+          id: true,
+          name: true,
+          logFrequency: true,
+          fullTimeHour: true,
+          fullTimeMinute: true,
+          timezone: true,
+        },
+      });
+
+      await Promise.all(
+        dueMssqlLogBackups.map(async (policy) => {
+          console.log(`[Worker] Enqueuing SQL Server transaction log backup: ${policy.name} (policy=${policy.id})`);
+          const nextLogRunAt = advanceBackupRun(
+            {
+              frequency: (policy.logFrequency ?? "HOURLY") as any,
+              timeHour: policy.fullTimeHour,
+              timeMinute: policy.fullTimeMinute,
+              timezone: policy.timezone,
+            },
+            now
+          );
+          await prisma.mssqlBackupPolicy.update({
+            where: { id: policy.id },
+            data: { nextLogRunAt },
+          });
+          await boss.send(
+            "mssql-backup-log",
+            { policyId: policy.id, triggeredBy: "schedule" },
+            { singletonKey: `mssql-log-${policy.id}` }
+          );
+        })
+      );
+
+      if (dueMssqlLogBackups.length > 0) {
+        console.log(`[Worker] Enqueued ${dueMssqlLogBackups.length} SQL Server transaction log backup(s)`);
+      }
+
       await processHelheimRetries();
     } catch (error) {
       console.error("[Worker] Scheduler tick error:", safeErrorMessage(error));

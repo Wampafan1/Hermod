@@ -2,6 +2,7 @@ import PgBoss from "pg-boss";
 
 const globalForBoss = globalThis as unknown as {
   pgBoss: PgBoss | undefined;
+  pgBossStartPromise: Promise<void> | undefined;
 };
 
 export function getBoss(): PgBoss {
@@ -21,4 +22,16 @@ export function getBoss(): PgBoss {
     });
   }
   return globalForBoss.pgBoss;
+}
+
+export async function ensureBossStarted(): Promise<PgBoss> {
+  const boss = getBoss();
+  if (!globalForBoss.pgBossStartPromise) {
+    globalForBoss.pgBossStartPromise = boss.start().then(() => undefined).catch((error) => {
+      globalForBoss.pgBossStartPromise = undefined;
+      throw error;
+    });
+  }
+  await globalForBoss.pgBossStartPromise;
+  return boss;
 }

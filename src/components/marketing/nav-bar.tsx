@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { RuneH } from "@/components/rune-h";
 
 const LINK_CLASS =
   "text-slate-600 font-medium font-serif tracking-tight text-sm uppercase hover:text-amber-700 transition-colors";
@@ -61,8 +62,12 @@ export function NavBar({ anchorPrefix = "/#", scrolledPastHero = false }: NavBar
     >
 
       {/* Logo */}
-      <a href="/" className="text-2xl font-serif font-bold text-amber-800 tracking-[0.08em]">
-        &#x16BA; HERMOD
+      <a
+        href="/"
+        className="text-2xl font-serif font-bold text-amber-800 tracking-[0.18em] uppercase inline-flex items-center gap-2"
+      >
+        <RuneH size={26} />
+        ermod
       </a>
 
       {/* Desktop links */}

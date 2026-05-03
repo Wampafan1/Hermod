@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { withRavenAuth } from "@/lib/raven/auth";
@@ -64,7 +65,7 @@ export const POST = withRavenAuth(async (req, ctx) => {
         jobId,
         chunkIndex: chunk,
         totalChunks,
-        data: rows as unknown as Record<string, unknown>[],
+        data: rows as unknown as Prisma.InputJsonValue,
       },
     });
   } catch (err: unknown) {

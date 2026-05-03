@@ -73,6 +73,7 @@ export const PUT = withAuth(async (req, session) => {
 
   const { name, config, credentials } = parsed.data;
   const connType = existing.type as ConnectionType;
+  let validatedConfig = config;
 
   // Type-aware validation for config if provided
   if (config) {
@@ -85,6 +86,7 @@ export const PUT = withAuth(async (req, session) => {
           { status: 400 }
         );
       }
+      validatedConfig = configResult.data;
     }
   }
 
@@ -105,7 +107,7 @@ export const PUT = withAuth(async (req, session) => {
   // Build update payload — only set fields that were provided
   const updateData: Record<string, unknown> = {};
   if (name !== undefined) updateData.name = name;
-  if (config !== undefined) updateData.config = config;
+  if (config !== undefined) updateData.config = validatedConfig;
   if (credentials !== undefined) {
     updateData.credentials = encrypt(JSON.stringify(credentials));
   }

@@ -88,6 +88,7 @@ export async function executePush(
   const provider = getProvider(conn.type);
   const credentials = conn.credentials ? JSON.parse(decrypt(conn.credentials)) : {};
   const providerConn = await provider.connect({
+    type: conn.type,
     config: conn.config as Record<string, unknown>,
     credentials,
   });

@@ -30,8 +30,8 @@ export function CatalogSidebar({
             onClick={() => onSelect(null)}
             className={`w-full text-left px-3 py-1.5 text-xs font-space-grotesk uppercase tracking-[0.08em] transition-colors ${
               activeCategory === null
-                ? "border-l-2 border-gold text-gold"
-                : "border-l-2 border-transparent text-text-dim hover:text-text"
+                ? "pl-5 text-gold bg-gold/[0.08] before:content-['▸'] before:absolute before:left-1 before:text-gold relative"
+                : "pl-5 text-text-dim hover:text-text relative"
             }`}
           >
             All ({totalCount})

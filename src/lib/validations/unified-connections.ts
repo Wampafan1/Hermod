@@ -11,8 +11,64 @@ const sqlConfigBase = {
   ssl: z.boolean().default(false),
 };
 
-const postgresConfig = z.object({ ...sqlConfigBase, port: z.coerce.number().int().min(1).max(65535).default(5432) });
-const mssqlConfig    = z.object({ ...sqlConfigBase, port: z.coerce.number().int().min(1).max(65535).default(1433) });
+const optionalDbName = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().min(1).optional()
+);
+
+export const postgresConnectionScopeSchema = z.enum(["DATABASE", "SERVER"]);
+export const mssqlConnectionScopeSchema = z.enum(["DATABASE", "SERVER"]);
+
+const postgresConfig = z.object({
+  host: z.string().min(1),
+  port: z.coerce.number().int().min(1).max(65535).default(5432),
+  username: z.string().min(1),
+  ssl: z.boolean().default(false),
+  scope: postgresConnectionScopeSchema.default("DATABASE"),
+  database: optionalDbName,
+  maintenanceDatabase: optionalDbName,
+}).superRefine((data, ctx) => {
+  if (data.scope === "DATABASE" && !data.database) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["database"],
+      message: "Database is required for database-scoped PostgreSQL connections",
+    });
+  }
+}).transform((data) => ({
+  ...data,
+  scope: data.scope ?? "DATABASE",
+  maintenanceDatabase: data.scope === "SERVER"
+    ? data.maintenanceDatabase ?? "postgres"
+    : data.maintenanceDatabase,
+}));
+const mssqlConfig = z.object({
+  host: z.string().min(1),
+  port: z.coerce.number().int().min(1).max(65535).default(1433),
+  username: z.string().min(1),
+  scope: mssqlConnectionScopeSchema.default("DATABASE"),
+  database: optionalDbName,
+  maintenanceDatabase: optionalDbName,
+  encrypt: z.boolean().default(false),
+  trustServerCertificate: z.boolean().default(true),
+  ssl: z.boolean().optional(),
+}).superRefine((data, ctx) => {
+  if (data.scope === "DATABASE" && !data.database) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["database"],
+      message: "Database is required for database-scoped SQL Server connections",
+    });
+  }
+}).transform((data) => ({
+  ...data,
+  scope: data.scope ?? "DATABASE",
+  maintenanceDatabase: data.scope === "SERVER"
+    ? data.maintenanceDatabase ?? "master"
+    : data.maintenanceDatabase,
+  encrypt: data.encrypt ?? data.ssl ?? false,
+  trustServerCertificate: data.trustServerCertificate ?? true,
+}));
 const mysqlConfig    = z.object({ ...sqlConfigBase, port: z.coerce.number().int().min(1).max(65535).default(3306) });
 
 const bigqueryConfig = z.object({

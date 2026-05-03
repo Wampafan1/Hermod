@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { NavBar } from "@/components/marketing/nav-bar";
+import { RuneH } from "@/components/rune-h";
 
 const CDN = "https://hermodforge.com/illustrations";
 
@@ -49,7 +50,10 @@ export default function LandingPage() {
           transition: "transform 0.3s ease",
         }}
       >
-        <span className="font-headline text-sm font-bold tracking-[0.25em] text-[#1a1a1a]">HERMOD</span>
+        <span className="font-headline text-sm font-bold tracking-[0.18em] text-[#1a1a1a] uppercase inline-flex items-center gap-1.5">
+          <RuneH size={18} />
+          ermod
+        </span>
         <a href="/login" className="px-5 py-1.5 bg-[#d4af37] text-[#0a0b0f] font-headline text-[11px] font-semibold tracking-[0.15em] uppercase hover:bg-[#c4962a] transition-colors">
           Start Free
         </a>
@@ -426,7 +430,10 @@ export default function LandingPage() {
       <footer className="bg-slate-50">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 px-12 py-16 max-w-7xl mx-auto">
           <div className="md:col-span-1">
-            <div className="text-xl font-serif font-black text-amber-900 mb-6">&#x16BA; HERMOD</div>
+            <div className="text-xl font-serif font-black text-amber-900 mb-6 tracking-[0.18em] uppercase inline-flex items-center gap-2">
+              <RuneH size={24} />
+              ermod
+            </div>
             <p className="font-mono text-[10px] tracking-widest text-slate-500 uppercase leading-loose">
               Automated report delivery from any database to any inbox.
             </p>

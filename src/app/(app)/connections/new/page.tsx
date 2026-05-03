@@ -15,6 +15,10 @@ const SOURCE_NAMES: Record<SourceType, string> = {
   MYSQL: "MySQL",
   BIGQUERY: "BigQuery",
   NETSUITE: "NetSuite",
+  REST_API: "API Connectors",
+  CSV_FILE: "CSV File",
+  EXCEL_FILE: "Excel File",
+  GOOGLE_SHEETS: "Google Sheets",
   ADP: "ADP",
   QUICKBOOKS: "QuickBooks",
   SAP: "SAP",
@@ -52,7 +56,7 @@ export default function NewConnectionPage() {
           </p>
         </div>
         <SftpWizard
-          sourceType={selected.type as Exclude<SourceType, "POSTGRES" | "MSSQL" | "MYSQL" | "BIGQUERY" | "NETSUITE" | "EMAIL_SMTP">}
+          sourceType={selected.type as Exclude<SourceType, "POSTGRES" | "MSSQL" | "MYSQL" | "BIGQUERY" | "NETSUITE" | "REST_API" | "CSV_FILE" | "EXCEL_FILE" | "GOOGLE_SHEETS" | "EMAIL_SMTP">}
           sourceName={selected.name}
           onBack={() => setSelected(null)}
         />

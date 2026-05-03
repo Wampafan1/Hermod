@@ -46,6 +46,12 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
     extractFromConfig(initialConfig, "port", DEFAULT_PORTS[(initial?.type as string) ?? "POSTGRES"] ?? 5432)
   );
   const [database, setDatabase] = useState<string>(extractFromConfig(initialConfig, "database", ""));
+  const [pgScope, setPgScope] = useState<"DATABASE" | "SERVER">(
+    extractFromConfig(initialConfig, "scope", "DATABASE") === "SERVER" ? "SERVER" : "DATABASE"
+  );
+  const [maintenanceDatabase, setMaintenanceDatabase] = useState<string>(
+    extractFromConfig(initialConfig, "maintenanceDatabase", "postgres")
+  );
   const [username, setUsername] = useState<string>(extractFromConfig(initialConfig, "username", ""));
   const [password, setPassword] = useState("");
   const [ssl, setSsl] = useState<boolean>(extractFromConfig(initialConfig, "ssl", true));
@@ -68,18 +74,28 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
 
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; error?: string; message?: string } | null>(null);
+  const [discoveringDatabases, setDiscoveringDatabases] = useState(false);
+  const [discoveredDatabases, setDiscoveredDatabases] = useState<Array<{ name: string; sizeBytes?: string; canConnect?: boolean }>>([]);
   const [saving, setSaving] = useState(false);
 
   const isBigQuery = type === "BIGQUERY";
   const isNetSuite = type === "NETSUITE";
   const isSftp = type === "SFTP";
   const isSql = !isBigQuery && !isNetSuite && !isSftp;
+  const isPostgres = type === "POSTGRES";
+  const isMssql = type === "MSSQL";
 
   function handleTypeChange(newType: ConnectionType) {
     setType(newType);
     setTestResult(null);
     if (DEFAULT_PORTS[newType]) {
       setPort(DEFAULT_PORTS[newType]);
+    }
+    if (newType === "MSSQL") {
+      setMaintenanceDatabase("master");
+    }
+    if (newType === "POSTGRES") {
+      setMaintenanceDatabase("postgres");
     }
   }
 
@@ -145,6 +161,41 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
       };
     }
     // SQL types
+    if (isPostgres) {
+      return {
+        name,
+        type,
+        config: {
+          host,
+          port,
+          username,
+          ssl,
+          scope: pgScope,
+          ...(pgScope === "SERVER"
+            ? { maintenanceDatabase: maintenanceDatabase || "postgres" }
+            : { database }),
+        },
+        ...(password ? { credentials: { password } } : {}),
+      };
+    }
+    if (isMssql) {
+      return {
+        name,
+        type,
+        config: {
+          host,
+          port,
+          username,
+          scope: pgScope,
+          encrypt: ssl,
+          trustServerCertificate: true,
+          ...(pgScope === "SERVER"
+            ? { maintenanceDatabase: maintenanceDatabase || "master" }
+            : { database }),
+        },
+        ...(password ? { credentials: { password } } : {}),
+      };
+    }
     return {
       name,
       type,
@@ -191,11 +242,36 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
     }
   }
 
+  async function handleDiscoverDatabases() {
+    if (!initial?.id) {
+      toast.error("Save this server connection before discovering databases");
+      return;
+    }
+    setDiscoveringDatabases(true);
+    setDiscoveredDatabases([]);
+    try {
+      const res = await fetch(`/api/connections/${initial.id}/${isMssql ? "mssql" : "postgres"}/databases`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Database discovery failed");
+      setDiscoveredDatabases(data.databases ?? []);
+      toast.success("Databases discovered");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Database discovery failed");
+    } finally {
+      setDiscoveringDatabases(false);
+    }
+  }
+
   async function handleSave() {
     if (!name.trim()) { toast.error("Name is required"); return; }
     if (isSql) {
       if (!host.trim()) { toast.error("Host is required"); return; }
-      if (!database.trim()) { toast.error("Database is required"); return; }
+      if ((isPostgres || isMssql) && pgScope === "SERVER") {
+        if (!maintenanceDatabase.trim()) { toast.error("Maintenance database is required"); return; }
+      } else if (!database.trim()) {
+        toast.error("Database is required");
+        return;
+      }
       if (!username.trim()) { toast.error("Username is required"); return; }
       if (!isEditing && !password) { toast.error("Password is required"); return; }
     }
@@ -386,15 +462,57 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
                   />
                 </div>
               </div>
-              <div>
-                <label className="label-norse">Database<span className="text-ember ml-1">*</span></label>
-                <input
-                  value={database}
-                  onChange={(e) => setDatabase(e.target.value)}
-                  className="input-norse"
-                  placeholder="my_database"
-                />
-              </div>
+              {(isPostgres || isMssql) && (
+                <div>
+                  <label className="label-norse">{isMssql ? "SQL Server Scope" : "PostgreSQL Scope"}</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex items-center gap-2 border border-border bg-void/30 p-3 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={pgScope === "DATABASE"}
+                        onChange={() => setPgScope("DATABASE")}
+                        className="accent-gold"
+                      />
+                      <span className="text-text-dim text-xs tracking-wide">Database connection</span>
+                    </label>
+                    <label className="flex items-center gap-2 border border-border bg-void/30 p-3 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={pgScope === "SERVER"}
+                        onChange={() => setPgScope("SERVER")}
+                        className="accent-gold"
+                      />
+                      <span className="text-text-dim text-xs tracking-wide">Server connection</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+              {(isPostgres || isMssql) && pgScope === "SERVER" ? (
+                <div>
+                  <label className="label-norse">Maintenance Database<span className="text-ember ml-1">*</span></label>
+                  <input
+                    value={maintenanceDatabase}
+                    onChange={(e) => setMaintenanceDatabase(e.target.value)}
+                    className="input-norse"
+                    placeholder={isMssql ? "master" : "postgres"}
+                  />
+                  <p className="text-text-dim/90 text-[0.68rem] tracking-wide leading-5 mt-2">
+                    {isMssql
+                      ? "SQL Server requires connecting to a database. Hermod uses master by default to discover and manage user databases on the instance."
+                      : "PostgreSQL requires connecting to a database. Hermod uses this maintenance database only to discover and manage databases on the server."}
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="label-norse">Database<span className="text-ember ml-1">*</span></label>
+                  <input
+                    value={database}
+                    onChange={(e) => setDatabase(e.target.value)}
+                    className="input-norse"
+                    placeholder="my_database"
+                  />
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label-norse">Username<span className="text-ember ml-1">*</span></label>
@@ -559,6 +677,36 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
               {testResult.success
                 ? "Connection successful!"
                 : testResult.error || "Connection failed"}
+            </div>
+          )}
+
+          {(isPostgres || isMssql) && pgScope === "SERVER" && (
+            <div className="border border-border bg-void/30 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-text-dim text-xs tracking-wide leading-5">
+                  Discover databases after saving this server connection.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleDiscoverDatabases}
+                  disabled={!initial?.id || discoveringDatabases}
+                  className="btn-ghost px-3 py-2 text-[0.65rem] tracking-[0.15em] uppercase"
+                >
+                  {discoveringDatabases ? "Discovering..." : "Discover"}
+                </button>
+              </div>
+              {discoveredDatabases.length > 0 && (
+                <div className="mt-3 grid grid-cols-1 gap-2">
+                  {discoveredDatabases.map((db) => (
+                    <div key={db.name} className="flex items-center justify-between border border-border bg-deep/60 px-3 py-2">
+                      <span className="text-text text-xs tracking-wide">{db.name}</span>
+                      <span className="text-text-dim text-[0.65rem] tracking-wide">
+                        {db.canConnect === false ? "No connect" : "Connect OK"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

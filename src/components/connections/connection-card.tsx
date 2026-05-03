@@ -52,10 +52,15 @@ function getDetailLine(connection: UnifiedConnection): string | null {
       const host = config.host as string | undefined;
       const port = config.port as number | undefined;
       const db = config.database as string | undefined;
+      const maintenanceDb = config.maintenanceDatabase as string | undefined;
       if (!host) return null;
       let line = host;
       if (port) line += `:${port}`;
-      if (db) line += ` / ${db}`;
+      if (type === "POSTGRES" && config.scope === "SERVER") {
+        line += ` / server via ${maintenanceDb || "postgres"}`;
+      } else if (db) {
+        line += ` / ${db}`;
+      }
       return line;
     }
     case "BIGQUERY": {

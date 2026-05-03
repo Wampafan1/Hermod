@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { encrypt } from "@/lib/crypto";
@@ -43,7 +44,7 @@ export const POST = withAuth(async (req, session) => {
     data: {
       name,
       type,
-      config,
+      config: config as Prisma.InputJsonValue,
       credentials: encrypt(JSON.stringify(credentials)),
       userId: session.user.id,
     },

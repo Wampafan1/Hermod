@@ -101,7 +101,7 @@ export function WizardObjects({ connectorSlug, objects, onComplete, onBack }: Wi
             <div
               key={obj.slug}
               className={`card-norse transition-colors ${
-                isSelected ? "border-l-2 border-l-gold bg-gold/[0.04]" : ""
+                isSelected ? "bg-gold/[0.06] border-gold/50 shadow-[0_0_0_1px_var(--gold-dim)]" : ""
               }`}
             >
               {/* Main row */}

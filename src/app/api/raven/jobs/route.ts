@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { withRavenAuth } from "@/lib/raven/auth";
@@ -81,8 +82,8 @@ export const POST = withAuth(async (req, session) => {
       ravenId,
       connectionId,
       query,
-      queryParams: queryParams ?? undefined,
-      destination: destination as Record<string, unknown>,
+      queryParams: queryParams as Prisma.InputJsonValue | undefined,
+      destination: destination as Prisma.InputJsonValue,
       timeout,
       maxRows,
       priority,

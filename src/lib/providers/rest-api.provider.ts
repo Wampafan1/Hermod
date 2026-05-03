@@ -11,6 +11,7 @@ import type { ConnectionLike, ProviderConnection } from "./types";
 import type { SourceConfig } from "@/lib/bifrost/types";
 import type { AuthConfig, PaginationConfig, RateLimitConfig, SchemaMapping } from "@/lib/alfheim/types";
 import { flattenRecord } from "@/lib/alfheim/schema-mapper";
+import { prisma } from "@/lib/db";
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -231,7 +232,48 @@ export class RestApiProvider implements ConnectionProvider {
       return response.ok;
     }
 
-    const response = await fetch(baseUrl, {
+    // Resolve a real endpoint to test against. Many REST APIs (e.g. ShipStation v1)
+    // return 403 for GET on the bare base URL — that's not an auth failure, it's
+    // just "no handler at /". Pull the first GET-method object from the catalog
+    // (if this connection is catalog-based) and hit that with minimal pagination.
+    let testUrl = baseUrl;
+    const catalogSlug = config.catalogSlug as string | undefined;
+    if (catalogSlug) {
+      const connector = await prisma.apiCatalogConnector.findUnique({
+        where: { slug: catalogSlug },
+        include: {
+          objects: {
+            where: { method: "GET" },
+            orderBy: { id: "asc" },
+            take: 1,
+          },
+        },
+      });
+      const endpoint = connector?.objects[0]?.endpoint;
+      if (endpoint) {
+        const joined = `${baseUrl.replace(/\/$/, "")}/${endpoint.replace(/^\//, "")}`;
+        try {
+          const u = new URL(joined);
+          const paginationType = pagination?.type;
+          if (pagination && (paginationType === "page_number" || paginationType === "offset")) {
+            const pageParam = pagination.pageParam || "page";
+            const limitParam = pagination.limitParam || "limit";
+            const startPage = pagination.startPage ?? 1;
+            if (paginationType === "page_number") {
+              u.searchParams.set(pageParam, String(startPage));
+            } else {
+              u.searchParams.set("offset", "0");
+            }
+            u.searchParams.set(limitParam, "1");
+          }
+          testUrl = u.toString();
+        } catch {
+          testUrl = joined;
+        }
+      }
+    }
+
+    const response = await fetch(testUrl, {
       method: "GET",
       headers,
       signal: AbortSignal.timeout(15_000),
