@@ -8,6 +8,7 @@
 import type { SchemaDiff } from "./schema-diff";
 import type { SqlDialect } from "@/lib/alfheim/types";
 import { toHermodType } from "@/lib/duckdb/type-mapper";
+import { fullSqlTableRef, quoteSqlIdentifier } from "./sql-identifiers";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -32,20 +33,11 @@ const TYPE_MAP: Record<string, Record<SqlDialect, string>> = {
 // ─── Quoting (same logic as alfheim/ddl-generator) ──
 
 function quoteIdent(name: string, dialect: SqlDialect): string {
-  switch (dialect) {
-    case "mssql":
-      return `[${name}]`;
-    case "mysql":
-    case "bigquery":
-      return `\`${name}\``;
-    case "postgres":
-    default:
-      return `"${name}"`;
-  }
+  return quoteSqlIdentifier(name, dialect);
 }
 
 function fullTableRef(schema: string, table: string, dialect: SqlDialect): string {
-  return `${quoteIdent(schema, dialect)}.${quoteIdent(table, dialect)}`;
+  return fullSqlTableRef(schema, table, dialect);
 }
 
 // ─── ConnectionType → SqlDialect mapping ────────────

@@ -138,6 +138,7 @@ function makeRoute(overrides?: Partial<LoadedRoute>): LoadedRoute {
     blueprintId: null,
     lastCheckpoint: null,
     cursorConfig: null,
+    needsFullReload: false,
     frequency: null,
     daysOfWeek: [],
     dayOfMonth: null,
@@ -302,6 +303,29 @@ describe("BifrostEngine", () => {
     expect(result.status).toBe("failed");
   });
 
+  it("blocks destructive full reload when destination table exists", async () => {
+    mockExtractGen.mockImplementation(() => asyncGenFromChunks([[{ id: 1 }]]));
+    mockLoad.mockResolvedValue({ rowsLoaded: 1, errors: [] });
+
+    const result = await engine.execute(
+      makeRoute({ needsFullReload: true }),
+      "manual"
+    );
+
+    expect(result.status).toBe("failed");
+    expect(mockDropTable).not.toHaveBeenCalled();
+    expect(mockLoad).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "log_1" },
+        data: expect.objectContaining({
+          status: "failed",
+          error: expect.stringContaining("Full reload is blocked"),
+        }),
+      })
+    );
+  });
+
   it("closes connections even on error", async () => {
     const closeSource = vi.fn();
     const closeDest = vi.fn();
@@ -315,6 +339,18 @@ describe("BifrostEngine", () => {
 
     expect(closeSource).toHaveBeenCalled();
     expect(closeDest).toHaveBeenCalled();
+  });
+
+  it("closes source connection when destination connect fails", async () => {
+    const closeSource = vi.fn();
+    mockConnect
+      .mockResolvedValueOnce({ client: {}, projectId: "test", close: closeSource })
+      .mockRejectedValueOnce(new Error("Destination connect failed"));
+
+    const result = await engine.execute(makeRoute(), "manual");
+
+    expect(result.status).toBe("failed");
+    expect(closeSource).toHaveBeenCalled();
   });
 
   it("creates routeLog with triggeredBy", async () => {
@@ -552,8 +588,8 @@ describe("BifrostEngine", () => {
       const result = await engine.execute(makeMergeRoute(), "schedule");
 
       expect(result.status).toBe("failed");
-      // Staging table cleanup is still attempted (in finally block)
-      expect(mockDropTable).toHaveBeenCalled();
+      // Failed MERGE keeps staging table available for debugging/recovery.
+      expect(mockDropTable).not.toHaveBeenCalled();
     });
 
     it("handles multiple batches with MERGE", async () => {

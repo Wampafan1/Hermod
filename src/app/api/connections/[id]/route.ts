@@ -35,7 +35,7 @@ export const GET = withAuth(async (req, session) => {
   }
 
   const connection = await prisma.connection.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
     select: connectionSelect,
   });
 
@@ -55,7 +55,7 @@ export const PUT = withAuth(async (req, session) => {
 
   // Verify ownership
   const existing = await prisma.connection.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -130,7 +130,7 @@ export const DELETE = withAuth(async (req, session) => {
 
   // Verify ownership
   const existing = await prisma.connection.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });

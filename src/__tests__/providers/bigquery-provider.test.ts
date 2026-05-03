@@ -208,6 +208,29 @@ describe("BigQueryProvider", () => {
     });
   });
 
+  describe("mergeInto()", () => {
+    it("escapes BigQuery identifiers in generated MERGE SQL", async () => {
+      mockQuery.mockResolvedValue([[]]);
+      const conn = await provider.connect(bqConnection);
+
+      await provider.mergeInto(
+        conn,
+        "da`ta",
+        "tar`get",
+        "sta`ging",
+        "id`pk",
+        ["id`pk", "na`me"]
+      );
+
+      const queryArg = mockQuery.mock.calls[0][0];
+      expect(queryArg.query).toContain("MERGE `da``ta`.`tar``get` T");
+      expect(queryArg.query).toContain("USING `da``ta`.`sta``ging` S");
+      expect(queryArg.query).toContain("ON T.`id``pk` = S.`id``pk`");
+      expect(queryArg.query).toContain("T.`na``me` = S.`na``me`");
+      expect(queryArg.useLegacySql).toBe(false);
+    });
+  });
+
   // ─── extract() ───────────────────────────────────────
   describe("extract()", () => {
     it("yields paginated chunks", async () => {

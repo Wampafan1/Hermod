@@ -122,7 +122,20 @@ export const POST = withRavenAuth(async (req, ctx) => {
         "[Raven] Failed to enqueue resume-raven-route:",
         err instanceof Error ? err.message : err
       );
-      // Non-fatal — the job is still marked complete
+      await prisma.ravenJob.update({
+        where: { id: jobId },
+        data: {
+          status: "running",
+          completedAt: null,
+          result: {
+            error: "Failed to enqueue pipeline resume",
+          },
+        },
+      });
+      return NextResponse.json(
+        { error: "Failed to enqueue pipeline resume" },
+        { status: 500 }
+      );
     }
   }
 

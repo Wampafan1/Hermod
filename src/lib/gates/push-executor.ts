@@ -10,6 +10,7 @@ import { decrypt } from "@/lib/crypto";
 import { getProvider } from "@/lib/providers";
 import { createAnalyticsSession } from "@/lib/duckdb/engine";
 import type { DestConfig, LoadResult } from "@/lib/bifrost/types";
+import { fullSqlTableRef, quoteSqlIdentifier } from "./sql-identifiers";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -304,14 +305,14 @@ function buildPostgresUpsert(
   pkColumns: string[],
   rows: Record<string, unknown>[]
 ): string {
-  const fullTable = `"${schema}"."${table}"`;
-  const colList = columns.map((c) => `"${c}"`).join(", ");
+  const fullTable = fullSqlTableRef(schema, table, "postgres");
+  const colList = columns.map((c) => quoteSqlIdentifier(c, "postgres")).join(", ");
   const pkSet = new Set(pkColumns.map((c) => c.toLowerCase()));
   const updateCols = columns
     .filter((c) => !pkSet.has(c.toLowerCase()))
-    .map((c) => `"${c}" = EXCLUDED."${c}"`)
+    .map((c) => `${quoteSqlIdentifier(c, "postgres")} = EXCLUDED.${quoteSqlIdentifier(c, "postgres")}`)
     .join(", ");
-  const conflictCols = pkColumns.map((c) => `"${c}"`).join(", ");
+  const conflictCols = pkColumns.map((c) => quoteSqlIdentifier(c, "postgres")).join(", ");
 
   const valueClauses = rows.map((row) => {
     const vals = columns.map((c) => sqlEscape(row[c]));
@@ -329,21 +330,21 @@ function buildMssqlMerge(
   pkColumns: string[],
   rows: Record<string, unknown>[]
 ): string {
-  const fullTable = `[${schema}].[${table}]`;
+  const fullTable = fullSqlTableRef(schema, table, "mssql");
   const valueClauses = rows.map((row) => {
     const vals = columns.map((c) => sqlEscape(row[c]));
     return `(${vals.join(", ")})`;
   });
 
-  const colList = columns.map((c) => `[${c}]`).join(", ");
+  const colList = columns.map((c) => quoteSqlIdentifier(c, "mssql")).join(", ");
   const pkSet = new Set(pkColumns.map((c) => c.toLowerCase()));
   const updateCols = columns
     .filter((c) => !pkSet.has(c.toLowerCase()))
-    .map((c) => `T.[${c}] = S.[${c}]`)
+    .map((c) => `T.${quoteSqlIdentifier(c, "mssql")} = S.${quoteSqlIdentifier(c, "mssql")}`)
     .join(", ");
-  const insertCols = columns.map((c) => `[${c}]`).join(", ");
-  const insertVals = columns.map((c) => `S.[${c}]`).join(", ");
-  const onClause = pkColumns.map((c) => `T.[${c}] = S.[${c}]`).join(" AND ");
+  const insertCols = columns.map((c) => quoteSqlIdentifier(c, "mssql")).join(", ");
+  const insertVals = columns.map((c) => `S.${quoteSqlIdentifier(c, "mssql")}`).join(", ");
+  const onClause = pkColumns.map((c) => `T.${quoteSqlIdentifier(c, "mssql")} = S.${quoteSqlIdentifier(c, "mssql")}`).join(" AND ");
 
   return `MERGE ${fullTable} AS T
     USING (VALUES ${valueClauses.join(", ")}) AS S (${colList})
@@ -359,12 +360,12 @@ function buildMysqlUpsert(
   pkColumns: string[],
   rows: Record<string, unknown>[]
 ): string {
-  const fullTable = schema ? `\`${schema}\`.\`${table}\`` : `\`${table}\``;
-  const colList = columns.map((c) => `\`${c}\``).join(", ");
+  const fullTable = fullSqlTableRef(schema, table, "mysql");
+  const colList = columns.map((c) => quoteSqlIdentifier(c, "mysql")).join(", ");
   const pkSet = new Set(pkColumns.map((c) => c.toLowerCase()));
   const updateCols = columns
     .filter((c) => !pkSet.has(c.toLowerCase()))
-    .map((c) => `\`${c}\` = VALUES(\`${c}\`)`)
+    .map((c) => `${quoteSqlIdentifier(c, "mysql")} = VALUES(${quoteSqlIdentifier(c, "mysql")})`)
     .join(", ");
 
   const valueClauses = rows.map((row) => {

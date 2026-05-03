@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ConnectionType } from "@/lib/providers/types";
-import { restApiConfigSchema, restApiCredentialsBaseSchema, restApiCredentialsSchema } from "./alfheim";
+import { restApiConfigSchema, restApiCredentialsSchema } from "./alfheim";
 
 // ─── Config schemas (non-sensitive, stored in config JSON) ───────
 
@@ -187,7 +187,7 @@ export const createConnectionSchema = z.discriminatedUnion("type", [
   z.object({ ...baseFields, type: z.literal("BIGQUERY"),  config: bigqueryConfig,  credentials: bigqueryCredentials }),
   z.object({ ...baseFields, type: z.literal("NETSUITE"),  config: netsuiteConfig,  credentials: netsuiteCredentials }),
   z.object({ ...baseFields, type: z.literal("SFTP"),      config: sftpConfig,      credentials: passwordCredentials }),
-  z.object({ ...baseFields, type: z.literal("REST_API"),  config: restApiConfigSchema, credentials: restApiCredentialsBaseSchema }),
+  z.object({ ...baseFields, type: z.literal("REST_API"),  config: restApiConfigSchema, credentials: restApiCredentialsSchema }),
   z.object({ ...baseFields, type: z.literal("CSV_FILE"),   config: csvFileConfig,       credentials: noCredentials }),
   z.object({ ...baseFields, type: z.literal("EXCEL_FILE"), config: excelFileConfig,     credentials: noCredentials }),
   z.object({ ...baseFields, type: z.literal("GOOGLE_SHEETS"), config: googleSheetsConfig, credentials: noCredentials }),

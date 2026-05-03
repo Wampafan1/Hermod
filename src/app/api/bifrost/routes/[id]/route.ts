@@ -10,7 +10,7 @@ export const GET = withAuth(async (req, session) => {
   const id = req.url.split("/bifrost/routes/")[1]?.split("/")[0]?.split("?")[0];
 
   const route = await prisma.bifrostRoute.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
     include: {
       source: { select: { id: true, name: true, type: true } },
       dest: { select: { id: true, name: true, type: true } },
@@ -30,7 +30,7 @@ export const PUT = withAuth(async (req, session) => {
   const id = req.url.split("/bifrost/routes/")[1]?.split("/")[0]?.split("?")[0];
 
   const existing = await prisma.bifrostRoute.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!existing) {
     return NextResponse.json({ error: "Route not found" }, { status: 404 });
@@ -45,6 +45,43 @@ export const PUT = withAuth(async (req, session) => {
     );
   }
   const data = parsed.data;
+
+  if (data.sourceId) {
+    const source = await prisma.connection.findFirst({
+      where: { id: data.sourceId, userId: session.user.id, tenantId: session.tenantId },
+    });
+    if (!source) {
+      return NextResponse.json({ error: "Source connection not found" }, { status: 404 });
+    }
+  }
+
+  if (data.ravenSatelliteId) {
+    const satellite = await prisma.ravenSatellite.findFirst({
+      where: { id: data.ravenSatelliteId, tenantId: session.tenantId },
+    });
+    if (!satellite) {
+      return NextResponse.json({ error: "Data Agent connection not found" }, { status: 404 });
+    }
+  }
+
+  if (data.destId) {
+    const dest = await prisma.connection.findFirst({
+      where: { id: data.destId, userId: session.user.id, tenantId: session.tenantId },
+    });
+    if (!dest) {
+      return NextResponse.json({ error: "Destination connection not found" }, { status: 404 });
+    }
+  }
+
+  if (data.blueprintId !== undefined && data.blueprintId !== null) {
+    const blueprint = await prisma.blueprint.findFirst({
+      where: { id: data.blueprintId, userId: session.user.id },
+      select: { steps: true },
+    });
+    if (!blueprint) {
+      return NextResponse.json({ error: "Blueprint not found" }, { status: 404 });
+    }
+  }
 
   // Recalculate nextRunAt if schedule fields changed
   let nextRunAt: Date | null | undefined;
@@ -98,7 +135,7 @@ export const DELETE = withAuth(async (req, session) => {
   const id = req.url.split("/bifrost/routes/")[1]?.split("/")[0]?.split("?")[0];
 
   const existing = await prisma.bifrostRoute.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!existing) {
     return NextResponse.json({ error: "Route not found" }, { status: 404 });

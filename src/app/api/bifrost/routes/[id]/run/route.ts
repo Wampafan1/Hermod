@@ -13,7 +13,7 @@ export const POST = withAuth(async (req, session) => {
   const id = req.url.split("/bifrost/routes/")[1]?.split("/")[0]?.split("?")[0];
 
   const route = await prisma.bifrostRoute.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
     include: {
       source: { select: { id: true, type: true, config: true, credentials: true } },
       dest: { select: { id: true, type: true, config: true, credentials: true } },

@@ -9,7 +9,7 @@ import { validateBlueprintForStreaming } from "@/lib/bifrost/forge/forge-validat
 // GET /api/bifrost/routes — List all routes for current user
 export const GET = withAuth(async (req, session) => {
   const routes = await prisma.bifrostRoute.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, tenantId: session.tenantId },
     include: {
       source: { select: { id: true, name: true, type: true } },
       dest: { select: { id: true, name: true, type: true } },
@@ -50,7 +50,7 @@ export const POST = withAuth(async (req, session) => {
   } else if (data.sourceId) {
     // Direct connection source
     const source = await prisma.connection.findFirst({
-      where: { id: data.sourceId, userId: session.user.id },
+      where: { id: data.sourceId, userId: session.user.id, tenantId: session.tenantId },
     });
     if (!source) {
       return NextResponse.json({ error: "Source connection not found" }, { status: 404 });
@@ -58,7 +58,7 @@ export const POST = withAuth(async (req, session) => {
   }
 
   const dest = await prisma.connection.findFirst({
-    where: { id: data.destId, userId: session.user.id },
+    where: { id: data.destId, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!dest) {
     return NextResponse.json({ error: "Destination connection not found" }, { status: 404 });
@@ -122,6 +122,7 @@ export const POST = withAuth(async (req, session) => {
       nextRunAt,
       cursorConfig: (data.cursorConfig ?? null) as Prisma.InputJsonValue,
       userId: session.user.id,
+      tenantId: session.tenantId,
     },
   });
 

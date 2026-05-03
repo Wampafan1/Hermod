@@ -20,7 +20,7 @@ export const POST = withAuth(async (req, session) => {
 
   // Verify user owns this connection
   const connection = await prisma.connection.findFirst({
-    where: { id: connectionId, userId: session.user.id },
+    where: { id: connectionId, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!connection) {
     return NextResponse.json(

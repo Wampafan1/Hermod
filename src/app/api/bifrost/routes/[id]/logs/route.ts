@@ -8,7 +8,7 @@ export const GET = withAuth(async (req, session) => {
 
   // Verify ownership
   const route = await prisma.bifrostRoute.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
     select: { id: true },
   });
   if (!route) {

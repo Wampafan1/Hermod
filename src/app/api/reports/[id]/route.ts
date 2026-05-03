@@ -12,7 +12,7 @@ export const GET = withAuth(async (req, session) => {
   }
 
   const report = await prisma.report.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
     include: {
       connection: { select: { id: true, name: true, type: true } },
       schedule: { select: { id: true, enabled: true } },
@@ -34,7 +34,7 @@ export const PUT = withAuth(async (req, session) => {
   }
 
   const existing = await prisma.report.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!existing) {
     return NextResponse.json({ error: "Report not found" }, { status: 404 });
@@ -52,7 +52,11 @@ export const PUT = withAuth(async (req, session) => {
   // If changing connection, verify ownership
   if (parsed.data.connectionId) {
     const conn = await prisma.connection.findFirst({
-      where: { id: parsed.data.connectionId, userId: session.user.id },
+      where: {
+        id: parsed.data.connectionId,
+        userId: session.user.id,
+        tenantId: session.tenantId,
+      },
     });
     if (!conn) {
       return NextResponse.json(
@@ -99,7 +103,7 @@ export const DELETE = withAuth(async (req, session) => {
   }
 
   const existing = await prisma.report.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, userId: session.user.id, tenantId: session.tenantId },
   });
   if (!existing) {
     return NextResponse.json({ error: "Report not found" }, { status: 404 });

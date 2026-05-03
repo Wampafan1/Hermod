@@ -16,7 +16,9 @@ describe("Helheim retry — writeDisposition override", () => {
    * Simulates the destConfig construction used in processHelheimRetries().
    * This mirrors the exact pattern from worker.ts.
    */
-  function buildRetryDestConfig(routeDestConfig: Record<string, unknown>) {
+  function buildRetryDestConfig<T extends Record<string, unknown>>(
+    routeDestConfig: T
+  ): T & { writeDisposition: "WRITE_APPEND" } {
     return {
       ...routeDestConfig,
       writeDisposition: "WRITE_APPEND",

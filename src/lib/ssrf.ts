@@ -1,22 +1,12 @@
 /**
- * SSRF protection — reject private/reserved IP addresses in connection tests.
+ * SSRF protection for user-supplied network targets.
  *
- * Prevents users from probing internal networks by testing connections to
- * private IPs (10.x.x.x, 192.168.x.x, 172.16-31.x.x, 127.x.x.x, etc.).
+ * Rejects private/reserved IP ranges before connection tests or discovery
+ * requests can probe internal services.
  */
 
 import { isIP } from "net";
 import { lookup } from "dns/promises";
-
-/** RFC 1918 + RFC 5737 + loopback + link-local + reserved ranges */
-const PRIVATE_RANGES: Array<{ prefix: number[]; mask: number }> = [
-  { prefix: [10], mask: 8 },           // 10.0.0.0/8
-  { prefix: [172, 16], mask: 12 },     // 172.16.0.0/12
-  { prefix: [192, 168], mask: 16 },    // 192.168.0.0/16
-  { prefix: [127], mask: 8 },          // 127.0.0.0/8
-  { prefix: [169, 254], mask: 16 },    // 169.254.0.0/16 (link-local)
-  { prefix: [0], mask: 8 },            // 0.0.0.0/8
-];
 
 function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split(".").map(Number);
@@ -24,65 +14,113 @@ function isPrivateIPv4(ip: string): boolean {
     return false;
   }
 
-  for (const range of PRIVATE_RANGES) {
-    let match = true;
-    for (let i = 0; i < range.prefix.length; i++) {
-      if (range.mask <= 8 && i === 0) {
-        // For /8 masks, only check first octet
-        if (parts[0] !== range.prefix[0]) { match = false; break; }
-      } else if (i === 1 && range.mask === 12) {
-        // For 172.16.0.0/12: second octet must be 16-31
-        if (parts[0] !== 172 || parts[1] < 16 || parts[1] > 31) { match = false; break; }
-      } else {
-        if (parts[i] !== range.prefix[i]) { match = false; break; }
-      }
-    }
-    if (match) return true;
-  }
-  return false;
+  const [a, b] = parts;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19))
+  );
 }
 
 function isPrivateIPv6(ip: string): boolean {
   const lower = ip.toLowerCase();
-  // ::1 (loopback), fc00::/7 (unique local), fe80::/10 (link-local)
   return lower === "::1" ||
-    lower.startsWith("fc") || lower.startsWith("fd") ||
+    lower.startsWith("fc") ||
+    lower.startsWith("fd") ||
     lower.startsWith("fe80");
 }
 
 /**
  * Check if a host resolves to a private/reserved IP.
- * Returns an error message if the host is private, or null if it's safe.
+ * Returns an error message if the host is private, or null if it is safe.
  */
 export async function checkSsrf(host: string): Promise<string | null> {
   if (process.env.ALLOW_PRIVATE_IPS === "true") return null;
 
-  // Direct IP address check
-  if (isIP(host) === 4) {
-    if (isPrivateIPv4(host)) {
-      return `Connection to private IP "${host}" is not allowed`;
-    }
-    return null;
-  }
-  if (isIP(host) === 6) {
-    if (isPrivateIPv6(host)) {
-      return `Connection to private IP "${host}" is not allowed`;
+  const normalizedHost = host.replace(/^\[|\]$/g, "");
+
+  if (isIP(normalizedHost) === 4) {
+    if (isPrivateIPv4(normalizedHost)) {
+      return `Connection to private IP "${normalizedHost}" is not allowed`;
     }
     return null;
   }
 
-  // Hostname — resolve to IP and check
-  try {
-    const result = await lookup(host);
-    if (result.family === 4 && isPrivateIPv4(result.address)) {
-      return `Host "${host}" resolves to private IP ${result.address}`;
+  if (isIP(normalizedHost) === 6) {
+    if (isPrivateIPv6(normalizedHost)) {
+      return `Connection to private IP "${normalizedHost}" is not allowed`;
     }
-    if (result.family === 6 && isPrivateIPv6(result.address)) {
-      return `Host "${host}" resolves to private IP ${result.address}`;
+    return null;
+  }
+
+  try {
+    const results = await lookup(normalizedHost, { all: true });
+    for (const result of results) {
+      if (result.family === 4 && isPrivateIPv4(result.address)) {
+        return `Host "${normalizedHost}" resolves to private IP ${result.address}`;
+      }
+      if (result.family === 6 && isPrivateIPv6(result.address)) {
+        return `Host "${normalizedHost}" resolves to private IP ${result.address}`;
+      }
     }
   } catch {
-    // DNS resolution failure — let the connection test itself handle it
+    // Let the actual connection attempt surface DNS failures.
   }
 
   return null;
+}
+
+export async function checkSsrfUrl(rawUrl: string): Promise<string | null> {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return "Invalid URL";
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return `URL protocol "${url.protocol}" is not allowed`;
+  }
+
+  return checkSsrf(url.hostname);
+}
+
+export async function fetchWithSsrfProtection(
+  rawUrl: string,
+  init?: RequestInit,
+  maxRedirects = 5
+): Promise<Response> {
+  let currentUrl = rawUrl;
+
+  for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount++) {
+    const ssrfError = await checkSsrfUrl(currentUrl);
+    if (ssrfError) {
+      throw new Error(ssrfError);
+    }
+
+    const response = await fetch(currentUrl, {
+      ...init,
+      redirect: "manual",
+    });
+
+    if (![301, 302, 303, 307, 308].includes(response.status)) {
+      return response;
+    }
+
+    const location = response.headers.get("location");
+    if (!location) {
+      return response;
+    }
+
+    currentUrl = new URL(location, currentUrl).toString();
+  }
+
+  throw new Error("Too many redirects");
 }

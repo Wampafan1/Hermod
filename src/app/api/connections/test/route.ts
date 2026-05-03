@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { getProvider } from "@/lib/providers";
 import { createConnectionSchema } from "@/lib/validations/unified-connections";
-import { checkSsrf } from "@/lib/ssrf";
+import { checkSsrf, checkSsrfUrl } from "@/lib/ssrf";
 import type { ConnectionLike } from "@/lib/providers/types";
 
 // ─── POST /api/connections/test — test before saving ─────────
@@ -18,9 +18,15 @@ export const POST = withAuth(async (req, _session) => {
 
   const { type, config, credentials } = parsed.data;
 
-  // SSRF protection: reject private/reserved IPs for SQL connection types
+  // SSRF protection: reject private/reserved network targets.
   const host = (config as Record<string, unknown>)?.host as string | undefined;
-  if (host && type !== "BIGQUERY" && type !== "NETSUITE") {
+  const baseUrl = (config as Record<string, unknown>)?.baseUrl as string | undefined;
+  if (type === "REST_API" && baseUrl) {
+    const ssrfError = await checkSsrfUrl(baseUrl);
+    if (ssrfError) {
+      return NextResponse.json({ success: false, error: ssrfError }, { status: 400 });
+    }
+  } else if (host && type !== "BIGQUERY" && type !== "NETSUITE") {
     const ssrfError = await checkSsrf(host);
     if (ssrfError) {
       return NextResponse.json({ success: false, error: ssrfError }, { status: 400 });

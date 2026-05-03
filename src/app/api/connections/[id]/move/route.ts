@@ -14,14 +14,12 @@ export const POST = withAuth(async (req, ctx) => {
   const body = await req.json();
   const { folderId } = body as { folderId: string | null };
 
-  // Verify connection belongs to user OR tenant (handles pre-multi-tenant connections with null tenantId)
+  // Verify connection belongs to the active tenant.
   const connection = await prisma.connection.findFirst({
     where: {
       id,
-      OR: [
-        { tenantId: ctx.tenantId },
-        { userId: ctx.userId },
-      ],
+      userId: ctx.userId,
+      tenantId: ctx.tenantId,
     },
   });
   if (!connection) {
@@ -38,12 +36,10 @@ export const POST = withAuth(async (req, ctx) => {
     }
   }
 
-  // Update folderId, and backfill tenantId if it was null
   const updated = await prisma.connection.update({
     where: { id },
     data: {
       folderId: folderId ?? null,
-      tenantId: connection.tenantId ?? ctx.tenantId,
     },
   });
 

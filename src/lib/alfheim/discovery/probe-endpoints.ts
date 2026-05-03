@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { buildAuthHeaders } from "../../providers/rest-api.provider";
+import { fetchWithSsrfProtection } from "@/lib/ssrf";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -95,7 +96,7 @@ async function probeSingleEndpoint(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
 
-    const response = await fetch(url, {
+    const response = await fetchWithSsrfProtection(url, {
       method: "GET",
       headers,
       signal: controller.signal,

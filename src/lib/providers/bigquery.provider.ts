@@ -378,18 +378,20 @@ export class BigQueryProvider implements ConnectionProvider {
   ): Promise<{ rowsMerged: number }> {
     const bqConn = conn as BigQueryProviderConnection;
 
+    const targetRef = `${quoteBigQueryIdentifier(dataset)}.${quoteBigQueryIdentifier(targetTable)}`;
+    const stagingRef = `${quoteBigQueryIdentifier(dataset)}.${quoteBigQueryIdentifier(stagingTable)}`;
     const updateCols = columns
       .filter((c) => c !== primaryKey)
-      .map((c) => `T.\`${c}\` = S.\`${c}\``)
+      .map((c) => `T.${quoteBigQueryIdentifier(c)} = S.${quoteBigQueryIdentifier(c)}`)
       .join(", ");
 
-    const insertCols = columns.map((c) => `\`${c}\``).join(", ");
-    const insertVals = columns.map((c) => `S.\`${c}\``).join(", ");
+    const insertCols = columns.map((c) => quoteBigQueryIdentifier(c)).join(", ");
+    const insertVals = columns.map((c) => `S.${quoteBigQueryIdentifier(c)}`).join(", ");
 
     const mergeSQL = `
-      MERGE \`${dataset}\`.\`${targetTable}\` T
-      USING \`${dataset}\`.\`${stagingTable}\` S
-      ON T.\`${primaryKey}\` = S.\`${primaryKey}\`
+      MERGE ${targetRef} T
+      USING ${stagingRef} S
+      ON T.${quoteBigQueryIdentifier(primaryKey)} = S.${quoteBigQueryIdentifier(primaryKey)}
       WHEN MATCHED THEN
         UPDATE SET ${updateCols}
       WHEN NOT MATCHED THEN
@@ -447,6 +449,13 @@ export class BigQueryProvider implements ConnectionProvider {
  *
  * Writing all numbers as floats ensures consistent FLOAT64 inference.
  */
+function quoteBigQueryIdentifier(name: string): string {
+  if (name.length === 0) {
+    throw new Error("BigQuery identifier cannot be empty");
+  }
+  return `\`${name.replace(/`/g, "``")}\``;
+}
+
 export function floatSafeJsonLine(row: Record<string, unknown>): string {
   // Use a replacer to tag integers, then post-process to add ".0".
   // The old regex approach could corrupt strings containing patterns

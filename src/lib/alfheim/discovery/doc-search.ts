@@ -6,6 +6,8 @@
 // Public types
 // ---------------------------------------------------------------------------
 
+import { fetchWithSsrfProtection } from "@/lib/ssrf";
+
 export interface DocSearchResult {
   foundSpec: boolean;
   specUrl?: string;
@@ -105,7 +107,7 @@ async function findSpec(
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), SPEC_TIMEOUT_MS);
 
-      const response = await fetch(url, {
+      const response = await fetchWithSsrfProtection(url, {
         method: "GET",
         headers: { Accept: "application/json" },
         signal: controller.signal,
@@ -161,7 +163,7 @@ async function findDocPages(
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), SPEC_TIMEOUT_MS);
 
-      const response = await fetch(url, {
+      const response = await fetchWithSsrfProtection(url, {
         method: "HEAD",
         signal: controller.signal,
       });

@@ -7,7 +7,7 @@ import { createReportSchema } from "@/lib/validations/reports";
 // GET /api/reports — list user's reports
 export const GET = withAuth(async (_req, session) => {
   const reports = await prisma.report.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, tenantId: session.tenantId },
     orderBy: { updatedAt: "desc" },
     include: {
       connection: { select: { name: true, type: true } },
@@ -48,7 +48,11 @@ export const POST = withAuth(async (req, session) => {
 
   // Verify user owns the connection
   const connection = await prisma.connection.findFirst({
-    where: { id: parsed.data.connectionId, userId: session.user.id },
+    where: {
+      id: parsed.data.connectionId,
+      userId: session.user.id,
+      tenantId: session.tenantId,
+    },
   });
   if (!connection) {
     return NextResponse.json(
@@ -66,6 +70,7 @@ export const POST = withAuth(async (req, session) => {
       formatting: parsed.data.formatting as Prisma.InputJsonValue ?? undefined,
       columnConfig: parsed.data.columnConfig as Prisma.InputJsonValue ?? undefined,
       userId: session.user.id,
+      tenantId: session.tenantId,
     },
   });
 

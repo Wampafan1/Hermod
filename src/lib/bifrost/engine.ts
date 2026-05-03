@@ -23,7 +23,7 @@ import type {
 } from "./types";
 import { DEFAULT_CHUNK_SIZE } from "./types";
 import type { CursorConfig } from "@/lib/sync/types";
-import { getWatermark, setWatermark, deleteWatermark, buildIncrementalClause, extractNewWatermark } from "@/lib/sync/watermark";
+import { getWatermark, setWatermark, buildIncrementalClause, extractNewWatermark } from "@/lib/sync/watermark";
 
 // ─── Route Loading ───────────────────────────────────
 
@@ -269,8 +269,8 @@ export class BifrostEngine {
 
     const sourceConnLike = toConnectionLike(route.source!);
     const destConnLike = toConnectionLike(route.dest);
-    const sourceConn = await sourceProvider.connect(sourceConnLike);
-    const destConn = await destProvider.connect(destConnLike);
+    let sourceConn: ProviderConnection | null = null;
+    let destConn: ProviderConnection | null = null;
 
     let routeLog: { id: string } | null = null;
     let forgeExecutionId: string | null = null;
@@ -279,10 +279,15 @@ export class BifrostEngine {
     let errorCount = 0;
 
     try {
+      sourceConn = await sourceProvider.connect(sourceConnLike);
+      destConn = await destProvider.connect(destConnLike);
+      const activeSourceConn = sourceConn;
+      const activeDestConn = destConn;
+
       // 1. Schema validation — also tells us if the target table exists
       const destTableExists = await this.validateOrCreateDestTable(
-        sourceConn,
-        destConn,
+        activeSourceConn,
+        activeDestConn,
         route,
         sourceProvider,
         destProvider
@@ -456,18 +461,13 @@ export class BifrostEngine {
       if (route.needsFullReload) {
         console.log(`[Bifrost] ${route.name}: Full reload triggered (schema change)`);
 
-        // Drop the destination table if it exists
-        if (destTableExists && "dropTable" in destProvider) {
-          await (destProvider as BigQueryProvider).dropTable(
-            destConn,
-            route.destConfig.dataset,
-            route.destConfig.table
+        if (destTableExists) {
+          throw new Error(
+            "Full reload is blocked until a safe staged reload is implemented; existing destination table was left untouched."
           );
-          console.log(`[Bifrost] ${route.name}: Destination table dropped for full reload`);
         }
 
-        // Clear the watermark so incremental clause is skipped
-        await deleteWatermark(route.id, tableName);
+        // Table does not exist yet, so a first load can safely read from the beginning.
         priorWatermark = null;
         incrementalClause = null;
       }
@@ -634,7 +634,7 @@ export class BifrostEngine {
             : schemaDestConfig.writeDisposition === "WRITE_TRUNCATE"
               ? { ...schemaDestConfig, writeDisposition: "WRITE_APPEND" as const }
               : schemaDestConfig;
-          const result = await this.loadWithRetry(destProvider, destConn, rows, effectiveDestConfig);
+          const result = await this.loadWithRetry(destProvider, activeDestConn, rows, effectiveDestConfig);
           totalLoaded += result.rowsLoaded;
           console.log(
             `[Bifrost] ${route.name}: Load job result: success — ${result.rowsLoaded} rows loaded` +
@@ -696,7 +696,7 @@ export class BifrostEngine {
       };
 
       for await (const chunk of sourceProvider.extract(
-        sourceConn,
+        activeSourceConn,
         effectiveSourceConfig
       )) {
         if (chunk.length === 0) continue;
@@ -762,6 +762,7 @@ export class BifrostEngine {
 
       // 5b. MERGE staging → target (if using upsert mode)
       if (useMerge && totalLoaded > 0 && stagingTableName) {
+        let mergeSucceeded = false;
         try {
           const bqProvider = destProvider as BigQueryProvider;
           // Get columns from the inferred schema
@@ -779,7 +780,7 @@ export class BifrostEngine {
           );
 
           await bqProvider.mergeInto(
-            destConn,
+            activeDestConn,
             route.destConfig.dataset,
             route.destConfig.table,
             stagingTableName,
@@ -787,6 +788,7 @@ export class BifrostEngine {
             mergeColumns
           );
 
+          mergeSucceeded = true;
           console.log(`[Bifrost] ${route.name}: MERGE completed successfully`);
         } catch (mergeErr) {
           // MERGE failed — staging table has the data, report failure
@@ -796,18 +798,24 @@ export class BifrostEngine {
           );
           throw mergeErr;
         } finally {
-          // Clean up staging table (best-effort)
-          try {
-            await (destProvider as BigQueryProvider).dropTable(
-              destConn,
-              route.destConfig.dataset,
-              stagingTableName
-            );
-            console.log(`[Bifrost] ${route.name}: Staging table "${stagingTableName}" dropped`);
-          } catch (dropErr) {
+          if (mergeSucceeded) {
+            // Clean up staging table (best-effort)
+            try {
+              await (destProvider as BigQueryProvider).dropTable(
+                activeDestConn,
+                route.destConfig.dataset,
+                stagingTableName
+              );
+              console.log(`[Bifrost] ${route.name}: Staging table "${stagingTableName}" dropped`);
+            } catch (dropErr) {
+              console.warn(
+                `[Bifrost] ${route.name}: Failed to drop staging table "${stagingTableName}":`,
+                dropErr instanceof Error ? dropErr.message : String(dropErr)
+              );
+            }
+          } else {
             console.warn(
-              `[Bifrost] ${route.name}: Failed to drop staging table "${stagingTableName}":`,
-              dropErr instanceof Error ? dropErr.message : String(dropErr)
+              `[Bifrost] ${route.name}: Leaving staging table "${stagingTableName}" in place after MERGE failure`
             );
           }
         }
@@ -936,8 +944,8 @@ export class BifrostEngine {
         duration,
       };
     } finally {
-      await sourceConn.close();
-      await destConn.close();
+      await sourceConn?.close();
+      await destConn?.close();
     }
   }
 

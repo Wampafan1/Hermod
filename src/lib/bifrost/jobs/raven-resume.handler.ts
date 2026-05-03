@@ -83,10 +83,7 @@ export async function handleRavenResume(job: {
       `[Bifrost/Raven] Assembled ${totalExtracted} rows from ${chunks.length} chunks`
     );
 
-    // 3. Clean up chunks now that we've read them
-    await prisma.ravenIngestChunk.deleteMany({ where: { jobId: ravenJobId } });
-
-    // 4. Optional Transform (Nidavellir forge)
+    // 3. Optional Transform (Nidavellir forge)
     let rows = allRows;
     if (route.transformEnabled && route.blueprintId) {
       const blueprint = await prisma.blueprint.findUniqueOrThrow({
@@ -114,7 +111,7 @@ export async function handleRavenResume(job: {
       );
     }
 
-    // 5. Load to destination
+    // 4. Load to destination
     const destProvider = getProvider(route.dest.type);
     const destConnLike = toConnectionLike(route.dest);
     const destConn = await destProvider.connect(destConnLike);
@@ -173,7 +170,7 @@ export async function handleRavenResume(job: {
       await destConn.close();
     }
 
-    // 6. Finalize RouteLog
+    // 5. Finalize RouteLog
     const duration = Date.now() - startTime;
     const status =
       errorCount === 0
@@ -193,6 +190,8 @@ export async function handleRavenResume(job: {
         completedAt: new Date(),
       },
     });
+
+    await prisma.ravenIngestChunk.deleteMany({ where: { jobId: ravenJobId } });
 
     console.log(
       `[Bifrost/Raven] Route ${route.name}: ${status} — ${totalLoaded}/${totalExtracted} rows in ${duration}ms`

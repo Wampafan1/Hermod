@@ -12,6 +12,7 @@ import type { SourceConfig } from "@/lib/bifrost/types";
 import type { AuthConfig, PaginationConfig, RateLimitConfig, SchemaMapping } from "@/lib/alfheim/types";
 import { flattenRecord } from "@/lib/alfheim/schema-mapper";
 import { prisma } from "@/lib/db";
+import { fetchWithSsrfProtection } from "@/lib/ssrf";
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -19,6 +20,21 @@ const DEFAULT_CHUNK_SIZE = 1000;
 const DEFAULT_RETRY_AFTER_SEC = 60;
 const MAX_RETRIES = 3;
 const REQUEST_TIMEOUT_MS = 30_000;
+
+function redactUrlForLog(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+    if (url.search) {
+      url.search = "?redacted=1";
+    }
+    return url.toString();
+  } catch {
+    return "[invalid-url]";
+  }
+}
 
 // ─── Auth Helper ─────────────────────────────────────────────
 
@@ -116,7 +132,7 @@ async function fetchWithRetry(
   for (let attempt = 0; attempt <= retries; attempt++) {
     let response: Response;
     try {
-      response = await fetch(url, init);
+      response = await fetchWithSsrfProtection(url, init);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt === retries) break;
@@ -126,9 +142,8 @@ async function fetchWithRetry(
 
     // Auth failures — no retry
     if (response.status === 401 || response.status === 403) {
-      const body = await response.text().catch(() => "");
-      console.error(`[REST] Auth failed ${response.status} for ${url}: ${body.slice(0, 500)}`);
-      throw new Error(`Authentication failed (${response.status}): ${body.slice(0, 200)}`);
+      console.error(`[REST] Auth failed ${response.status} for ${redactUrlForLog(url)}`);
+      throw new Error(`Authentication failed (${response.status})`);
     }
 
     // Rate limited — wait and retry
@@ -220,7 +235,7 @@ export class RestApiProvider implements ConnectionProvider {
       headers["Content-Type"] = "application/json";
       const body = { ...buildAuthBody(authConfig, creds), PageSize: 1, PageNumber: 0 };
       const testUrl = `${baseUrl.replace(/\/$/, "")}/products/getProducts`;
-      const response = await fetch(testUrl, {
+      const response = await fetchWithSsrfProtection(testUrl, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
@@ -273,7 +288,7 @@ export class RestApiProvider implements ConnectionProvider {
       }
     }
 
-    const response = await fetch(testUrl, {
+    const response = await fetchWithSsrfProtection(testUrl, {
       method: "GET",
       headers,
       signal: AbortSignal.timeout(15_000),
@@ -317,7 +332,7 @@ export class RestApiProvider implements ConnectionProvider {
     const isBodyAuth = !!(authConfig as AuthConfig | undefined)?.bodyAuth;
     const isPost = pagination.requestMethod === "POST" || isBodyAuth;
 
-    console.log(`[REST extract] ${fullUrl} | authType=${authType} | method=${isPost ? "POST" : "GET"} | credKeys=${Object.keys(credentials).join(",")}`);
+    console.log(`[REST extract] ${redactUrlForLog(fullUrl)} | authType=${authType} | method=${isPost ? "POST" : "GET"}`);
 
     if (isPost) {
       headers["Content-Type"] = "application/json";

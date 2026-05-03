@@ -8,7 +8,7 @@ import { createConnectionSchema } from "@/lib/validations/unified-connections";
 // ─── GET /api/connections — list user's connections ──────────
 export const GET = withAuth(async (_req, session) => {
   const connections = await prisma.connection.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, tenantId: session.tenantId },
     select: {
       id: true,
       name: true,
@@ -47,6 +47,7 @@ export const POST = withAuth(async (req, session) => {
       config: config as Prisma.InputJsonValue,
       credentials: encrypt(JSON.stringify(credentials)),
       userId: session.user.id,
+      tenantId: session.tenantId,
     },
     select: {
       id: true,

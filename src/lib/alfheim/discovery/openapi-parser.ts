@@ -3,8 +3,10 @@
 // ---------------------------------------------------------------------------
 
 import SwaggerParser from "@apidevtools/swagger-parser";
+import { parse as parseYaml } from "yaml";
 import type { OpenAPI, OpenAPIV3, OpenAPIV2 } from "openapi-types";
 import type { SchemaMapping, ColumnMapping, ChildTableMapping } from "../types";
+import { fetchWithSsrfProtection } from "@/lib/ssrf";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -28,6 +30,11 @@ export interface ParsedSpec {
   endpoints: ParsedEndpoint[];
 }
 
+const validateOpenApi = SwaggerParser.validate as unknown as (
+  api: OpenAPI.Document,
+  options: { resolve: { external: boolean } },
+) => Promise<OpenAPI.Document>;
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -43,13 +50,25 @@ export async function parseOpenApiSpec(input: {
   // Parse and resolve $refs
   let api: OpenAPI.Document;
   if (input.specUrl) {
-    api = await SwaggerParser.validate(input.specUrl);
+    const response = await fetchWithSsrfProtection(input.specUrl, {
+      method: "GET",
+      headers: { Accept: "application/json, application/yaml, text/yaml, */*" },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch OpenAPI spec: HTTP ${response.status}`);
+    }
+    const raw = parseSpecText(await response.text());
+    api = await validateOpenApi(raw as OpenAPI.Document, {
+      resolve: { external: false },
+    });
   } else {
     const raw =
       typeof input.specContent === "string"
-        ? JSON.parse(input.specContent)
+        ? parseSpecText(input.specContent)
         : input.specContent;
-    api = await SwaggerParser.validate(raw as OpenAPI.Document);
+    api = await validateOpenApi(raw as OpenAPI.Document, {
+      resolve: { external: false },
+    });
   }
 
   const isOAS3 = "openapi" in api;
@@ -60,6 +79,14 @@ export async function parseOpenApiSpec(input: {
   const endpoints = extractEndpoints(api, isOAS3);
 
   return { title, version, baseUrl, auth, endpoints };
+}
+
+function parseSpecText(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return parseYaml(text);
+  }
 }
 
 // ---------------------------------------------------------------------------

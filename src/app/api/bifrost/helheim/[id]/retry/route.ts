@@ -18,7 +18,7 @@ export const POST = withAuth(async (req, session) => {
   const entry = await prisma.helheimEntry.findFirst({
     where: {
       id,
-      route: { userId: session.user.id },
+      route: { userId: session.user.id, tenantId: session.tenantId },
     },
     include: {
       route: {
@@ -45,14 +45,18 @@ export const POST = withAuth(async (req, session) => {
   const destProvider = getProvider(entry.route.dest.type);
   const destConnLike = toConnectionLike(entry.route.dest);
   const destConn = await destProvider.connect(destConnLike);
-  const rows = await decompressPayload(entry.payload);
   const destConfig = entry.route.destConfig as unknown as DestConfig;
 
   try {
+    const rows = await decompressPayload(entry.payload);
     const schema = inferSchemaFromRows(rows);
     const dateCols = getDateColumns(schema);
     if (dateCols.size > 0) normalizeRowDates(rows, dateCols);
-    const result = await destProvider.load!(destConn, rows, { ...destConfig, schema });
+    const result = await destProvider.load!(destConn, rows, {
+      ...destConfig,
+      schema,
+      writeDisposition: "WRITE_APPEND",
+    });
     await markRecovered(entry.id);
     return NextResponse.json({ status: "recovered", rowsLoaded: result.rowsLoaded });
   } catch (err) {

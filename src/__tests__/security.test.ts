@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeAll, describe, it, expect, vi } from "vitest";
 
 // ─── Task 29: SSRF Protection ────────────────────────
 describe("SSRF Protection", () => {
@@ -57,6 +57,18 @@ describe("SSRF Protection", () => {
   it("rejects 0.0.0.0", async () => {
     const result = await checkSsrf("0.0.0.0");
     expect(result).toContain("private IP");
+  });
+
+  it("rejects private REST API URLs", async () => {
+    const { checkSsrfUrl } = await import("@/lib/ssrf");
+    const result = await checkSsrfUrl("http://127.0.0.1:3000/openapi.json");
+    expect(result).toContain("private IP");
+  });
+
+  it("rejects non-http URL protocols", async () => {
+    const { checkSsrfUrl } = await import("@/lib/ssrf");
+    const result = await checkSsrfUrl("file:///etc/passwd");
+    expect(result).toContain("not allowed");
   });
 });
 
