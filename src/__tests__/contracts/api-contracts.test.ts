@@ -39,6 +39,7 @@ const routeListItemSchema = z.object({
   destId: z.string(),
   destConfig: jsonObject,
   transformEnabled: z.boolean(),
+  blueprintVersionId: z.string().nullable(),
   blueprintId: z.string().nullable(),
   frequency: z.string().nullable(),
   daysOfWeek: z.array(z.number()),

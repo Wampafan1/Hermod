@@ -18,10 +18,6 @@ import { canBeSource, canBeDestination } from "@/lib/providers/capabilities";
 import type { ConnectionType } from "@/lib/providers/types";
 import { CursorConfigPanel } from "./cursor-config-panel";
 import type { CursorConfig, ColumnSchema } from "@/lib/sync/types";
-import {
-  blueprintOptionLabel,
-  filterAttachableBlueprintOptions,
-} from "@/components/mjolnir/blueprint-status-badge";
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -39,10 +35,18 @@ interface FolderOption {
   connectionCount: number;
 }
 
-interface BlueprintOption {
+interface PublishedBlueprintOption {
   id: string;
   name: string;
   status: string;
+  latestVersion: {
+    id: string;
+    version: number;
+    stepsHash: string;
+    createdAt: string;
+    source: string;
+    isLocked: boolean;
+  } | null;
 }
 
 interface NetSuiteRecordType {
@@ -143,7 +147,7 @@ export function SyncBuilder() {
 
   // ── Forge state ──
   const [transformEnabled, setTransformEnabled] = useState(false);
-  const [blueprintId, setBlueprintId] = useState<string | null>(null);
+  const [blueprintVersionId, setBlueprintVersionId] = useState<string | null>(null);
 
   // ── Destination state ──
   const [destId, setDestId] = useState("");
@@ -169,7 +173,7 @@ export function SyncBuilder() {
   const [ravenAgents, setRavenAgents] = useState<RavenAgent[]>([]);
   const [folders, setFolders] = useState<FolderOption[]>([]);
   const [destFolderId, setDestFolderId] = useState<string | "">("");
-  const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
+  const [publishedBlueprints, setPublishedBlueprints] = useState<PublishedBlueprintOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
 
@@ -178,6 +182,10 @@ export function SyncBuilder() {
   const isNetSuiteSource = selectedSource?.type === "NETSUITE";
   const isRavenSource = !!ravenSatelliteId;
   const selectedDest = dataSources.find((ds) => ds.id === destId);
+  const publishedBlueprintOptions = publishedBlueprints.filter((bp) => bp.latestVersion);
+  const selectedPublishedBlueprint = blueprintVersionId
+    ? publishedBlueprints.find((bp) => bp.latestVersion?.id === blueprintVersionId) ?? null
+    : null;
 
   // Find selected Raven connection details for display
   const selectedRavenConn = useMemo(() => {
@@ -302,9 +310,9 @@ export function SyncBuilder() {
   useEffect(() => {
     Promise.all([
       fetch("/api/connections").then((r) => r.json()),
-      fetch("/api/mjolnir/blueprints?status=VALIDATED,ACTIVE")
+      fetch("/api/mjolnir/published-blueprints?includeVersions=true")
         .then((r) => r.json())
-        .catch(() => []),
+        .catch(() => ({ blueprints: [] })),
       fetch("/api/connection-folders")
         .then((r) => r.json())
         .catch(() => []),
@@ -314,7 +322,7 @@ export function SyncBuilder() {
     ])
       .then(([connections, bps, flds, ravens]) => {
         setDataSources(connections);
-        setBlueprints(filterAttachableBlueprintOptions(bps as BlueprintOption[]));
+        setPublishedBlueprints((bps as { blueprints?: PublishedBlueprintOption[] }).blueprints ?? []);
         setFolders(flds as FolderOption[]);
         setRavenAgents(Array.isArray(ravens) ? ravens : []);
       })
@@ -452,7 +460,8 @@ export function SyncBuilder() {
           ...(activeFieldMappings.length > 0 && { fieldMapping: fieldMap }),
         },
         transformEnabled,
-        blueprintId: transformEnabled ? blueprintId : null,
+        blueprintVersionId: transformEnabled ? blueprintVersionId : null,
+        blueprintId: null,
         cursorConfig,
         frequency: frequency || null,
         daysOfWeek,
@@ -1156,22 +1165,38 @@ export function SyncBuilder() {
                 </p>
 
                 <div>
-                  <label className="label-norse">Blueprint</label>
-                  <select
-                    value={blueprintId ?? ""}
-                    onChange={(e) => setBlueprintId(e.target.value || null)}
-                    className="select-norse"
-                  >
-                    <option value="">Select a blueprint...</option>
-                    {blueprints.map((bp) => (
-                      <option key={bp.id} value={bp.id}>
-                        {blueprintOptionLabel(bp)}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="label-norse">Published Blueprint Version</label>
+                  {publishedBlueprintOptions.length > 0 ? (
+                    <select
+                      value={blueprintVersionId ?? ""}
+                      onChange={(e) => setBlueprintVersionId(e.target.value || null)}
+                      className="select-norse"
+                    >
+                      <option value="">No transform blueprint</option>
+                      {publishedBlueprintOptions.map((bp) => (
+                        <option key={bp.latestVersion!.id} value={bp.latestVersion!.id}>
+                          {bp.name} ({bp.status}) v{bp.latestVersion!.version}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-text-dim text-[0.55rem] tracking-wider mt-1">
+                      No published blueprints. Publish one from Mjolnir before pinning this route.
+                    </p>
+                  )}
                   <p className="text-text-dim text-[0.55rem] tracking-wider mt-1">
-                    Stateless steps only (rename, filter, calculate)
+                    Published versions pin stateless transform steps for streaming routes
                   </p>
+                  {blueprintVersionId && (
+                    <p className="text-frost text-[0.55rem] tracking-wider mt-1">
+                      Pinned {selectedPublishedBlueprint
+                        ? `v${selectedPublishedBlueprint.latestVersion?.version}`
+                        : "version"}
+                      {selectedPublishedBlueprint?.latestVersion?.stepsHash
+                        ? ` - ${selectedPublishedBlueprint.latestVersion.stepsHash.slice(0, 12)}`
+                        : ""}
+                    </p>
+                  )}
                 </div>
               </>
             ) : (

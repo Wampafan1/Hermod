@@ -76,6 +76,7 @@ export function makeBifrostRoute(overrides: Record<string, unknown> = {}) {
       autoCreateTable: true,
     },
     transformEnabled: false,
+    blueprintVersionId: null,
     blueprintId: null,
     frequency: "DAILY",
     daysOfWeek: [],

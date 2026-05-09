@@ -17,6 +17,7 @@ import {
   getBlueprintExecutionDescriptor,
   type BlueprintExecutionDescriptor,
 } from "@/lib/mjolnir/blueprint-execution-descriptor";
+import { loadBifrostPinnedBlueprintVersion } from "@/lib/mjolnir/bifrost-blueprint-runtime";
 import { calculateNextRun } from "@/lib/schedule-utils";
 import type {
   DestConfig,
@@ -52,6 +53,7 @@ export interface LoadedRoute {
   sourceConfig: SourceConfig;
   destConfig: DestConfig;
   transformEnabled: boolean;
+  blueprintVersionId: string | null;
   blueprintId: string | null;
   lastCheckpoint: Date | null;
   cursorConfig: CursorConfig | null;
@@ -326,7 +328,25 @@ export class BifrostEngine {
 
       // 4. Pre-fetch blueprint if transform is enabled (once, not per-chunk)
       let blueprintSteps: Array<{ type: string; order: number; config: Record<string, unknown> }> | null = null;
-      if (route.transformEnabled && route.blueprintId) {
+      if (route.transformEnabled && route.blueprintVersionId) {
+        const { version, steps } = await loadBifrostPinnedBlueprintVersion({
+          blueprintVersionId: route.blueprintVersionId,
+          tenantId: route.tenantId,
+        });
+
+        blueprintExecutionDescriptor = getBlueprintExecutionDescriptor({
+          blueprint: {
+            id: version.blueprintId,
+            name: version.blueprint.name,
+            status: version.blueprint.status,
+            steps: version.steps,
+          },
+          blueprintVersionId: version.id,
+          executionMode: "PINNED_VERSION",
+          stepsHash: version.stepsHash,
+        });
+        blueprintSteps = steps;
+      } else if (route.transformEnabled && route.blueprintId) {
         const blueprint = await prisma.blueprint.findUniqueOrThrow({
           where: { id: route.blueprintId },
           select: { id: true, name: true, status: true, steps: true },

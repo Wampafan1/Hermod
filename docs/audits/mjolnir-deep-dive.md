@@ -1153,3 +1153,11 @@ Do not start the migration until those product decisions are made.
 - Report execution prefers pinned `BlueprintVersion.steps`, `sourceSchema`, `afterFormatting`, and stored `stepsHash` when present.
 - Legacy reports with only `Report.blueprintId` still execute through the mutable fallback and retain the legacy execution warning.
 - Bifrost and RealmGate execution remain unchanged until their dedicated pinning phases.
+
+## Bifrost Version Pinning Note
+
+- Bifrost routes can now attach to tenant-published immutable `BlueprintVersion` records through `blueprintVersionId`.
+- Bifrost create/update prefers `blueprintVersionId` over legacy `blueprintId` and validates tenant, lock state, parent scope/status, and streaming compatibility.
+- Bifrost execution and Raven resume now prefer pinned `BlueprintVersion.steps` when present.
+- Legacy routes with only `BifrostRoute.blueprintId` still execute through the mutable fallback and retain the legacy execution warning.
+- Report behavior remains as implemented in Phase 3, and RealmGate execution remains unchanged until its dedicated pinning phase.

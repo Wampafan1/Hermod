@@ -11,6 +11,8 @@ import { BifrostEngine, loadRouteWithRelations } from "../engine";
 import { getProvider, toConnectionLike } from "@/lib/providers";
 import { executeBlueprint } from "@/lib/mjolnir/engine/blueprint-executor";
 import { validateBlueprintForStreaming } from "../forge/forge-validator";
+import { getBlueprintExecutionDescriptor } from "@/lib/mjolnir/blueprint-execution-descriptor";
+import { loadBifrostPinnedBlueprintVersion } from "@/lib/mjolnir/bifrost-blueprint-runtime";
 import { enqueueDeadLetter } from "../helheim/dead-letter";
 import { inferSchemaFromRows, normalizeRowDates, getDateColumns } from "../engine";
 import type { DestConfig } from "../types";
@@ -102,10 +104,22 @@ export async function handleRavenResume(job: {
 
     // 3. Optional Transform (Nidavellir forge)
     let rows = allRows;
-    if (route.transformEnabled && route.blueprintId) {
+    if (route.transformEnabled && route.blueprintVersionId) {
+      const { steps } = await loadBifrostPinnedBlueprintVersion({
+        blueprintVersionId: route.blueprintVersionId,
+        tenantId: route.tenantId,
+      });
+
+      const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+      const result = executeBlueprint(steps as any, { columns, rows });
+      rows = result.rows;
+      console.log(
+        `[Bifrost/Raven] Transform complete: ${totalExtracted} -> ${rows.length} rows`
+      );
+    } else if (route.transformEnabled && route.blueprintId) {
       const blueprint = await prisma.blueprint.findUniqueOrThrow({
         where: { id: route.blueprintId },
-        select: { id: true, status: true, steps: true },
+        select: { id: true, name: true, status: true, steps: true },
       });
       if (blueprint.status === "ARCHIVED") {
         throw new Error("Archived blueprints cannot be executed by Bifrost routes.");
@@ -114,6 +128,17 @@ export async function handleRavenResume(job: {
         console.warn(
           `[Bifrost/Raven] Route ${route.id} is using legacy DRAFT blueprint ${blueprint.id}; new DRAFT attachments are blocked.`
         );
+      }
+      const descriptor = getBlueprintExecutionDescriptor({
+        blueprint: {
+          id: blueprint.id,
+          name: blueprint.name,
+          status: blueprint.status,
+          steps: blueprint.steps,
+        },
+      });
+      if (descriptor.warning) {
+        console.warn(`[Bifrost/Raven] ${descriptor.warning}`);
       }
       const steps = blueprint.steps as Array<{
         type: string;

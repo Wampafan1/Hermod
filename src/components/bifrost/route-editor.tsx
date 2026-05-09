@@ -9,9 +9,6 @@ import type { ConnectionType } from "@/lib/providers/types";
 import { DaySelector } from "@/components/schedule/day-selector";
 import { COMMON_TIMEZONES, OTHER_TIMEZONES } from "@/lib/timezones";
 import {
-  blueprintOptionLabel,
-  filterAttachableBlueprintOptions,
-  findLegacyCurrentBlueprint,
   legacyCurrentBlueprintLabel,
 } from "@/components/mjolnir/blueprint-status-badge";
 
@@ -33,6 +30,31 @@ interface BlueprintOption {
   id: string;
   name: string;
   status: string;
+}
+
+interface PublishedBlueprintOption {
+  id: string;
+  name: string;
+  status: string;
+  latestVersion: {
+    id: string;
+    version: number;
+    stepsHash: string;
+    createdAt: string;
+    source: string;
+    isLocked: boolean;
+  } | null;
+}
+
+interface CurrentBlueprintVersion {
+  id: string;
+  version: number;
+  stepsHash: string;
+  blueprint?: {
+    id: string;
+    name: string;
+    status: string;
+  } | null;
 }
 
 interface NetSuiteRecordType {
@@ -107,6 +129,8 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
   const [autoCreateTable, setAutoCreateTable] = useState(false);
   const [transformEnabled, setTransformEnabled] = useState(false);
   const [blueprintId, setBlueprintId] = useState<string | null>(null);
+  const [blueprintVersionId, setBlueprintVersionId] = useState<string | null>(null);
+  const [currentBlueprintVersion, setCurrentBlueprintVersion] = useState<CurrentBlueprintVersion | null>(null);
   const [frequency, setFrequency] = useState("");
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>([1]); // Monday
   const [dayOfMonth, setDayOfMonth] = useState<number | null>(1);
@@ -127,11 +151,17 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
   const [folders, setFolders] = useState<FolderOption[]>([]);
   const [destFolderId, setDestFolderId] = useState<string | "">("");
-  const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
+  const [publishedBlueprints, setPublishedBlueprints] = useState<PublishedBlueprintOption[]>([]);
+  const [legacyBlueprints, setLegacyBlueprints] = useState<BlueprintOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEdit);
-  const attachableBlueprints = filterAttachableBlueprintOptions(blueprints);
-  const legacyCurrentBlueprint = findLegacyCurrentBlueprint(blueprints, blueprintId);
+  const publishedOptions = publishedBlueprints.filter((bp) => bp.latestVersion);
+  const legacyCurrentBlueprint = blueprintId
+    ? legacyBlueprints.find((bp) => bp.id === blueprintId) ?? null
+    : null;
+  const selectedPublishedBlueprint = blueprintVersionId
+    ? publishedBlueprints.find((bp) => bp.latestVersion?.id === blueprintVersionId) ?? null
+    : null;
 
   // Derived: selected source type
   const selectedSource = dataSources.find((ds) => ds.id === sourceId);
@@ -220,14 +250,25 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
       .then((data) => setFolders(data))
       .catch(() => {/* folders are optional */});
 
-    const include = blueprintId ? `&include=${encodeURIComponent(blueprintId)}` : "";
-    fetch(`/api/mjolnir/blueprints?status=VALIDATED,ACTIVE${include}`)
+    fetch("/api/mjolnir/published-blueprints?includeVersions=true")
       .then((r) => r.json())
-      .then((data) =>
-        setBlueprints(data as BlueprintOption[])
+      .then((data: { blueprints?: PublishedBlueprintOption[] }) =>
+        setPublishedBlueprints(data.blueprints ?? [])
       )
       .catch(() => toast.error("Failed to load blueprints"));
-  }, [blueprintId, toast]);
+  }, [toast]);
+
+  useEffect(() => {
+    if (!blueprintId) {
+      setLegacyBlueprints([]);
+      return;
+    }
+
+    fetch(`/api/mjolnir/blueprints?status=VALIDATED,ACTIVE&include=${encodeURIComponent(blueprintId)}`)
+      .then((r) => r.json())
+      .then((data: BlueprintOption[]) => setLegacyBlueprints(data))
+      .catch(() => {});
+  }, [blueprintId]);
 
   // Load existing route in edit mode
   useEffect(() => {
@@ -257,6 +298,8 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
         setAutoCreateTable(dc?.autoCreateTable ?? false);
         setTransformEnabled(route.transformEnabled);
         setBlueprintId(route.blueprintId);
+        setBlueprintVersionId(route.blueprintVersionId ?? null);
+        setCurrentBlueprintVersion(route.blueprintVersion ?? null);
         setFrequency(route.frequency ?? "");
         setDaysOfWeek(route.daysOfWeek ?? [1]);
         setDayOfMonth(route.dayOfMonth);
@@ -302,7 +345,8 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
         autoCreateTable,
       },
       transformEnabled,
-      blueprintId: transformEnabled ? blueprintId : null,
+      blueprintVersionId: transformEnabled ? blueprintVersionId : null,
+      blueprintId: transformEnabled && !blueprintVersionId ? blueprintId : null,
       frequency: frequency || null,
       daysOfWeek,
       dayOfMonth,
@@ -314,6 +358,20 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
       ...(cursorConfig !== null && { cursorConfig }),
       ...(needsFullReload && { needsFullReload: true }),
     };
+  }
+
+  function handleBlueprintSelect(value: string) {
+    if (!value) {
+      setBlueprintVersionId(null);
+      setCurrentBlueprintVersion(null);
+      setBlueprintId(null);
+      return;
+    }
+    if (value.startsWith("legacy:")) return;
+
+    setBlueprintVersionId(value);
+    setCurrentBlueprintVersion(null);
+    setBlueprintId(null);
   }
 
   /** Detect whether NS fields or query changed compared to original saved state. */
@@ -768,30 +826,65 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
         </label>
 
         {transformEnabled && (
-          <Label text="Blueprint">
-            <select
-              value={blueprintId ?? ""}
-              onChange={(e) => setBlueprintId(e.target.value || null)}
-              className="select-norse"
-            >
-              <option value="">Select a blueprint...</option>
-              {legacyCurrentBlueprint && (
-                <option value={legacyCurrentBlueprint.id} disabled>
-                  {legacyCurrentBlueprintLabel(legacyCurrentBlueprint)}
-                </option>
-              )}
-              {attachableBlueprints.map((bp) => (
-                <option key={bp.id} value={bp.id}>
-                  {blueprintOptionLabel(bp)}
-                </option>
-              ))}
-            </select>
+          <Label text="Published Blueprint Version">
+            {publishedOptions.length > 0 || legacyCurrentBlueprint || currentBlueprintVersion ? (
+              <select
+                value={blueprintVersionId ?? (legacyCurrentBlueprint ? `legacy:${legacyCurrentBlueprint.id}` : "")}
+                onChange={(e) => handleBlueprintSelect(e.target.value)}
+                className="select-norse"
+              >
+                <option value="">No transform blueprint</option>
+                {legacyCurrentBlueprint && (
+                  <option value={`legacy:${legacyCurrentBlueprint.id}`} disabled>
+                    {legacyCurrentBlueprintLabel(legacyCurrentBlueprint)}
+                  </option>
+                )}
+                {currentBlueprintVersion && !selectedPublishedBlueprint && (
+                  <option value={currentBlueprintVersion.id}>
+                    {currentBlueprintVersion.blueprint?.name ?? "Pinned blueprint"} (v{currentBlueprintVersion.version})
+                  </option>
+                )}
+                {publishedOptions.map((bp) => (
+                  <option key={bp.latestVersion!.id} value={bp.latestVersion!.id}>
+                    {bp.name} ({bp.status}) v{bp.latestVersion!.version}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-text-dim text-[0.6rem] tracking-wider">
+                No published blueprints. Publish one from Mjolnir before pinning this route.
+              </p>
+            )}
             <p className="text-text-dim text-[0.6rem] tracking-wider mt-1">
-              Only stateless steps (rename, filter, calculate) are supported for streaming routes
+              Published versions pin stateless transform steps for streaming routes
             </p>
+            {blueprintVersionId && (
+              <p className="text-frost text-[0.6rem] tracking-wider mt-1">
+                Pinned {selectedPublishedBlueprint
+                  ? `v${selectedPublishedBlueprint.latestVersion?.version}`
+                  : currentBlueprintVersion
+                  ? `v${currentBlueprintVersion.version}`
+                  : "version"}
+                {selectedPublishedBlueprint?.latestVersion?.stepsHash
+                  ? ` - ${selectedPublishedBlueprint.latestVersion.stepsHash.slice(0, 12)}`
+                  : currentBlueprintVersion?.stepsHash
+                  ? ` - ${currentBlueprintVersion.stepsHash.slice(0, 12)}`
+                  : ""}
+              </p>
+            )}
             {legacyCurrentBlueprint && (
               <p className="text-ember text-[0.6rem] tracking-wider mt-1">
-                {legacyCurrentBlueprintLabel(legacyCurrentBlueprint)}. It remains attached for legacy use but cannot be selected for new attachments.
+                This route uses a legacy mutable blueprint. Select a published version to pin execution.
+              </p>
+            )}
+            {!blueprintVersionId && !legacyCurrentBlueprint && (
+              <p className="text-text-dim text-[0.6rem] tracking-wider mt-1">
+                Only stateless steps (rename, filter, calculate) are supported for streaming routes
+              </p>
+            )}
+            {currentBlueprintVersion && !selectedPublishedBlueprint && (
+              <p className="text-text-dim text-[0.6rem] tracking-wider mt-1">
+                Current pinned version is no longer in the default published list.
               </p>
             )}
           </Label>

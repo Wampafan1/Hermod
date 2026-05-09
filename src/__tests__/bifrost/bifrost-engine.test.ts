@@ -8,6 +8,7 @@ const {
   mockUpdateMany,
   mockFindUniqueOrThrow,
   mockBifrostRouteUpdate,
+  mockBlueprintVersionFindFirst,
   mockForgeBlueprintFindUnique,
   mockForgeBlueprintVersionFindFirst,
   mockRecordExecution,
@@ -26,6 +27,7 @@ const {
   mockUpdateMany: vi.fn(),
   mockFindUniqueOrThrow: vi.fn(),
   mockBifrostRouteUpdate: vi.fn(),
+  mockBlueprintVersionFindFirst: vi.fn(),
   mockForgeBlueprintFindUnique: vi.fn(),
   mockForgeBlueprintVersionFindFirst: vi.fn(),
   mockRecordExecution: vi.fn(),
@@ -53,6 +55,9 @@ vi.mock("@prisma/client", () => ({
       },
       blueprint: {
         findUniqueOrThrow: mockFindUniqueOrThrow,
+      },
+      blueprintVersion: {
+        findFirst: mockBlueprintVersionFindFirst,
       },
       forgeBlueprint: {
         findUnique: mockForgeBlueprintFindUnique,
@@ -130,6 +135,8 @@ vi.mock("@/lib/schedule-utils", () => ({
 import { BifrostEngine } from "@/lib/bifrost/engine";
 import type { LoadedRoute } from "@/lib/bifrost/engine";
 import { enqueueDeadLetter } from "@/lib/bifrost/helheim/dead-letter";
+import { validateBlueprintForStreaming } from "@/lib/bifrost/forge/forge-validator";
+import { executeBlueprint } from "@/lib/mjolnir/engine/blueprint-executor";
 
 // ─── Test Route ──────────────────────────────────────
 
@@ -138,6 +145,7 @@ function makeRoute(overrides?: Partial<LoadedRoute>): LoadedRoute {
     id: "route_1",
     name: "Test Route",
     enabled: true,
+    tenantId: "tenant_1",
     sourceId: "src_1",
     source: { id: "src_1", type: "BIGQUERY", config: {}, credentials: null },
     ravenSatelliteId: null,
@@ -153,6 +161,7 @@ function makeRoute(overrides?: Partial<LoadedRoute>): LoadedRoute {
       chunkSize: 100, // small batch for tests — each 100-row chunk triggers a load
     },
     transformEnabled: false,
+    blueprintVersionId: null,
     blueprintId: null,
     lastCheckpoint: null,
     cursorConfig: null,
@@ -181,6 +190,33 @@ async function* asyncGenFromChunks(chunks: Record<string, unknown>[][]) {
   }
 }
 
+function blueprintVersion(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "bv_1",
+    blueprintId: "bp_published",
+    tenantId: "tenant_1",
+    version: 1,
+    steps: [{
+      order: 0,
+      type: "rename_columns",
+      confidence: 1,
+      config: { mapping: { value: "Value" } },
+      description: "Rename value",
+    }],
+    stepsHash: "a".repeat(64),
+    sourceSchema: null,
+    afterFormatting: null,
+    isLocked: true,
+    blueprint: {
+      id: "bp_published",
+      name: "Published Route Transform",
+      status: "ACTIVE",
+      scope: "TENANT_PUBLISHED",
+    },
+    ...overrides,
+  };
+}
+
 // ─── Tests ───────────────────────────────────────────
 
 describe("BifrostEngine", () => {
@@ -203,6 +239,7 @@ describe("BifrostEngine", () => {
     mockUpdate.mockResolvedValue({});
     mockUpdateMany.mockResolvedValue({ count: 0 });
     mockForgeBlueprintFindUnique.mockResolvedValue(null);
+    mockBlueprintVersionFindFirst.mockResolvedValue(null);
     mockForgeBlueprintVersionFindFirst.mockResolvedValue(null);
     mockRecordExecution.mockResolvedValue({ id: "exec_1" });
   });
@@ -434,6 +471,124 @@ describe("BifrostEngine", () => {
 
     expect(result.duration).toBeGreaterThanOrEqual(0);
     expect(typeof result.duration).toBe("number");
+  });
+
+  it("uses BlueprintVersion.steps when blueprintVersionId exists", async () => {
+    const version = blueprintVersion();
+    mockBlueprintVersionFindFirst.mockResolvedValue(version);
+    mockExtractGen.mockImplementation(() => asyncGenFromChunks([[{ id: 1, value: "A" }]]));
+    mockLoad.mockResolvedValue({ rowsLoaded: 1, errors: [] });
+
+    const result = await engine.execute(
+      makeRoute({
+        transformEnabled: true,
+        blueprintVersionId: "bv_1",
+        blueprintId: "bp_legacy",
+      }),
+      "manual"
+    );
+
+    expect(result.status).toBe("completed");
+    expect(mockBlueprintVersionFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "bv_1", tenantId: "tenant_1" },
+    }));
+    expect(mockFindUniqueOrThrow).not.toHaveBeenCalled();
+    expect(vi.mocked(executeBlueprint)).toHaveBeenCalledWith(
+      version.steps,
+      expect.objectContaining({ rows: [{ id: 1, value: "A" }] })
+    );
+    expect(result.blueprintExecutionDescriptor).toMatchObject({
+      blueprintId: "bp_published",
+      blueprintName: "Published Route Transform",
+      blueprintStatus: "ACTIVE",
+      blueprintVersionId: "bv_1",
+      executionMode: "PINNED_VERSION",
+      stepsHash: "a".repeat(64),
+    });
+    expect(result.blueprintExecutionDescriptor).not.toHaveProperty("warning");
+  });
+
+  it("falls back to legacy blueprintId when no blueprintVersionId exists", async () => {
+    mockFindUniqueOrThrow.mockResolvedValue({
+      id: "bp_legacy",
+      name: "Legacy Route Transform",
+      status: "ACTIVE",
+      steps: [{ order: 0, type: "rename_columns", config: { mapping: { value: "Value" } } }],
+    });
+    mockExtractGen.mockImplementation(() => asyncGenFromChunks([[{ id: 1, value: "A" }]]));
+    mockLoad.mockResolvedValue({ rowsLoaded: 1, errors: [] });
+
+    const result = await engine.execute(
+      makeRoute({ transformEnabled: true, blueprintId: "bp_legacy" }),
+      "manual"
+    );
+
+    expect(result.status).toBe("completed");
+    expect(mockBlueprintVersionFindFirst).not.toHaveBeenCalled();
+    expect(mockFindUniqueOrThrow).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "bp_legacy" },
+    }));
+    expect(result.blueprintExecutionDescriptor).toMatchObject({
+      blueprintId: "bp_legacy",
+      blueprintVersionId: null,
+      executionMode: "MUTABLE_LEGACY",
+    });
+  });
+
+  it("fails clearly when a pinned BlueprintVersion is missing", async () => {
+    mockBlueprintVersionFindFirst.mockResolvedValue(null);
+
+    const result = await engine.execute(
+      makeRoute({ transformEnabled: true, blueprintVersionId: "bv_missing" }),
+      "manual"
+    );
+
+    expect(result.status).toBe("failed");
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        error: "Pinned blueprint version not found for this tenant.",
+      }),
+    }));
+  });
+
+  it("fails clearly when a pinned BlueprintVersion is unlocked", async () => {
+    mockBlueprintVersionFindFirst.mockResolvedValue(blueprintVersion({ isLocked: false }));
+
+    const result = await engine.execute(
+      makeRoute({ transformEnabled: true, blueprintVersionId: "bv_1" }),
+      "manual"
+    );
+
+    expect(result.status).toBe("failed");
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        error: "Pinned blueprint version must be locked before execution.",
+      }),
+    }));
+  });
+
+  it("fails streaming-incompatible pinned versions before chunk execution", async () => {
+    mockBlueprintVersionFindFirst.mockResolvedValue(blueprintVersion({
+      steps: [{ order: 0, type: "sort", config: {} }],
+    }));
+    vi.mocked(validateBlueprintForStreaming).mockReturnValueOnce({
+      valid: false,
+      statefulSteps: ["sort"],
+      suggestion: "Add ORDER BY to your source query",
+    });
+
+    const result = await engine.execute(
+      makeRoute({ transformEnabled: true, blueprintVersionId: "bv_1" }),
+      "manual"
+    );
+
+    expect(result.status).toBe("failed");
+    expect(mockExtractGen).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        error: "Blueprint version contains stateful steps not supported in streaming mode: sort",
+      }),
+    }));
   });
 
   it("returns a mutable blueprint execution descriptor when transform uses current Blueprint steps", async () => {

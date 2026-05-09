@@ -4,7 +4,7 @@ import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { createRouteSchema } from "@/lib/validations/bifrost";
 import { calculateNextRun } from "@/lib/schedule-utils";
-import { validateOptionalAttachableBlueprint } from "@/lib/mjolnir/blueprint-attach";
+import { validateBifrostBlueprintAttachment } from "@/lib/mjolnir/bifrost-blueprint-attach";
 
 // GET /api/bifrost/routes — List all routes for current user
 export const GET = withAuth(async (req, session) => {
@@ -64,12 +64,12 @@ export const POST = withAuth(async (req, session) => {
     return NextResponse.json({ error: "Destination connection not found" }, { status: 404 });
   }
 
-  const blueprintValidation = await validateOptionalAttachableBlueprint({
-    blueprintId: data.blueprintId,
+  const blueprintValidation = await validateBifrostBlueprintAttachment({
+    blueprintVersionId: data.blueprintVersionId,
+    legacyBlueprintId: data.blueprintId,
     userId: session.user.id,
     tenantId: session.tenantId,
-    context: "bifrost-route",
-    requireStreamingCompatible: data.transformEnabled && !!data.blueprintId,
+    transformEnabled: data.transformEnabled,
   });
   if (!blueprintValidation.ok) {
     return NextResponse.json(
@@ -107,7 +107,8 @@ export const POST = withAuth(async (req, session) => {
       destId: data.destId,
       destConfig: data.destConfig as Prisma.InputJsonValue,
       transformEnabled: data.transformEnabled,
-      blueprintId: blueprintValidation.blueprint?.id ?? null,
+      blueprintVersionId: blueprintValidation.data.blueprintVersionId,
+      blueprintId: blueprintValidation.data.blueprintId,
       frequency: data.frequency ?? null,
       daysOfWeek: data.daysOfWeek,
       dayOfMonth: data.dayOfMonth ?? null,

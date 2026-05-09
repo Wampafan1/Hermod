@@ -1334,6 +1334,65 @@ What is intentionally not changed:
 - `Report.blueprintId` remains in schema and runtime fallback.
 - No legacy fallback removal was performed.
 
+## Phase 4 Bifrost Version Pinning Results
+
+Bifrost create/update behavior:
+
+- `src/lib/validations/bifrost.ts` now accepts nullable optional `blueprintVersionId` while preserving legacy `blueprintId`.
+- Added `src/lib/mjolnir/bifrost-blueprint-attach.ts` to validate Bifrost route attachments through one version-first path.
+- If `blueprintVersionId` is provided, it wins over legacy `blueprintId`.
+- Bifrost route create/update stores `blueprintVersionId` and clears `blueprintId` for pinned attachments.
+- Legacy `blueprintId` remains accepted for compatibility and still uses the existing lifecycle and streaming-compatibility guards.
+
+Bifrost engine behavior:
+
+- `BifrostEngine.execute()` now prefers `route.blueprintVersionId` when present.
+- Pinned execution loads the version by `blueprintVersionId` and route tenant using a Bifrost runtime loader.
+- Pinned execution uses immutable `BlueprintVersion.steps` and stored `stepsHash`.
+- The engine does not load mutable `Blueprint.steps` when a pinned version is present.
+- Missing, wrong-tenant, unlocked, non-tenant-published, DRAFT, ARCHIVED, or streaming-incompatible pinned versions fail clearly before chunk execution.
+
+Raven resume behavior:
+
+- `handleRavenResume()` mirrors the engine path: pinned `BlueprintVersion` first, legacy `blueprintId` fallback second.
+- Raven resume validates tenant, lock state, parent scope/status, and streaming compatibility before transforming uploaded chunks.
+- Existing Raven safety blocks for staged MERGE and direct `WRITE_TRUNCATE` remain unchanged.
+
+Legacy fallback behavior:
+
+- Bifrost routes with only legacy `blueprintId` still run through the mutable blueprint path.
+- Legacy execution continues to emit mutable execution warning/descriptor metadata.
+- No existing Bifrost routes are auto-published, auto-pinned, or migrated in this phase.
+
+UI selector behavior:
+
+- Bifrost create/edit selectors now fetch `/api/mjolnir/published-blueprints?includeVersions=true`.
+- New route selections save the latest published tenant version through `blueprintVersionId`.
+- Legacy routes show warning copy: select a published version to pin execution.
+- Pinned routes show version number and a short `stepsHash` cue without exposing raw steps or analysis metadata.
+
+Tests added:
+
+- `src/__tests__/bifrost/bifrost-blueprint-attach.test.ts`: no attachment with transform disabled, valid/cross-tenant/unlocked/DRAFT/ARCHIVED/streaming-incompatible pinned versions, valid/DRAFT/stateful legacy blueprints, version-wins behavior, route create/update version storage, invalid version rejection, and legacy compatibility.
+- `src/__tests__/bifrost/bifrost-engine.test.ts`: pinned version execution, mutable step non-loading, legacy fallback, missing pinned failure, unlocked pinned failure, streaming-incompatible pinned failure, and pinned execution descriptor metadata.
+- `src/__tests__/bifrost/raven-resume.test.ts`: Raven resume pinned version execution without falling back to mutable `Blueprint.steps`.
+
+Validation results:
+
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 99 test files and 1309 tests.
+- `npm run build`: passed with existing lint warnings.
+- `npm run lint`: passed with existing warnings.
+
+What is intentionally not changed:
+
+- Report behavior was already handled in Phase 3 and was not changed here.
+- RealmGate still uses legacy fields.
+- No production backfill was added.
+- `BifrostRoute.blueprintId` remains in schema and runtime fallback.
+- No legacy fallback removal was performed.
+
 ## Open Product Decisions
 
 1. Should published blueprint parent reuse `Blueprint` with `scope = TENANT_PUBLISHED`, or use a separate `PublishedBlueprint` model?

@@ -5,12 +5,18 @@ const {
   mockRavenJobFindUniqueOrThrow,
   mockRouteLogUpdate,
   mockRavenIngestChunkFindMany,
+  mockRavenIngestChunkDeleteMany,
+  mockBlueprintFindUniqueOrThrow,
+  mockBlueprintVersionFindFirst,
   mockGetProvider,
 } = vi.hoisted(() => ({
   mockRouteFindUniqueOrThrow: vi.fn(),
   mockRavenJobFindUniqueOrThrow: vi.fn(),
   mockRouteLogUpdate: vi.fn(),
   mockRavenIngestChunkFindMany: vi.fn(),
+  mockRavenIngestChunkDeleteMany: vi.fn(),
+  mockBlueprintFindUniqueOrThrow: vi.fn(),
+  mockBlueprintVersionFindFirst: vi.fn(),
   mockGetProvider: vi.fn(),
 }));
 
@@ -25,13 +31,16 @@ vi.mock("@/lib/db", () => ({
     },
     ravenIngestChunk: {
       findMany: mockRavenIngestChunkFindMany,
-      deleteMany: vi.fn(),
+      deleteMany: mockRavenIngestChunkDeleteMany,
     },
     routeLog: {
       update: mockRouteLogUpdate,
     },
     blueprint: {
-      findUniqueOrThrow: vi.fn(),
+      findUniqueOrThrow: mockBlueprintFindUniqueOrThrow,
+    },
+    blueprintVersion: {
+      findFirst: mockBlueprintVersionFindFirst,
     },
   },
 }));
@@ -52,6 +61,8 @@ vi.mock("@/lib/mjolnir/engine/blueprint-executor", () => ({
 vi.mock("@/lib/bifrost/forge/forge-validator", () => ({
   validateBlueprintForStreaming: vi.fn().mockReturnValue({ valid: true, statefulSteps: [] }),
 }));
+
+import { executeBlueprint } from "@/lib/mjolnir/engine/blueprint-executor";
 
 function makeRoute(overrides: Record<string, unknown> = {}) {
   return {
@@ -84,6 +95,7 @@ function makeRoute(overrides: Record<string, unknown> = {}) {
       autoCreateTable: false,
     },
     transformEnabled: false,
+    blueprintVersionId: null,
     blueprintId: null,
     lastCheckpoint: null,
     cursorConfig: {
@@ -113,6 +125,9 @@ describe("Raven resume handler", () => {
     mockRouteFindUniqueOrThrow.mockResolvedValue(makeRoute());
     mockRavenJobFindUniqueOrThrow.mockResolvedValue({ id: "job_1", status: "success" });
     mockRouteLogUpdate.mockResolvedValue({});
+    mockRavenIngestChunkDeleteMany.mockResolvedValue({ count: 0 });
+    mockBlueprintVersionFindFirst.mockResolvedValue(null);
+    mockBlueprintFindUniqueOrThrow.mockResolvedValue(null);
     mockGetProvider.mockReturnValue({ mergeInto: vi.fn() });
   });
 
@@ -165,6 +180,81 @@ describe("Raven resume handler", () => {
       data: expect.objectContaining({
         status: "failed",
         error: expect.stringContaining("WRITE_TRUNCATE"),
+      }),
+    });
+  });
+
+  it("prefers pinned BlueprintVersion steps when resuming a Raven route", async () => {
+    const close = vi.fn();
+    const load = vi.fn().mockResolvedValue({ rowsLoaded: 1, errors: [] });
+    const versionSteps = [{ order: 0, type: "rename_columns", config: { mapping: { value: "Value" } } }];
+    mockRouteFindUniqueOrThrow.mockResolvedValueOnce(makeRoute({
+      cursorConfig: null,
+      transformEnabled: true,
+      blueprintVersionId: "bv_1",
+      blueprintId: "bp_legacy",
+    }));
+    mockBlueprintVersionFindFirst.mockResolvedValue({
+      id: "bv_1",
+      blueprintId: "bp_published",
+      tenantId: "tenant_1",
+      version: 1,
+      steps: versionSteps,
+      stepsHash: "a".repeat(64),
+      sourceSchema: null,
+      afterFormatting: null,
+      isLocked: true,
+      blueprint: {
+        id: "bp_published",
+        name: "Published Raven Transform",
+        status: "ACTIVE",
+        scope: "TENANT_PUBLISHED",
+      },
+    });
+    mockRavenIngestChunkFindMany.mockResolvedValue([
+      { data: [{ id: 1, value: "A" }] },
+    ]);
+    mockGetProvider.mockReturnValue({
+      connect: vi.fn().mockResolvedValue({ close }),
+      load,
+    });
+    vi.mocked(executeBlueprint).mockReturnValue({
+      columns: [],
+      rows: [{ id: 1, Value: "A" }],
+      warnings: [],
+      metrics: [],
+      totalDurationMs: 0,
+    });
+
+    const { handleRavenResume } = await import("@/lib/bifrost/jobs/raven-resume.handler");
+
+    await handleRavenResume({
+      data: {
+        routeId: "route_1",
+        routeLogId: "log_1",
+        ravenJobId: "job_1",
+      },
+    });
+
+    expect(mockBlueprintVersionFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "bv_1", tenantId: "tenant_1" },
+    }));
+    expect(mockBlueprintFindUniqueOrThrow).not.toHaveBeenCalled();
+    expect(vi.mocked(executeBlueprint)).toHaveBeenCalledWith(
+      versionSteps,
+      expect.objectContaining({ rows: [{ id: 1, value: "A" }] })
+    );
+    expect(load).toHaveBeenCalledWith(
+      expect.anything(),
+      [{ id: 1, Value: "A" }],
+      expect.objectContaining({ table: "customers" })
+    );
+    expect(mockRouteLogUpdate).toHaveBeenCalledWith({
+      where: { id: "log_1" },
+      data: expect.objectContaining({
+        status: "completed",
+        rowsExtracted: 1,
+        rowsLoaded: 1,
       }),
     });
   });

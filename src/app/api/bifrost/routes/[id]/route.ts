@@ -4,7 +4,7 @@ import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { updateRouteSchema } from "@/lib/validations/bifrost";
 import { calculateNextRun } from "@/lib/schedule-utils";
-import { validateOptionalAttachableBlueprint } from "@/lib/mjolnir/blueprint-attach";
+import { validateBifrostBlueprintAttachment } from "@/lib/mjolnir/bifrost-blueprint-attach";
 
 // GET /api/bifrost/routes/[id]
 export const GET = withAuth(async (req, session) => {
@@ -16,6 +16,18 @@ export const GET = withAuth(async (req, session) => {
       source: { select: { id: true, name: true, type: true } },
       dest: { select: { id: true, name: true, type: true } },
       blueprint: { select: { id: true, name: true, status: true } },
+      blueprintVersion: {
+        select: {
+          id: true,
+          blueprintId: true,
+          version: true,
+          stepsHash: true,
+          createdAt: true,
+          source: true,
+          isLocked: true,
+          blueprint: { select: { id: true, name: true, status: true } },
+        },
+      },
     },
   });
 
@@ -75,21 +87,36 @@ export const PUT = withAuth(async (req, session) => {
   }
 
   let blueprintId: string | null | undefined;
-  const blueprintChanged = data.blueprintId !== undefined && data.blueprintId !== existing.blueprintId;
+  let blueprintVersionId: string | null | undefined;
+  const attachmentFieldIncluded =
+    data.blueprintVersionId !== undefined ||
+    data.blueprintId !== undefined;
   const transformChanged = data.transformEnabled !== undefined && data.transformEnabled !== existing.transformEnabled;
+  const effectiveTransformEnabled = data.transformEnabled ?? existing.transformEnabled;
+  const requestedBlueprintVersionId = data.blueprintVersionId !== undefined
+    ? data.blueprintVersionId?.trim() || null
+    : data.blueprintId !== undefined
+      ? null
+      : existing.blueprintVersionId ?? null;
+  const requestedBlueprintId = requestedBlueprintVersionId
+    ? null
+    : data.blueprintId !== undefined
+      ? data.blueprintId?.trim() || null
+      : existing.blueprintId ?? null;
+  const attachmentChanged =
+    requestedBlueprintVersionId !== (existing.blueprintVersionId ?? null) ||
+    requestedBlueprintId !== (existing.blueprintId ?? null);
   const shouldValidateBlueprint =
-    blueprintChanged ||
-    (transformChanged && (data.transformEnabled ?? existing.transformEnabled));
+    attachmentChanged ||
+    (transformChanged && effectiveTransformEnabled);
 
   if (shouldValidateBlueprint) {
-    const effectiveTransformEnabled = data.transformEnabled ?? existing.transformEnabled;
-    const effectiveBlueprintId = data.blueprintId !== undefined ? data.blueprintId : existing.blueprintId;
-    const blueprintValidation = await validateOptionalAttachableBlueprint({
-      blueprintId: effectiveBlueprintId,
+    const blueprintValidation = await validateBifrostBlueprintAttachment({
+      blueprintVersionId: requestedBlueprintVersionId,
+      legacyBlueprintId: requestedBlueprintId,
       userId: session.user.id,
       tenantId: session.tenantId,
-      context: "bifrost-route",
-      requireStreamingCompatible: effectiveTransformEnabled && !!effectiveBlueprintId,
+      transformEnabled: effectiveTransformEnabled,
     });
     if (!blueprintValidation.ok) {
       return NextResponse.json(
@@ -102,9 +129,11 @@ export const PUT = withAuth(async (req, session) => {
       );
     }
 
-    if (data.blueprintId !== undefined) {
-      blueprintId = blueprintValidation.blueprint?.id ?? null;
-    }
+    blueprintVersionId = blueprintValidation.data.blueprintVersionId;
+    blueprintId = blueprintValidation.data.blueprintId;
+  } else if (attachmentFieldIncluded && attachmentChanged) {
+    blueprintVersionId = null;
+    blueprintId = null;
   }
 
   // Recalculate nextRunAt if schedule fields changed
@@ -138,7 +167,7 @@ export const PUT = withAuth(async (req, session) => {
       ...(data.destId !== undefined && { destId: data.destId }),
       ...(data.destConfig !== undefined && { destConfig: data.destConfig as Prisma.InputJsonValue }),
       ...(data.transformEnabled !== undefined && { transformEnabled: data.transformEnabled }),
-      ...(blueprintChanged && { blueprintId }),
+      ...(shouldValidateBlueprint && { blueprintVersionId, blueprintId }),
       ...(data.frequency !== undefined && { frequency: data.frequency }),
       ...(data.daysOfWeek !== undefined && { daysOfWeek: data.daysOfWeek }),
       ...(data.dayOfMonth !== undefined && { dayOfMonth: data.dayOfMonth }),
