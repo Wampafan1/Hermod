@@ -1,12 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import {
-  blueprintOptionLabel,
-  filterAttachableBlueprintOptions,
-  findLegacyCurrentBlueprint,
-  legacyCurrentBlueprintLabel,
-} from "@/components/mjolnir/blueprint-status-badge";
+import { legacyCurrentBlueprintLabel } from "@/components/mjolnir/blueprint-status-badge";
 
 interface Connection {
   id: string;
@@ -25,16 +20,46 @@ interface BlueprintOption {
   status: string;
 }
 
+interface PublishedBlueprintOption {
+  id: string;
+  name: string;
+  status: string;
+  latestVersion: {
+    id: string;
+    version: number;
+    stepsHash: string;
+    createdAt: string;
+    source: string;
+    isLocked: boolean;
+  } | null;
+}
+
+interface CurrentBlueprintVersion {
+  id: string;
+  version: number;
+  stepsHash: string;
+  blueprint?: {
+    id: string;
+    name: string;
+    status: string;
+  } | null;
+}
+
 interface ReportConfigProps {
   name: string;
   description: string;
   connectionId: string;
   connections: Connection[];
   blueprintId: string | null;
+  blueprintVersionId: string | null;
+  currentBlueprintVersion: CurrentBlueprintVersion | null;
   onNameChange: (name: string) => void;
   onDescriptionChange: (desc: string) => void;
   onConnectionChange: (id: string) => void;
-  onBlueprintChange: (id: string | null) => void;
+  onBlueprintAttachmentChange: (attachment: {
+    blueprintVersionId: string | null;
+    blueprintId: string | null;
+  }) => void;
   onSave: () => void;
   onSaveAndSchedule: () => void;
   onTestSend: (recipients: string[], emailConnectionId: string) => Promise<void>;
@@ -49,10 +74,12 @@ export function ReportConfig({
   connectionId,
   connections,
   blueprintId,
+  blueprintVersionId,
+  currentBlueprintVersion,
   onNameChange,
   onDescriptionChange,
   onConnectionChange,
-  onBlueprintChange,
+  onBlueprintAttachmentChange,
   onSave,
   onSaveAndSchedule,
   onTestSend,
@@ -64,9 +91,15 @@ export function ReportConfig({
   const [sending, setSending] = useState(false);
   const [emailConnections, setEmailConnections] = useState<EmailConnection[]>([]);
   const [testEmailConnectionId, setTestEmailConnectionId] = useState("");
-  const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
-  const attachableBlueprints = filterAttachableBlueprintOptions(blueprints);
-  const legacyCurrentBlueprint = findLegacyCurrentBlueprint(blueprints, blueprintId);
+  const [publishedBlueprints, setPublishedBlueprints] = useState<PublishedBlueprintOption[]>([]);
+  const [legacyBlueprints, setLegacyBlueprints] = useState<BlueprintOption[]>([]);
+  const publishedOptions = publishedBlueprints.filter((bp) => bp.latestVersion);
+  const legacyCurrentBlueprint = blueprintId
+    ? legacyBlueprints.find((bp) => bp.id === blueprintId) ?? null
+    : null;
+  const selectedPublishedBlueprint = blueprintVersionId
+    ? publishedBlueprints.find((bp) => bp.latestVersion?.id === blueprintVersionId) ?? null
+    : null;
 
   useEffect(() => {
     fetch("/api/email-connections")
@@ -81,12 +114,33 @@ export function ReportConfig({
   }, []);
 
   useEffect(() => {
-    const include = blueprintId ? `&include=${encodeURIComponent(blueprintId)}` : "";
-    fetch(`/api/mjolnir/blueprints?status=VALIDATED,ACTIVE${include}`)
+    fetch("/api/mjolnir/published-blueprints?includeVersions=true")
       .then((r) => r.json())
-      .then((bps: BlueprintOption[]) => setBlueprints(bps))
+      .then((data: { blueprints?: PublishedBlueprintOption[] }) => setPublishedBlueprints(data.blueprints ?? []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!blueprintId) {
+      setLegacyBlueprints([]);
+      return;
+    }
+
+    fetch(`/api/mjolnir/blueprints?status=VALIDATED,ACTIVE&include=${encodeURIComponent(blueprintId)}`)
+      .then((r) => r.json())
+      .then((bps: BlueprintOption[]) => setLegacyBlueprints(bps))
       .catch(() => {});
   }, [blueprintId]);
+
+  function handleBlueprintSelect(value: string) {
+    if (!value) {
+      onBlueprintAttachmentChange({ blueprintVersionId: null, blueprintId: null });
+      return;
+    }
+    if (value.startsWith("legacy:")) return;
+
+    onBlueprintAttachmentChange({ blueprintVersionId: value, blueprintId: null });
+  }
 
   async function handleTestSend() {
     const recipients = testEmail
@@ -147,39 +201,58 @@ export function ReportConfig({
 
       {/* Blueprint (Mjolnir Forge) */}
       <div>
-        <label className="label-norse">Forge Blueprint</label>
-        {attachableBlueprints.length > 0 || legacyCurrentBlueprint ? (
+        <label className="label-norse">Published Forge Version</label>
+        {publishedOptions.length > 0 || legacyCurrentBlueprint || currentBlueprintVersion ? (
           <select
-            value={blueprintId ?? ""}
-            onChange={(e) => onBlueprintChange(e.target.value || null)}
+            value={blueprintVersionId ?? (legacyCurrentBlueprint ? `legacy:${legacyCurrentBlueprint.id}` : "")}
+            onChange={(e) => handleBlueprintSelect(e.target.value)}
             className="select-norse"
           >
             <option value="">None (raw query output)</option>
             {legacyCurrentBlueprint && (
-              <option value={legacyCurrentBlueprint.id} disabled>
+              <option value={`legacy:${legacyCurrentBlueprint.id}`} disabled>
                 {legacyCurrentBlueprintLabel(legacyCurrentBlueprint)}
               </option>
             )}
-            {attachableBlueprints.map((bp) => (
-              <option key={bp.id} value={bp.id}>
-                {blueprintOptionLabel(bp)}
+            {currentBlueprintVersion && !selectedPublishedBlueprint && (
+              <option value={currentBlueprintVersion.id}>
+                {currentBlueprintVersion.blueprint?.name ?? "Pinned blueprint"} (v{currentBlueprintVersion.version})
+              </option>
+            )}
+            {publishedOptions.map((bp) => (
+              <option key={bp.latestVersion!.id} value={bp.latestVersion!.id}>
+                {bp.name} ({bp.status}) v{bp.latestVersion!.version}
               </option>
             ))}
           </select>
         ) : (
           <p className="text-[0.5625rem] text-text-dim tracking-wide">
-            No blueprints.{" "}
+            No published blueprints.{" "}
             <a href="/mjolnir" className="text-gold hover:text-gold-bright underline">
-              Forge one
+              Publish one
             </a>
           </p>
         )}
         <p className="text-[0.5rem] text-text-dim tracking-wide mt-1">
-          Applies transformation steps to query results before export
+          Published versions pin transformation steps before export
         </p>
+        {blueprintVersionId && (
+          <p className="text-[0.5rem] text-frost tracking-wide mt-1">
+            Pinned {selectedPublishedBlueprint
+              ? `v${selectedPublishedBlueprint.latestVersion?.version}`
+              : currentBlueprintVersion
+              ? `v${currentBlueprintVersion.version}`
+              : "version"}
+            {selectedPublishedBlueprint?.latestVersion?.stepsHash
+              ? ` - ${selectedPublishedBlueprint.latestVersion.stepsHash.slice(0, 12)}`
+              : currentBlueprintVersion?.stepsHash
+              ? ` - ${currentBlueprintVersion.stepsHash.slice(0, 12)}`
+              : ""}
+          </p>
+        )}
         {legacyCurrentBlueprint && (
           <p className="text-[0.5rem] text-ember tracking-wide mt-1">
-            {legacyCurrentBlueprintLabel(legacyCurrentBlueprint)}. It remains attached for legacy use but cannot be selected for new attachments.
+            This report uses a legacy mutable blueprint. Select a published version to pin execution.
           </p>
         )}
       </div>

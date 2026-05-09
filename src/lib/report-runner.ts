@@ -24,6 +24,11 @@ import {
   getBlueprintExecutionDescriptor,
   type BlueprintExecutionDescriptor,
 } from "@/lib/mjolnir/blueprint-execution-descriptor";
+import { loadBlueprintVersionForTenant } from "@/lib/mjolnir/blueprint-version-loader";
+import {
+  canAttachBlueprintStatus,
+  normalizeBlueprintStatus,
+} from "@/lib/mjolnir/blueprint-status";
 
 /** Univer ICellData shape (subset we use for export) */
 interface UniverCellData {
@@ -96,6 +101,10 @@ export interface PipelineInput {
   columnConfig: unknown;
   /** Saved template JSON (Univer cosmetics) */
   formatting: unknown;
+  /** Preferred immutable Mjolnir blueprint version for production execution */
+  blueprintVersionId?: string | null;
+  /** Tenant boundary for pinned blueprint version loading */
+  tenantId?: string | null;
   /** Optional blueprint ID — if set, loads and executes the blueprint on query results */
   blueprintId?: string | null;
 }
@@ -115,8 +124,8 @@ export interface PipelineResult {
  * Shared report pipeline: query → column config → blueprint execution → Excel.
  *
  * Used by both `runReport()` (scheduled) and test-send (ad hoc).
- * If `blueprintId` is set, the blueprint is loaded, input schema is validated,
- * and the transformation pipeline is executed before Excel generation.
+ * If `blueprintVersionId` is set, the pinned immutable version is loaded and
+ * executed. Otherwise, legacy `blueprintId` fallback remains temporarily.
  */
 export async function executeReportPipeline(input: PipelineInput): Promise<PipelineResult> {
   const startTime = Date.now();
@@ -166,7 +175,70 @@ export async function executeReportPipeline(input: PipelineInput): Promise<Pipel
   // transformation (rename, reorder, calculate, filter). Column config
   // is the manual approach; blueprints are the automated approach.
   // They must NOT both run or they fight each other.
-  if (input.blueprintId) {
+  if (input.blueprintVersionId) {
+    if (!input.tenantId) {
+      throw new Error("Pinned blueprint version requires tenant context.");
+    }
+
+    const version = await loadBlueprintVersionForTenant({
+      blueprintVersionId: input.blueprintVersionId,
+      tenantId: input.tenantId,
+    });
+
+    if (!version) {
+      throw new Error("Pinned blueprint version not found for this tenant.");
+    }
+
+    if (!version.isLocked) {
+      throw new Error("Pinned blueprint version must be locked before execution.");
+    }
+
+    if (version.blueprint.scope !== "TENANT_PUBLISHED") {
+      throw new Error("Pinned blueprint version is not tenant-published.");
+    }
+
+    const parentStatus = normalizeBlueprintStatus(version.blueprint.status);
+    if (!canAttachBlueprintStatus(parentStatus)) {
+      throw new Error(
+        parentStatus === "ARCHIVED"
+          ? "Archived pinned blueprint versions cannot be executed."
+          : "Pinned blueprint version parent must be validated or active before execution."
+      );
+    }
+
+    blueprintExecutionDescriptor = getBlueprintExecutionDescriptor({
+      blueprint: {
+        id: version.blueprintId,
+        name: version.blueprint.name,
+        status: version.blueprint.status,
+        steps: version.steps,
+      },
+      blueprintVersionId: version.id,
+      executionMode: "PINNED_VERSION",
+      stepsHash: version.stepsHash,
+    });
+
+    const steps = version.steps as unknown as ForgeStep[];
+    const sourceSchema = version.sourceSchema as BlueprintData["sourceSchema"];
+
+    const schemaCheck = validateInputSchema(sourceSchema, result.columns);
+    if (!schemaCheck.valid && !schemaCheck.skipped) {
+      forgeWarnings.push(`Schema drift: ${schemaCheck.error}`);
+    }
+
+    const forgeResult = executeBlueprint(steps, {
+      columns: result.columns,
+      rows: result.rows,
+    });
+
+    finalCols = forgeResult.columns;
+    finalRows = forgeResult.rows;
+    forgeWarnings.push(...forgeResult.warnings);
+    forgeMetrics = forgeResult.metrics;
+    usedBlueprint = true;
+
+    blueprintFormatting = version.afterFormatting as unknown as BlueprintFormatting | null;
+  } else if (input.blueprintId) {
     const blueprint = await prisma.blueprint.findUnique({
       where: { id: input.blueprintId },
     });
@@ -316,6 +388,8 @@ export async function runReport(
       connectionId: report.connectionId,
       columnConfig: report.columnConfig,
       formatting: report.formatting,
+      blueprintVersionId: report.blueprintVersionId,
+      tenantId: report.tenantId,
       blueprintId: report.blueprintId,
     });
 

@@ -40,6 +40,17 @@ interface ReportEditorProps {
   reportId?: string;
 }
 
+interface CurrentBlueprintVersion {
+  id: string;
+  version: number;
+  stepsHash: string;
+  blueprint?: {
+    id: string;
+    name: string;
+    status: string;
+  } | null;
+}
+
 export function ReportEditor({ reportId }: ReportEditorProps) {
   const router = useRouter();
   const toast = useToast();
@@ -54,6 +65,8 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
   const [template, setTemplate] = useState<SheetTemplate | null>(null);
 
   const [blueprintId, setBlueprintId] = useState<string | null>(null);
+  const [blueprintVersionId, setBlueprintVersionId] = useState<string | null>(null);
+  const [currentBlueprintVersion, setCurrentBlueprintVersion] = useState<CurrentBlueprintVersion | null>(null);
 
   // Raw query results (before column config mapping)
   const [rawColumns, setRawColumns] = useState<string[]>([]);
@@ -128,9 +141,9 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
           setColumnConfig(migrated);
           columnConfigRef.current = migrated;
         }
-        if (report.blueprintId) {
-          setBlueprintId(report.blueprintId);
-        }
+        setBlueprintId(report.blueprintId ?? null);
+        setBlueprintVersionId(report.blueprintVersionId ?? null);
+        setCurrentBlueprintVersion(report.blueprintVersion ?? null);
         setLoaded(true);
       })
       .catch(() => {
@@ -142,7 +155,7 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
 
   useEffect(() => {
     if (loaded && !isNew) setHasChanges(true);
-  }, [name, description, sql, connectionId, blueprintId]);
+  }, [name, description, sql, connectionId, blueprintId, blueprintVersionId]);
 
   // Helper: compute and set mapped data from column config + raw data
   function updateMappedData(config: ColumnConfig[], cols: string[], rws: Record<string, unknown>[]) {
@@ -286,6 +299,7 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
         connectionId,
         formatting: templateRef.current,
         columnConfig: columnConfigRef.current.length > 0 ? columnConfigRef.current : undefined,
+        blueprintVersionId,
         blueprintId,
       };
       console.log('[handleSave:report-editor] PAYLOAD columnConfig widths:', payload.columnConfig ? (payload.columnConfig as ColumnConfig[]).map((c: ColumnConfig) => ({ id: c.id.slice(0,6), name: c.displayName, width: c.width })) : 'NONE');
@@ -477,10 +491,19 @@ export function ReportEditor({ reportId }: ReportEditorProps) {
           connectionId={connectionId}
           connections={connections}
           blueprintId={blueprintId}
+          blueprintVersionId={blueprintVersionId}
+          currentBlueprintVersion={currentBlueprintVersion}
           onNameChange={(v) => { setName(v); setHasChanges(true); }}
           onDescriptionChange={(v) => { setDescription(v); setHasChanges(true); }}
           onConnectionChange={(v) => { setConnectionId(v); setHasChanges(true); }}
-          onBlueprintChange={(v) => { setBlueprintId(v); setHasChanges(true); }}
+          onBlueprintAttachmentChange={(attachment) => {
+            setBlueprintVersionId(attachment.blueprintVersionId);
+            setBlueprintId(attachment.blueprintId);
+            if (attachment.blueprintVersionId !== currentBlueprintVersion?.id) {
+              setCurrentBlueprintVersion(null);
+            }
+            setHasChanges(true);
+          }}
           onSave={handleSave}
           onSaveAndSchedule={handleSaveAndSchedule}
           onTestSend={handleTestSend}

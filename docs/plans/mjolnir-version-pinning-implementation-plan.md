@@ -1281,6 +1281,59 @@ Next phase recommendation:
 
 - Implement report attach to `blueprintVersionId` next, while retaining legacy `blueprintId` fallback for existing reports until migration/backfill is complete.
 
+## Phase 3 Report Version Pinning Results
+
+Report create/update behavior:
+
+- `src/lib/validations/reports.ts` now accepts nullable optional `blueprintVersionId` while preserving legacy `blueprintId`.
+- Added `src/lib/mjolnir/report-blueprint-attach.ts` to validate report attachments through one path.
+- If `blueprintVersionId` is provided, it wins over legacy `blueprintId`.
+- Report create/update stores `blueprintVersionId` and clears `blueprintId` for pinned attachments.
+- Legacy `blueprintId` remains accepted for compatibility and still rejects DRAFT/ARCHIVED blueprints through the lifecycle attach guard.
+- Clearing the selector stores both attachment fields as null.
+
+Report runner behavior:
+
+- `executeReportPipeline()` now prefers `blueprintVersionId` when present.
+- Pinned execution loads the version by `blueprintVersionId` and report tenant using `loadBlueprintVersionForTenant()`.
+- Pinned execution uses immutable `BlueprintVersion.steps`, `sourceSchema`, `afterFormatting`, and stored `stepsHash`.
+- The runner does not load mutable `Blueprint.steps` when a pinned version is present.
+- Missing, wrong-tenant, unlocked, non-tenant-published, DRAFT, or ARCHIVED pinned versions fail clearly.
+
+Legacy fallback behavior:
+
+- Reports with only legacy `blueprintId` still run through the existing mutable blueprint path.
+- Legacy execution continues to emit the mutable blueprint execution warning/descriptor.
+- No existing reports are auto-published, auto-pinned, or migrated in this phase.
+
+UI selector behavior:
+
+- Report config now fetches `/api/mjolnir/published-blueprints?includeVersions=true`.
+- New report selections save `blueprintVersionId` for the latest published tenant version.
+- Legacy reports show warning copy: select a published version to pin execution.
+- Pinned reports show version number and a short `stepsHash` cue without exposing steps or analysis metadata.
+
+Tests added:
+
+- `src/__tests__/reports/report-blueprint-attach.test.ts`: no attachment, valid/cross-tenant/unlocked/DRAFT pinned versions, valid/DRAFT legacy blueprints, version-wins behavior, report create/update version storage, invalid version rejection, and legacy compatibility.
+- `src/__tests__/reports/report-runner-blueprint-version.test.ts`: pinned version execution, mutable step non-loading, legacy fallback, missing/wrong-tenant pinned failures, unlocked pinned failure, and pinned execution descriptor metadata.
+
+Validation results:
+
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed after applying the existing Windows Prisma DLL-lock workaround.
+- `npm run test`: passed, 98 test files and 1287 tests.
+- `npm run build`: passed with existing lint warnings.
+- `npm run lint`: passed with existing warnings.
+
+What is intentionally not changed:
+
+- Bifrost still uses legacy `blueprintId`.
+- RealmGate still uses legacy fields.
+- No production backfill was added.
+- `Report.blueprintId` remains in schema and runtime fallback.
+- No legacy fallback removal was performed.
+
 ## Open Product Decisions
 
 1. Should published blueprint parent reuse `Blueprint` with `scope = TENANT_PUBLISHED`, or use a separate `PublishedBlueprint` model?

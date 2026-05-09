@@ -19,6 +19,14 @@ export async function loadBlueprintVersionForTenant(input: {
       sourceSchema: true,
       afterFormatting: true,
       isLocked: true,
+      blueprint: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          scope: true,
+        },
+      },
     },
   });
 }

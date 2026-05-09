@@ -20,6 +20,7 @@ export interface BlueprintExecutionDescriptorInput {
     steps: unknown;
   };
   blueprintVersionId?: string | null;
+  stepsHash?: string | null;
   executionMode?: BlueprintExecutionMode;
 }
 
@@ -35,7 +36,7 @@ export function getBlueprintExecutionDescriptor(
     blueprintName: input.blueprint.name,
     blueprintStatus: input.blueprint.status,
     blueprintVersionId: input.blueprintVersionId ?? null,
-    stepsHash: hashBlueprintSteps(input.blueprint.steps),
+    stepsHash: input.stepsHash ?? hashBlueprintSteps(input.blueprint.steps),
     executionMode,
   };
 

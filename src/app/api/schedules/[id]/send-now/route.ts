@@ -53,6 +53,8 @@ export const POST = withAuth(async (req, session) => {
     connectionId: report.connectionId,
     columnConfig: report.columnConfig,
     formatting: report.formatting,
+    blueprintVersionId: report.blueprintVersionId,
+    tenantId: report.tenantId,
     blueprintId: report.blueprintId,
   });
 

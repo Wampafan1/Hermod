@@ -1146,3 +1146,10 @@ Do not start the migration until those product decisions are made.
 - `POST /api/mjolnir/blueprints/[id]/publish` creates or reuses a tenant-published parent for the active tenant and creates a locked immutable `BlueprintVersion`.
 - `GET /api/mjolnir/published-blueprints` lists active-tenant published parents and optional latest version summaries without raw steps or analysis metadata.
 - Personal drafts remain editable, and report/Bifrost/RealmGate execution still uses legacy mutable `blueprintId` / `forgeBlueprintId` paths until the dedicated pinning phases.
+
+## Report Version Pinning Note
+
+- Reports can now attach to tenant-published immutable `BlueprintVersion` records through `blueprintVersionId`.
+- Report execution prefers pinned `BlueprintVersion.steps`, `sourceSchema`, `afterFormatting`, and stored `stepsHash` when present.
+- Legacy reports with only `Report.blueprintId` still execute through the mutable fallback and retain the legacy execution warning.
+- Bifrost and RealmGate execution remain unchanged until their dedicated pinning phases.

@@ -7,6 +7,7 @@ export const createReportSchema = z.object({
   connectionId: z.string().min(1, "Connection is required"),
   formatting: z.record(z.unknown()).optional(),
   columnConfig: z.array(z.record(z.unknown())).optional(),
+  blueprintVersionId: z.string().nullable().optional(),
   blueprintId: z.string().nullable().optional(),
 });
 
@@ -17,6 +18,7 @@ export const updateReportSchema = z.object({
   connectionId: z.string().min(1).optional(),
   formatting: z.record(z.unknown()).optional().nullable(),
   columnConfig: z.array(z.record(z.unknown())).optional().nullable(),
+  blueprintVersionId: z.string().nullable().optional(),
   blueprintId: z.string().nullable().optional(),
 });
 

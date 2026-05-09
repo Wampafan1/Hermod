@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { updateReportSchema } from "@/lib/validations/reports";
-import { validateOptionalAttachableBlueprint } from "@/lib/mjolnir/blueprint-attach";
+import { validateReportBlueprintAttachment } from "@/lib/mjolnir/report-blueprint-attach";
 
 // GET /api/reports/[id] — get single report
 export const GET = withAuth(async (req, session) => {
@@ -17,6 +17,24 @@ export const GET = withAuth(async (req, session) => {
     include: {
       connection: { select: { id: true, name: true, type: true } },
       schedule: { select: { id: true, enabled: true } },
+      blueprintVersion: {
+        select: {
+          id: true,
+          blueprintId: true,
+          version: true,
+          stepsHash: true,
+          createdAt: true,
+          source: true,
+          isLocked: true,
+          blueprint: {
+            select: {
+              id: true,
+              name: true,
+              status: true,
+            },
+          },
+        },
+      },
     },
   });
 
@@ -68,27 +86,35 @@ export const PUT = withAuth(async (req, session) => {
   }
 
   let blueprintId: string | null | undefined;
+  let blueprintVersionId: string | null | undefined;
   if (
-    parsed.data.blueprintId !== undefined &&
-    parsed.data.blueprintId !== existing.blueprintId
+    parsed.data.blueprintVersionId !== undefined ||
+    parsed.data.blueprintId !== undefined
   ) {
-    const blueprintValidation = await validateOptionalAttachableBlueprint({
-      blueprintId: parsed.data.blueprintId,
-      userId: session.user.id,
-      tenantId: session.tenantId,
-      context: "report",
-    });
-    if (!blueprintValidation.ok) {
-      return NextResponse.json(
-        {
-          error: blueprintValidation.error,
-          statefulSteps: blueprintValidation.statefulSteps,
-          suggestion: blueprintValidation.suggestion,
-        },
-        { status: blueprintValidation.status }
-      );
+    const requestedBlueprintVersionId = parsed.data.blueprintVersionId?.trim() || null;
+    const requestedBlueprintId = requestedBlueprintVersionId
+      ? null
+      : parsed.data.blueprintId?.trim() || null;
+    const attachmentChanged =
+      requestedBlueprintVersionId !== (existing.blueprintVersionId ?? null) ||
+      requestedBlueprintId !== (existing.blueprintId ?? null);
+
+    if (attachmentChanged) {
+      const blueprintValidation = await validateReportBlueprintAttachment({
+        blueprintVersionId: requestedBlueprintVersionId,
+        legacyBlueprintId: requestedBlueprintId,
+        userId: session.user.id,
+        tenantId: session.tenantId,
+      });
+      if (!blueprintValidation.ok) {
+        return NextResponse.json(
+          { error: blueprintValidation.error },
+          { status: blueprintValidation.status }
+        );
+      }
+      blueprintVersionId = blueprintValidation.data.blueprintVersionId;
+      blueprintId = blueprintValidation.data.blueprintId;
     }
-    blueprintId = blueprintValidation.blueprint?.id ?? null;
   }
 
   const updated = await prisma.report.update({
@@ -100,6 +126,7 @@ export const PUT = withAuth(async (req, session) => {
       connectionId: parsed.data.connectionId,
       formatting: parsed.data.formatting as Prisma.InputJsonValue ?? undefined,
       columnConfig: parsed.data.columnConfig as Prisma.InputJsonValue ?? undefined,
+      blueprintVersionId,
       blueprintId,
     },
   });
