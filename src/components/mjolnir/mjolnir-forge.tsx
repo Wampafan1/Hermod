@@ -27,6 +27,11 @@ interface ForgeState {
   loading: boolean;
   error: string | null;
   warnings: string[];
+  aiSamplePolicy: {
+    mode: string;
+    message: string;
+    warning?: string;
+  } | null;
 }
 
 const initialState: ForgeState = {
@@ -42,6 +47,7 @@ const initialState: ForgeState = {
   loading: false,
   error: null,
   warnings: [],
+  aiSamplePolicy: null,
 };
 
 // ─── Actions ─────────────────────────────────────────
@@ -51,7 +57,7 @@ type ForgeAction =
   | { type: "SET_AFTER"; payload: FileInfo }
   | { type: "SET_DESCRIPTION"; payload: string }
   | { type: "SET_STEPS"; payload: ForgeStep[] }
-  | { type: "SET_ANALYSIS"; payload: { steps: ForgeStep[]; diff: Partial<StructuralDiffResult>; afterFormatting?: BlueprintFormatting | null; warnings?: string[] } }
+  | { type: "SET_ANALYSIS"; payload: { steps: ForgeStep[]; diff: Partial<StructuralDiffResult>; afterFormatting?: BlueprintFormatting | null; warnings?: string[]; aiSamplePolicy?: ForgeState["aiSamplePolicy"] } }
   | { type: "SET_VALIDATION"; payload: ValidationResult }
   | { type: "SET_BLUEPRINT_NAME"; payload: string }
   | { type: "SET_LOADING"; payload: boolean }
@@ -86,6 +92,7 @@ function forgeReducer(state: ForgeState, action: ForgeAction): ForgeState {
         diff: action.payload.diff,
         afterFormatting: action.payload.afterFormatting ?? null,
         warnings: action.payload.warnings ?? [],
+        aiSamplePolicy: action.payload.aiSamplePolicy ?? null,
         currentStep: 3,
         loading: false,
         error: null,
@@ -179,7 +186,13 @@ export function MjolnirForge({ blueprints: initialBlueprints }: MjolnirForgeProp
       const data = await res.json();
       dispatch({
         type: "SET_ANALYSIS",
-        payload: { steps: data.steps, diff: data.diff, afterFormatting: data.afterFormatting, warnings: data.warnings },
+        payload: {
+          steps: data.steps,
+          diff: data.diff,
+          afterFormatting: data.afterFormatting,
+          warnings: data.warnings,
+          aiSamplePolicy: data.aiSamplePolicy,
+        },
       });
     } catch {
       dispatch({ type: "SET_ERROR", payload: "Network error during analysis." });
@@ -511,6 +524,23 @@ export function MjolnirForge({ blueprints: initialBlueprints }: MjolnirForgeProp
                   </p>
                 </div>
               ) : null}
+
+              {/* AI warnings */}
+              {state.aiSamplePolicy && (
+                <div className="bg-frost/5 border border-frost/20 p-3 space-y-1">
+                  <p className="text-frost text-[0.625rem] tracking-[0.35em] uppercase font-bold">
+                    AI Sample Privacy
+                  </p>
+                  <p className="text-text-dim text-xs tracking-wide leading-relaxed">
+                    {state.aiSamplePolicy.message}
+                  </p>
+                  {state.aiSamplePolicy.warning && (
+                    <p className="text-ember/80 text-xs tracking-wide leading-relaxed">
+                      {state.aiSamplePolicy.warning}
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* AI warnings */}
               {state.warnings.length > 0 && (

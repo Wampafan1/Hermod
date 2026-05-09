@@ -9,6 +9,7 @@ import { cleanupExpiredMjolnirTempFiles, getMjolnirUserTempDir } from "@/lib/mjo
 import { computeStructuralDiff } from "@/lib/mjolnir/engine/structural-diff";
 import { runAiInference } from "@/lib/mjolnir/engine/ai-inference";
 import { extractStyleTemplate } from "@/lib/mjolnir/engine/style-extractor";
+import { describeAiSamplePolicyForUi } from "@/lib/mjolnir/ai-sample-policy";
 
 // POST /api/mjolnir/analyze — run structural diff + AI inference
 export const POST = withAuth(async (req, session) => {
@@ -125,5 +126,6 @@ export const POST = withAuth(async (req, session) => {
     },
     afterFormatting,
     warnings: aiResult.warnings,
+    aiSamplePolicy: aiResult.aiSamplePolicy ?? describeAiSamplePolicyForUi(),
   });
 });

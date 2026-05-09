@@ -938,6 +938,54 @@ Remaining follow-ups:
 - Immutable version pinning for report, Bifrost, and RealmGate attachments.
 - A fuller RealmGate UI flow for selecting available ForgeBlueprints when product rules are finalized.
 
+## AI Sample Privacy Patch Results
+
+Default AI sample mode:
+
+- `REDACTED`.
+- `FULL_DEBUG` is available only through explicit `MJOLNIR_AI_SAMPLE_MODE=FULL_DEBUG`.
+- `STRUCTURAL_ONLY` is available through `MJOLNIR_AI_SAMPLE_MODE=STRUCTURAL_ONLY`.
+
+What AI can receive:
+
+- In `REDACTED` mode, AI prompt context may include column names, structural diff metadata, row counts, matched/added/removed column signals, and formula/formatting context with sensitive literals redacted.
+- In `STRUCTURAL_ONLY` mode, AI prompt context is reduced to structure: columns, row counts, matched/added/removed/reorder signals, sanitized fingerprints, and formatting change shape.
+- In `FULL_DEBUG` mode, the older richer prompt context is preserved for debugging and may include sample-derived workbook values.
+
+What is redacted or removed:
+
+- Emails, phone numbers, URLs, SSNs, UUIDs, long tokens, long numeric IDs, paths, and workbook-like filenames.
+- Row/sample payloads such as `sampleRows`, `sampleData`, `beforeRow`, `afterRow`, `removedRows`, and `keptRows`.
+- Sample scalar fields such as `beforeValue`, `afterValue`, `sampleValue`, `targetValue`, `sourceValue`, `oldValue`, `newValue`, `topValues`, `minValue`, `maxValue`, `value`, and `values` when they appear in outbound AI context.
+- Formula string literals are sanitized before prompt construction in default mode.
+- Fingerprint values that reveal sample-derived content, including `sampleHash`, `topValues`, `minValue`, and `maxValue`, are omitted from AI context in non-debug modes.
+
+UI/API behavior:
+
+- `POST /api/mjolnir/analyze` now returns an `aiSamplePolicy` description.
+- The Mjolnir forge review step displays a subtle AI sample privacy notice.
+- The existing save-step retention notice remains in place for persisted blueprint data.
+
+Tests added or updated:
+
+- `src/__tests__/mjolnir/ai-sample-policy.test.ts`: default mode, structural-only removal, redaction coverage, explicit `FULL_DEBUG`, non-mutating sanitization, and formula literal redaction.
+- `src/__tests__/mjolnir/ai-inference.test.ts`: provider prompt payloads no longer include raw sensitive values in default mode and omit row samples in `STRUCTURAL_ONLY` mode.
+
+Validation results:
+
+- Focused AI sample policy tests passed: 2 test files and 22 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 88 test files and 1215 tests.
+- `npm run build`: passed; pre-existing lint warnings were reported during the build.
+- `npm run lint`: passed with pre-existing warnings.
+
+Remaining product decisions:
+
+- Tenant-level AI sample analysis opt-out or mode selection.
+- User-visible AI consent for sample analysis.
+- Model/provider retention disclosures.
+
 ## Recommended Next Prompt
 
 Make the product decision for Mjolnir ownership and retention before the next schema change:

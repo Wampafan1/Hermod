@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { LlmProvider, LlmChatRequest, LlmChatResponse } from "@/lib/llm/types";
 import type {
   AmbiguousCase,
@@ -92,6 +92,10 @@ describe("ai-inference", () => {
     mockChatResponses.responses = [];
     mockChatResponses.callIndex = 0;
     mockChatResponses.calls = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("returns empty array when no ambiguous cases", async () => {
@@ -697,5 +701,97 @@ The above step calculates the total [as requested].`;
     // Verify user description is included in the context sent to LLM
     const call = mockChatResponses.calls[0];
     expect(call.messages[1].content).toContain(userDescription);
+  });
+
+  it("redacts sensitive values before sending prompt context to the provider", async () => {
+    const { runAiInference } = await import("@/lib/mjolnir/engine/ai-inference");
+
+    const before = makeParsedFile(
+      ["Email", "Phone"],
+      [{
+        Email: "jane.doe@example.com",
+        Phone: "555-123-4567",
+      }]
+    );
+    const after = makeParsedFile(
+      ["Email", "Phone", "Customer File"],
+      [{
+        Email: "jane.doe@example.com",
+        Phone: "555-123-4567",
+        "Customer File": "customer-prod-report.xlsx",
+      }]
+    );
+
+    const diff = makeDiff({
+      addedColumns: ["Customer File"],
+      ambiguousCases: [
+        {
+          type: "new_column",
+          description: "Customer File is new",
+          context: { column: "Customer File" },
+        },
+      ],
+    });
+
+    setMockResponses(
+      makeMockResponse(
+        JSON.stringify({
+          formula: '"customer-prod-report.xlsx"',
+          confidence: 0.8,
+          explanation: "constant filename",
+        })
+      )
+    );
+
+    await runAiInference(diff, before, after, undefined, mockProvider);
+
+    const prompt = mockChatResponses.calls[0].messages[1].content;
+    expect(prompt).toContain("[REDACTED_SAMPLE]");
+    expect(prompt).not.toContain("jane.doe@example.com");
+    expect(prompt).not.toContain("555-123-4567");
+    expect(prompt).not.toContain("customer-prod-report.xlsx");
+  });
+
+  it("omits row samples from provider prompts in STRUCTURAL_ONLY mode", async () => {
+    vi.stubEnv("MJOLNIR_AI_SAMPLE_MODE", "STRUCTURAL_ONLY");
+    const { runAiInference } = await import("@/lib/mjolnir/engine/ai-inference");
+
+    const before = makeParsedFile(
+      ["Email", "Revenue"],
+      [{ Email: "jane.doe@example.com", Revenue: 100 }]
+    );
+    const after = makeParsedFile(
+      ["Email", "Revenue", "Score"],
+      [{ Email: "jane.doe@example.com", Revenue: 100, Score: 1 }]
+    );
+
+    const diff = makeDiff({
+      addedColumns: ["Score"],
+      ambiguousCases: [
+        {
+          type: "new_column",
+          description: "Score is new",
+          context: { column: "Score" },
+        },
+      ],
+    });
+
+    setMockResponses(
+      makeMockResponse(
+        JSON.stringify({
+          formula: "{Revenue}",
+          confidence: 0.8,
+          explanation: "copy revenue",
+        })
+      )
+    );
+
+    await runAiInference(diff, before, after, undefined, mockProvider);
+
+    const prompt = mockChatResponses.calls[0].messages[1].content;
+    expect(prompt).toContain("beforeColumns");
+    expect(prompt).not.toContain("sampleData");
+    expect(prompt).not.toContain("beforeRow");
+    expect(prompt).not.toContain("jane.doe@example.com");
   });
 });

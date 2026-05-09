@@ -423,15 +423,17 @@ function redactDescription(
     );
 }
 
-function redactSensitiveFragments(value: string): string {
+export function redactSensitiveFragments(value: string): string {
   return value
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, REDACTED_SAMPLE_VALUE)
     .replace(/\bhttps?:\/\/\S+|\bwww\.\S+/gi, REDACTED_SAMPLE_VALUE)
     .replace(/\b\d{3}-\d{2}-\d{4}\b/g, REDACTED_SAMPLE_VALUE)
     .replace(/\b(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b/g, REDACTED_SAMPLE_VALUE)
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, REDACTED_SAMPLE_VALUE)
+    .replace(/\b\d{10,}\b/g, REDACTED_SAMPLE_VALUE)
     .replace(/\b[A-Za-z0-9_-]{24,}\b/g, REDACTED_SAMPLE_VALUE)
-    .replace(/(?:[A-Za-z]:\\|\/)[^\s"'`<>]+/g, REDACTED_SAMPLE_VALUE);
+    .replace(/(?:[A-Za-z]:\\|\/)[^\s"'`<>]+/g, REDACTED_SAMPLE_VALUE)
+    .replace(/\b[^\s"'`<>]+\.(?:csv|json|pdf|sql|tsv|xls|xlsx)\b/gi, REDACTED_SAMPLE_VALUE);
 }
 
 function redactQuotedSensitiveLiterals(value: string): string {

@@ -21,6 +21,12 @@ import {
   CLASSIFY_AMBIGUOUS_PROMPT,
   ANALYZE_COLUMNS_PROMPT,
 } from "../prompts";
+import {
+  describeAiSamplePolicyForUi,
+  sanitizeAiAnalysisContext,
+  shouldUseAiForSampleAnalysis,
+  type MjolnirAiSamplePolicyDescription,
+} from "../ai-sample-policy";
 import { validateAndNormalizeSteps } from "./step-validator";
 
 // ─── Constants ──────────────────────────────────────
@@ -96,7 +102,7 @@ export function buildContext(
   after: ParsedFileData,
   description?: string
 ): string {
-  return JSON.stringify(buildContextObject(diff, before, after, description), null, 2);
+  return stringifyAiContext(buildContextObject(diff, before, after, description));
 }
 
 /**
@@ -151,7 +157,7 @@ function buildFormulaContext(
     context.userDescription = description;
   }
 
-  return JSON.stringify(context, null, 2);
+  return stringifyAiContext(context);
 }
 
 /**
@@ -204,7 +210,7 @@ function buildFilterContext(
     context.userDescription = description;
   }
 
-  return JSON.stringify(context, null, 2);
+  return stringifyAiContext(context);
 }
 
 /**
@@ -266,7 +272,11 @@ function buildBulkColumnContext(
     context.userDescription = description;
   }
 
-  return JSON.stringify(context, null, 2);
+  return stringifyAiContext(context);
+}
+
+function stringifyAiContext(context: Record<string, unknown>): string {
+  return JSON.stringify(sanitizeAiAnalysisContext(context), null, 2);
 }
 
 // ─── Response Parsing ───────────────────────────────
@@ -458,6 +468,7 @@ function parseFormulaFromResponse(
 export interface AiInferenceResult {
   steps: ForgeStep[];
   warnings: string[];
+  aiSamplePolicy: MjolnirAiSamplePolicyDescription;
 }
 
 export async function runAiInference(
@@ -468,10 +479,11 @@ export async function runAiInference(
   provider?: LlmProvider
 ): Promise<AiInferenceResult> {
   const warnings: string[] = [];
+  const aiSamplePolicy = describeAiSamplePolicyForUi();
 
   // If no ambiguous cases, nothing to do
-  if (diff.ambiguousCases.length === 0) {
-    return { steps: [], warnings };
+  if (!shouldUseAiForSampleAnalysis({ ambiguousCaseCount: diff.ambiguousCases.length })) {
+    return { steps: [], warnings, aiSamplePolicy };
   }
 
   // Resolve LLM provider
@@ -481,7 +493,7 @@ export async function runAiInference(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     warnings.push(`LLM provider not configured: ${msg}`);
-    return { steps: [], warnings };
+    return { steps: [], warnings, aiSamplePolicy };
   }
 
   // Determine starting order after deterministic steps (excluding reorder_columns,
@@ -684,7 +696,7 @@ export async function runAiInference(
       try {
         const contextObj = buildContextObject(diff, before, after, description);
         contextObj.ambiguousCases = otherCases;
-        const contextWithCases = JSON.stringify(contextObj, null, 2);
+        const contextWithCases = stringifyAiContext(contextObj);
 
         const response = await llm.chat({
           messages: [
@@ -727,5 +739,5 @@ export async function runAiInference(
     return true;
   });
 
-  return { steps: dedupedSteps, warnings };
+  return { steps: dedupedSteps, warnings, aiSamplePolicy };
 }
