@@ -139,6 +139,11 @@ interface MjolnirForgeProps {
     afterSample: string | null;
     createdAt: string;
     updatedAt: string;
+    usage?: {
+      reports: number;
+      bifrostRoutes: number;
+      total: number;
+    };
   }[];
 }
 

@@ -696,6 +696,91 @@ Remaining product decisions:
 - personal vs tenant-published ownership.
 - immutable version pinning.
 
+## Delete / Archive Safety Patch Results
+
+Files changed:
+
+- `src/lib/mjolnir/blueprint-usage.ts`
+- `src/app/api/mjolnir/blueprints/[id]/route.ts`
+- `src/app/api/mjolnir/blueprints/[id]/usage/route.ts`
+- `src/app/api/mjolnir/blueprints/[id]/archive/route.ts`
+- `src/app/api/mjolnir/blueprints/[id]/detach/route.ts`
+- `src/lib/validations/mjolnir.ts`
+- `src/app/(app)/mjolnir/page.tsx`
+- `src/components/mjolnir/mjolnir-forge.tsx`
+- `src/components/mjolnir/blueprint-list.tsx`
+- `src/__tests__/mjolnir/blueprint-usage.test.ts`
+- `src/__tests__/mjolnir/blueprint-delete-archive.test.ts`
+- `docs/audits/mjolnir-deep-dive.md`
+
+Usage helper:
+
+- Added `getBlueprintUsage({ blueprintId, userId })`.
+- Usage is scoped by `userId` under the current personal-blueprint ownership model.
+- Reports and Bifrost routes are selected with minimal fields: id, name, tenant id/name, enabled/schedule state, and updated timestamp.
+- The helper does not select SQL query text, connection credentials, source config, or destination config.
+
+Usage API endpoint:
+
+- Added `GET /api/mjolnir/blueprints/[id]/usage`.
+- Requires `withAuth`.
+- Verifies the blueprint belongs to the current user before returning usage.
+- Returns 404 for missing or non-owned blueprints.
+
+Delete behavior:
+
+- `DELETE /api/mjolnir/blueprints/[id]` now checks usage after ownership validation.
+- In-use blueprints return 409 with `{ error, usage, suggestion }`.
+- Unused blueprints can still be hard-deleted.
+- Reports/routes are no longer silently detached by hard-delete in the in-use case.
+
+Archive behavior:
+
+- Added `POST /api/mjolnir/blueprints/[id]/archive`.
+- Requires `withAuth`.
+- Sets `status = "ARCHIVED"` and returns the updated blueprint plus usage summary.
+- The endpoint is idempotent when the blueprint is already archived.
+- Existing attach validation continues to reject archived blueprints.
+- Archiving does not detach existing reports or routes.
+
+Detach behavior:
+
+- Added `POST /api/mjolnir/blueprints/[id]/detach`.
+- Accepts `{ type: "report" | "bifrost_route", targetId }`.
+- Verifies the blueprint belongs to the current user.
+- Verifies the target belongs to the current user and active tenant and currently references the blueprint.
+- Sets the target `blueprintId` to `null`.
+
+UI changes:
+
+- The Mjolnir page preloads lightweight usage counts without selecting sensitive fields.
+- Blueprint cards show usage counts such as `Used by 2 reports, 1 route`.
+- Delete now fetches exact usage before confirmation.
+- In-use blueprints show affected reports/routes and offer archive as the safe action.
+- Unused blueprints keep the hard-delete confirmation.
+- Archived blueprints show the existing `ARCHIVED` badge and disable archive actions.
+
+Tests added:
+
+- `src/__tests__/mjolnir/blueprint-usage.test.ts`: usage summary shape, safe minimal selects, and user scoping.
+- `src/__tests__/mjolnir/blueprint-delete-archive.test.ts`: unused delete, in-use 409, non-owned 404, usage endpoint ownership, archive/idempotency, attach rejection for archived blueprints, and tenant-scoped detach behavior.
+
+Validation results:
+
+- Focused Mjolnir usage/delete/archive/attach tests passed: 4 test files and 33 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 83 test files and 1156 tests.
+- `npm run build`: passed; pre-existing lint warnings were reported during the build.
+- `npm run lint`: passed with pre-existing warnings.
+
+Remaining follow-ups:
+
+- Add detach controls to the UI if product wants one-click detach from the usage dialog.
+- tenant-published ownership.
+- immutable version pinning.
+- used-by counts across RealmGates / ForgeBlueprint if those surfaces become connected to Mjolnir blueprints.
+
 ## Recommended Next Prompt
 
 Make the product decision for Mjolnir ownership and retention before the next schema change:

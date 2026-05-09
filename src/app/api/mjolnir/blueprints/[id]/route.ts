@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { updateBlueprintSchema } from "@/lib/validations/mjolnir";
 import { sanitizeBlueprintCreatePayload } from "@/lib/mjolnir/retention";
+import { getBlueprintUsage } from "@/lib/mjolnir/blueprint-usage";
 
 /**
  * Extract the blueprint ID from the request URL.
@@ -105,6 +106,22 @@ export const DELETE = withAuth(async (req, session) => {
 
   if (!existing) {
     return NextResponse.json({ error: "Blueprint not found" }, { status: 404 });
+  }
+
+  const usage = await getBlueprintUsage({
+    blueprintId: id,
+    userId: session.user.id,
+  });
+
+  if (usage.total > 0) {
+    return NextResponse.json(
+      {
+        error: "Blueprint is in use",
+        usage,
+        suggestion: "Archive the blueprint or detach it from reports/routes before deleting.",
+      },
+      { status: 409 }
+    );
   }
 
   await prisma.blueprint.delete({

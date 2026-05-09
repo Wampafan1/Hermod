@@ -49,6 +49,11 @@ export const updateBlueprintSchema = z.object({
   status: z.enum(["DRAFT", "VALIDATED", "ACTIVE", "ARCHIVED"]).optional(),
 });
 
+export const detachBlueprintSchema = z.object({
+  type: z.enum(["report", "bifrost_route"]),
+  targetId: z.string().min(1),
+});
+
 export const analyzeSchema = z.object({
   beforeFileId: z.string().uuid("Invalid before file ID"),
   afterFileId: z.string().uuid("Invalid after file ID"),
@@ -65,5 +70,6 @@ export const validateSchema = z.object({
 // Export inferred types
 export type CreateBlueprintInput = z.infer<typeof createBlueprintSchema>;
 export type UpdateBlueprintInput = z.infer<typeof updateBlueprintSchema>;
+export type DetachBlueprintInput = z.infer<typeof detachBlueprintSchema>;
 export type AnalyzeInput = z.infer<typeof analyzeSchema>;
 export type ValidateInput = z.infer<typeof validateSchema>;

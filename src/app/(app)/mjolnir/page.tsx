@@ -22,7 +22,45 @@ export default async function MjolnirPage() {
     },
   });
 
+  const blueprintIds = blueprints.map((blueprint) => blueprint.id);
+  const [reportCounts, routeCounts] = blueprintIds.length > 0
+    ? await Promise.all([
+        prisma.report.groupBy({
+          by: ["blueprintId"],
+          where: {
+            userId: session.user.id,
+            blueprintId: { in: blueprintIds },
+          },
+          _count: { _all: true },
+        }),
+        prisma.bifrostRoute.groupBy({
+          by: ["blueprintId"],
+          where: {
+            userId: session.user.id,
+            blueprintId: { in: blueprintIds },
+          },
+          _count: { _all: true },
+        }),
+      ])
+    : [[], []];
+
+  const reportCountByBlueprint = new Map(
+    reportCounts
+      .filter((count) => count.blueprintId)
+      .map((count) => [count.blueprintId as string, count._count._all])
+  );
+  const routeCountByBlueprint = new Map(
+    routeCounts
+      .filter((count) => count.blueprintId)
+      .map((count) => [count.blueprintId as string, count._count._all])
+  );
+
   const serialized = blueprints.map((b: { id: string; name: string; description: string | null; status: string; version: number; beforeSample: string | null; afterSample: string | null; createdAt: Date; updatedAt: Date }) => ({
+    usage: {
+      reports: reportCountByBlueprint.get(b.id) ?? 0,
+      bifrostRoutes: routeCountByBlueprint.get(b.id) ?? 0,
+      total: (reportCountByBlueprint.get(b.id) ?? 0) + (routeCountByBlueprint.get(b.id) ?? 0),
+    },
     ...b,
     createdAt: b.createdAt.toISOString(),
     updatedAt: b.updatedAt.toISOString(),
