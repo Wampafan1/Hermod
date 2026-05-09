@@ -1303,6 +1303,8 @@ model RealmGate {
 
   // Mapping & Strategy
   primaryKeyColumns Json             @default("[]") // Array of source column names — e.g. ["PO Number", "ISBN"]
+  keyConstraintName String?
+  keyHistory        Json?
   mergeStrategy     String           // "UPSERT" | "TRUNCATE_RELOAD" | "APPEND"
   columnMapping     Json             // Array of { sourceColumn, destinationColumn, sourceType, destType }
   savedSchema       Json             // DuckDB-profiled schema snapshot from initial setup file (drift detection)
@@ -1346,10 +1348,12 @@ model GatePush {
   rowsInserted    Int?
   rowsUpdated     Int?
   rowsErrored     Int?
+  blankRowsSkipped Int      @default(0)
 
   // Schema drift details
   schemaDiff      Json?     // { added: [], removed: [], typeChanged: [] }
   driftResolution String?   // "ADJUSTED_FILE" | "ADJUSTED_DESTINATION" | null
+  keyDrift        Json?     // current UPSERT key failed repeat-upload preflight
 
   // Error handling
   errorMessage    String?

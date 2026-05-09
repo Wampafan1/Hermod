@@ -268,6 +268,7 @@ export const POST = withAuth(async (req, ctx) => {
           ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           : "text/csv",
         status: "PUSHING",
+        tempFileId,
       },
     });
 
@@ -280,7 +281,6 @@ export const POST = withAuth(async (req, ctx) => {
 
     initialPush = {
       pushId: push.id,
-      status: "SUCCESS",
       ...pushResult,
     };
   } catch (err) {
@@ -292,7 +292,9 @@ export const POST = withAuth(async (req, ctx) => {
   }
 
   // Clean up temp file
-  await deleteTempFile(tempFileId);
+  if (initialPush?.status !== "KEY_DRIFT") {
+    await deleteTempFile(tempFileId);
+  }
 
   return NextResponse.json({ ...gate, initialPush }, { status: 201 });
 });

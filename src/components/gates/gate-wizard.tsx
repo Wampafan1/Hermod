@@ -302,7 +302,17 @@ export function GateWizard() {
 
   // Step 3 state
   const [createdGateId, setCreatedGateId] = useState<string | null>(null);
-  const [initialPushResult, setInitialPushResult] = useState<{ status: string; rowCount?: number; rowsInserted?: number; rowsUpdated?: number; error?: string } | null>(null);
+  const [initialPushResult, setInitialPushResult] = useState<{
+    status: string;
+    rowCount?: number;
+    rowsInserted?: number;
+    rowsUpdated?: number;
+    rowsErrored?: number;
+    blankRowsSkipped?: number;
+    error?: string;
+    errorMessage?: string;
+    keyDrift?: { reason?: string };
+  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -687,9 +697,13 @@ export function GateWizard() {
       setStep(2);
       if (gate.initialPush?.status === "SUCCESS") {
         toast.success(`Gate sealed — ${gate.initialPush.rowCount?.toLocaleString() ?? 0} rows pushed`);
+      } else if (gate.initialPush?.status === "KEY_DRIFT") {
+        toast.info("Gate sealed, but the current key needs review before the staged upload can be pushed");
+      } else if (gate.initialPush?.status === "PARTIAL") {
+        toast.info("Gate sealed, but the initial push completed with row errors");
       } else if (gate.initialPush?.status === "FAILED") {
         toast.success("Gate sealed");
-        toast.error(`Initial push failed: ${gate.initialPush.error ?? "Unknown error"}`);
+        toast.error(`Initial push failed: ${gate.initialPush.error ?? gate.initialPush.errorMessage ?? "Unknown error"}`);
       } else {
         toast.success("Gate sealed");
       }
@@ -1101,6 +1115,10 @@ export function GateWizard() {
           <p className="text-text-dim text-xs tracking-wide mb-8">
             {initialPushResult?.status === "SUCCESS"
               ? "Your portal is inscribed and the data has been delivered."
+              : initialPushResult?.status === "KEY_DRIFT"
+                ? "Your portal is ready, but the staged upload needs key review before delivery."
+                : initialPushResult?.status === "PARTIAL"
+                  ? "Your portal is ready, but the initial push completed with row errors."
               : "Your portal is ready. Drop files here whenever you need to push data."}
           </p>
 
@@ -1138,12 +1156,32 @@ export function GateWizard() {
                       {initialPushResult.rowCount?.toLocaleString()} rows
                       {initialPushResult.rowsInserted ? ` (${initialPushResult.rowsInserted.toLocaleString()} inserted)` : ""}
                       {initialPushResult.rowsUpdated ? ` (${initialPushResult.rowsUpdated.toLocaleString()} updated)` : ""}
+                      {initialPushResult.blankRowsSkipped ? `, ${initialPushResult.blankRowsSkipped.toLocaleString()} blank skipped` : ""}
+                    </span>
+                  </div>
+                ) : initialPushResult.status === "KEY_DRIFT" ? (
+                  <div className="space-y-1 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-ember">Initial push held</span>
+                      <span className="font-inconsolata text-ember">KEY DRIFT</span>
+                    </div>
+                    <p className="font-inconsolata text-text-dim text-[10px]">
+                      {initialPushResult.keyDrift?.reason ?? "The current key has duplicate or blank values in this upload."}
+                      {initialPushResult.blankRowsSkipped ? ` ${initialPushResult.blankRowsSkipped.toLocaleString()} fully blank rows were skipped.` : ""}
+                    </p>
+                  </div>
+                ) : initialPushResult.status === "PARTIAL" ? (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-ember">Initial push partial</span>
+                    <span className="font-inconsolata text-ember text-[10px]">
+                      {initialPushResult.rowsErrored?.toLocaleString() ?? 0} rows errored
+                      {initialPushResult.blankRowsSkipped ? `, ${initialPushResult.blankRowsSkipped.toLocaleString()} blank skipped` : ""}
                     </span>
                   </div>
                 ) : (
                   <div className="flex justify-between text-xs">
                     <span className="text-ember">Initial push failed</span>
-                    <span className="font-inconsolata text-ember text-[10px]">{initialPushResult.error}</span>
+                    <span className="font-inconsolata text-ember text-[10px]">{initialPushResult.error ?? initialPushResult.errorMessage}</span>
                   </div>
                 )}
               </div>

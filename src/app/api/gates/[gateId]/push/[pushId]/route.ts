@@ -7,6 +7,7 @@ const CLEARABLE_STATUSES = new Set([
   "VALIDATING",
   "VALIDATED",
   "SCHEMA_DRIFT",
+  "KEY_DRIFT",
   "FAILED",
   "CANCELLED",
 ]);

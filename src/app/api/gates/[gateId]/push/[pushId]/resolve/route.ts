@@ -207,16 +207,21 @@ export const POST = withAuth(async (req, ctx) => {
         // Execute the push
         try {
           const result = await executePush(gateId, pushId, tempFile.buffer, tempFile.extension);
-          await deleteTempFile(push.tempFileId);
+          if (result.status !== "KEY_DRIFT") {
+            await deleteTempFile(push.tempFileId);
+          }
 
           return NextResponse.json({
             pushId: push.id,
-            status: "SUCCESS",
+            status: result.status,
             resolution: "ADJUSTED_DESTINATION",
             rowCount: result.rowCount,
             rowsInserted: result.rowsInserted,
             rowsUpdated: result.rowsUpdated,
             rowsErrored: result.rowsErrored,
+            blankRowsSkipped: result.blankRowsSkipped,
+            keyDrift: result.keyDrift,
+            errorMessage: result.errorMessage,
             duration: result.duration,
           });
         } catch (err) {

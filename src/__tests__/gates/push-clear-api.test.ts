@@ -66,6 +66,30 @@ describe("gate push clear API", () => {
     expect(mockDeleteTempFile).toHaveBeenCalledWith("tmp_1");
   });
 
+  it("cancels a KEY_DRIFT review push and deletes the preserved temp file", async () => {
+    mockGatePushFindFirst.mockResolvedValue({
+      id: "push_1",
+      gateId: "gate_1",
+      tenantId: "tenant_1",
+      status: "KEY_DRIFT",
+      tempFileId: "tmp_1",
+    });
+
+    const { DELETE } = await import("@/app/api/gates/[gateId]/push/[pushId]/route");
+    const response = await DELETE(request());
+
+    expect(response.status).toBe(200);
+    expect(mockGatePushUpdate).toHaveBeenCalledWith({
+      where: { id: "push_1" },
+      data: {
+        status: "CANCELLED",
+        tempFileId: null,
+        completedAt: expect.any(Date),
+      },
+    });
+    expect(mockDeleteTempFile).toHaveBeenCalledWith("tmp_1");
+  });
+
   it("does not clear a running push", async () => {
     mockGatePushFindFirst.mockResolvedValue({
       id: "push_1",

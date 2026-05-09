@@ -166,10 +166,12 @@ function setupSuccessfulCreate() {
   });
   mockGatePushCreate.mockResolvedValue({ id: "push_1" });
   mockExecutePush.mockResolvedValue({
+    status: "SUCCESS",
     rowCount: 1,
     rowsInserted: 1,
     rowsUpdated: 0,
     rowsErrored: 0,
+    blankRowsSkipped: 0,
     duration: 10,
   });
 }
@@ -208,6 +210,47 @@ describe("gates API", () => {
         forgeBlueprintId: null,
       }),
     }));
+    expect(mockDeleteTempFile).toHaveBeenCalledWith("tmp_1");
+  });
+
+  it("uses the real initial push status and preserves staged files on KEY_DRIFT", async () => {
+    setupSuccessfulCreate();
+    mockExecutePush.mockResolvedValue({
+      status: "KEY_DRIFT",
+      rowCount: 3,
+      rowsInserted: 0,
+      rowsUpdated: 0,
+      rowsErrored: 0,
+      blankRowsSkipped: 1,
+      keyDrift: {
+        oldKey: ["id"],
+        duplicateExamples: [],
+        nullKeyExamples: [
+          { rowIndex: 2, keyValues: { id: null }, missingColumns: ["id"] },
+        ],
+        reason: "Current UPSERT key has blank values in this upload.",
+        candidateKeys: [],
+        recommendation: null,
+        validationStats: null,
+        selectedKey: null,
+      },
+      duration: 12,
+    });
+
+    const { POST } = await import("@/app/api/gates/route");
+    const response = await POST(gateCreateRequest("conn_tenant_b"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(payload.initialPush.status).toBe("KEY_DRIFT");
+    expect(payload.initialPush.blankRowsSkipped).toBe(1);
+    expect(mockGatePushCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "PUSHING",
+        tempFileId: "tmp_1",
+      }),
+    }));
+    expect(mockDeleteTempFile).not.toHaveBeenCalled();
   });
 
   it("creates gates with same-tenant forgeBlueprintId", async () => {

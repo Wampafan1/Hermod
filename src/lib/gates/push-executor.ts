@@ -12,24 +12,61 @@ import { createAnalyticsSession } from "@/lib/duckdb/engine";
 import type { DestConfig, LoadResult } from "@/lib/bifrost/types";
 import type { ConnectionProvider } from "@/lib/providers/provider";
 import type { ProviderConnection } from "@/lib/providers/types";
+import { Prisma } from "@prisma/client";
 import { normalizeDestinationColumnName } from "./alter-generator";
 import { fullSqlTableRef, quoteSqlIdentifier } from "./sql-identifiers";
 
 // ─── Types ──────────────────────────────────────────
 
-interface ColumnMap {
+export interface ColumnMap {
   sourceColumn: string;
   destinationColumn: string;
   sourceType: string;
-  destType: string;
+  destType: string | null;
 }
 
-interface PushResult {
+export type GatePushExecutionStatus = "SUCCESS" | "FAILED" | "PARTIAL" | "KEY_DRIFT";
+
+export interface IndexedMappedRow {
+  row: Record<string, unknown>;
+  rowIndex: number;
+}
+
+export interface KeyDriftDetails {
+  oldKey: string[];
+  duplicateExamples: Array<{
+    keyValues: Record<string, string | number | boolean | null>;
+    rowIndexes: number[];
+  }>;
+  nullKeyExamples: Array<{
+    rowIndex: number;
+    keyValues: Record<string, string | number | boolean | null>;
+    missingColumns: string[];
+  }>;
+  reason: string;
+  candidateKeys: [];
+  recommendation: null;
+  validationStats: null;
+  selectedKey: null;
+}
+
+export interface PushResult {
+  status: GatePushExecutionStatus;
   rowCount: number;
   rowsInserted: number;
   rowsUpdated: number;
   rowsErrored: number;
+  blankRowsSkipped: number;
+  keyDrift?: KeyDriftDetails;
   duration: number;
+  errorMessage?: string;
+}
+
+export interface PreparedGateRows {
+  mappedRows: Record<string, unknown>[];
+  indexedMappedRows: IndexedMappedRow[];
+  blankRowsSkipped: number;
+  keyDrift?: KeyDriftDetails;
 }
 
 // ─── Execute Push ───────────────────────────────────
@@ -75,7 +112,18 @@ export async function executePush(
   }
 
   if (rows.length === 0) {
-    return { rowCount: 0, rowsInserted: 0, rowsUpdated: 0, rowsErrored: 0, duration: Date.now() - startTime };
+    const result: PushResult = {
+      status: "SUCCESS",
+      rowCount: 0,
+      rowsInserted: 0,
+      rowsUpdated: 0,
+      rowsErrored: 0,
+      blankRowsSkipped: 0,
+      duration: Date.now() - startTime,
+    };
+    await persistPushResult(pushId, result);
+    await markGateDelivered(gateId);
+    return result;
   }
 
   // 2. Map columns: rename source → destination
@@ -97,52 +145,68 @@ export async function executePush(
       columnMapping
     );
 
-    // 3. Map columns: rename source to destination
-    const mappedRows = rows.map((row) => {
-      const mapped: Record<string, unknown> = {};
-      for (const col of effectiveColumnMapping) {
-        mapped[col.destinationColumn] = row[col.sourceColumn] ?? null;
-      }
-      return mapped;
+    const prepared = prepareMappedRowsForPush({
+      rows,
+      columnMapping: effectiveColumnMapping,
+      primaryKeyColumns,
+      mergeStrategy,
     });
 
-    // 4. Execute based on merge strategy
+    if (prepared.keyDrift) {
+      const result: PushResult = {
+        status: "KEY_DRIFT",
+        rowCount: rows.length,
+        rowsInserted: 0,
+        rowsUpdated: 0,
+        rowsErrored: 0,
+        blankRowsSkipped: prepared.blankRowsSkipped,
+        keyDrift: prepared.keyDrift,
+        duration: Date.now() - startTime,
+      };
+      await persistPushResult(pushId, result);
+      return result;
+    }
+
     let result: PushResult;
 
     if (mergeStrategy === "TRUNCATE_RELOAD") {
-      result = await truncateAndLoad(provider, providerConn, gate, mappedRows);
+      result = await truncateAndLoad(provider, providerConn, gate, prepared.mappedRows);
     } else if (mergeStrategy === "UPSERT") {
-      result = await upsertRows(provider, providerConn, gate, primaryKeyColumns, mappedRows, effectiveColumnMapping);
+      if (prepared.mappedRows.length === 0) {
+        result = {
+          status: "SUCCESS",
+          rowCount: 0,
+          rowsInserted: 0,
+          rowsUpdated: 0,
+          rowsErrored: 0,
+          blankRowsSkipped: 0,
+          duration: 0,
+        };
+      } else {
+        result = await upsertRows(
+          provider,
+          providerConn,
+          gate,
+          resolvePrimaryKeyDestinationColumns(primaryKeyColumns, effectiveColumnMapping),
+          prepared.mappedRows,
+          effectiveColumnMapping
+        );
+      }
     } else {
       // APPEND
-      result = await appendRows(provider, providerConn, gate, mappedRows);
+      result = await appendRows(provider, providerConn, gate, prepared.mappedRows);
     }
 
     result.duration = Date.now() - startTime;
     result.rowCount = rows.length;
+    result.blankRowsSkipped = prepared.blankRowsSkipped;
+    applyDefaultErrorMessage(result);
 
-    // 5. Update push record
-    await prisma.gatePush.update({
-      where: { id: pushId },
-      data: {
-        status: "SUCCESS",
-        rowCount: result.rowCount,
-        rowsInserted: result.rowsInserted,
-        rowsUpdated: result.rowsUpdated,
-        rowsErrored: result.rowsErrored,
-        duration: result.duration,
-        completedAt: new Date(),
-      },
-    });
+    await persistPushResult(pushId, result);
 
-    // 6. Update gate denormalized fields
-    await prisma.realmGate.update({
-      where: { id: gateId },
-      data: {
-        lastPushAt: new Date(),
-        pushCount: { increment: 1 },
-      },
-    });
+    if (result.status === "SUCCESS" || result.status === "PARTIAL") {
+      await markGateDelivered(gateId);
+    }
 
     return result;
   } catch (err) {
@@ -152,7 +216,7 @@ export async function executePush(
       data: {
         status: "FAILED",
         errorMessage: err instanceof Error ? err.message : String(err),
-        errorDetails: err instanceof Error ? { stack: err.stack } : undefined,
+        errorDetails: err instanceof Error && err.stack ? { stack: err.stack } : undefined,
         duration,
         completedAt: new Date(),
       },
@@ -201,6 +265,215 @@ async function resolveDestinationColumnMapping(
   }
 }
 
+export function isBlankMappedValue(value: unknown): boolean {
+  return value == null || (typeof value === "string" && value.trim() === "");
+}
+
+export function isFullyBlankMappedRow(row: Record<string, unknown>): boolean {
+  const values = Object.values(row);
+  return values.length > 0 && values.every(isBlankMappedValue);
+}
+
+export function resolvePrimaryKeyDestinationColumns(
+  primaryKeyColumns: string[],
+  columnMapping: ColumnMap[]
+): string[] {
+  return primaryKeyColumns.map((sourcePrimaryKey) => {
+    const mapped = columnMapping.find(
+      (mapping) => mapping.sourceColumn.toLowerCase() === sourcePrimaryKey.toLowerCase()
+    );
+    return mapped?.destinationColumn ?? sourcePrimaryKey;
+  });
+}
+
+export function prepareMappedRowsForPush(input: {
+  rows: Record<string, unknown>[];
+  columnMapping: ColumnMap[];
+  primaryKeyColumns: string[];
+  mergeStrategy: string;
+}): PreparedGateRows {
+  const indexedMappedRows = input.rows.map((row, index) => {
+    const mapped: Record<string, unknown> = {};
+    for (const col of input.columnMapping) {
+      mapped[col.destinationColumn] = row[col.sourceColumn] ?? null;
+    }
+    return { row: mapped, rowIndex: index + 1 };
+  });
+
+  const nonBlankRows = indexedMappedRows.filter(({ row }) => !isFullyBlankMappedRow(row));
+  const prepared: PreparedGateRows = {
+    mappedRows: nonBlankRows.map(({ row }) => row),
+    indexedMappedRows: nonBlankRows,
+    blankRowsSkipped: indexedMappedRows.length - nonBlankRows.length,
+  };
+
+  if (input.mergeStrategy === "UPSERT" && nonBlankRows.length > 0) {
+    const keyColumns = resolvePrimaryKeyDestinationColumns(
+      input.primaryKeyColumns,
+      input.columnMapping
+    );
+    const preflight = preflightUpsertKey({
+      primaryKeyColumns: keyColumns,
+      rows: nonBlankRows,
+    });
+    if (!preflight.ok) {
+      prepared.keyDrift = preflight.keyDrift;
+    }
+  }
+
+  return prepared;
+}
+
+export function derivePushStatus(input: {
+  attemptedRows: number;
+  rowsErrored: number;
+}): Exclude<GatePushExecutionStatus, "KEY_DRIFT"> {
+  if (input.rowsErrored <= 0) return "SUCCESS";
+  if (input.attemptedRows <= 0 || input.rowsErrored >= input.attemptedRows) return "FAILED";
+  return "PARTIAL";
+}
+
+export function preflightUpsertKey(input: {
+  primaryKeyColumns: string[];
+  rows: IndexedMappedRow[];
+  maxExamples?: number;
+}): { ok: true } | { ok: false; keyDrift: KeyDriftDetails } {
+  const maxExamples = input.maxExamples ?? 5;
+  if (input.primaryKeyColumns.length === 0) return { ok: true };
+
+  const duplicateCandidates = new Map<
+    string,
+    { keyValues: Record<string, string | number | boolean | null>; rowIndexes: number[] }
+  >();
+  const nullKeyExamples: KeyDriftDetails["nullKeyExamples"] = [];
+
+  for (const indexedRow of input.rows) {
+    const keyValues = buildSafeKeyValues(indexedRow.row, input.primaryKeyColumns);
+    const missingColumns = input.primaryKeyColumns.filter((column) =>
+      isBlankMappedValue(indexedRow.row[column])
+    );
+
+    if (missingColumns.length > 0) {
+      if (nullKeyExamples.length < maxExamples) {
+        nullKeyExamples.push({
+          rowIndex: indexedRow.rowIndex,
+          keyValues,
+          missingColumns,
+        });
+      }
+      continue;
+    }
+
+    const signature = JSON.stringify(input.primaryKeyColumns.map((column) => keyValues[column]));
+    const existing = duplicateCandidates.get(signature);
+    if (existing) {
+      existing.rowIndexes.push(indexedRow.rowIndex);
+    } else {
+      duplicateCandidates.set(signature, {
+        keyValues,
+        rowIndexes: [indexedRow.rowIndex],
+      });
+    }
+  }
+
+  const duplicateExamples = Array.from(duplicateCandidates.values())
+    .filter((example) => example.rowIndexes.length > 1)
+    .slice(0, maxExamples);
+
+  if (duplicateExamples.length === 0 && nullKeyExamples.length === 0) {
+    return { ok: true };
+  }
+
+  const hasDuplicates = duplicateExamples.length > 0;
+  const hasNullKeys = nullKeyExamples.length > 0;
+  const reason = hasDuplicates && hasNullKeys
+    ? "Current UPSERT key has duplicate and blank values in this upload."
+    : hasDuplicates
+      ? "Current UPSERT key has duplicate values in this upload."
+      : "Current UPSERT key has blank values in this upload.";
+
+  return {
+    ok: false,
+    keyDrift: {
+      oldKey: input.primaryKeyColumns,
+      duplicateExamples,
+      nullKeyExamples,
+      reason,
+      candidateKeys: [],
+      recommendation: null,
+      validationStats: null,
+      selectedKey: null,
+    },
+  };
+}
+
+function buildSafeKeyValues(
+  row: Record<string, unknown>,
+  keyColumns: string[]
+): Record<string, string | number | boolean | null> {
+  const values: Record<string, string | number | boolean | null> = {};
+  for (const column of keyColumns) {
+    values[column] = toSafeKeyValue(row[column]);
+  }
+  return values;
+}
+
+function toSafeKeyValue(value: unknown): string | number | boolean | null {
+  if (value == null) return null;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
+async function persistPushResult(pushId: string, result: PushResult): Promise<void> {
+  const hasRowErrors = result.rowsErrored > 0;
+
+  await prisma.gatePush.update({
+    where: { id: pushId },
+    data: {
+      status: result.status,
+      rowCount: result.rowCount,
+      rowsInserted: result.rowsInserted,
+      rowsUpdated: result.rowsUpdated,
+      rowsErrored: result.rowsErrored,
+      blankRowsSkipped: result.blankRowsSkipped,
+      keyDrift: result.keyDrift
+        ? (result.keyDrift as unknown as Prisma.InputJsonValue)
+        : Prisma.JsonNull,
+      errorMessage: result.errorMessage ?? null,
+      errorDetails: hasRowErrors
+        ? ({
+            status: result.status,
+            rowsErrored: result.rowsErrored,
+          } as Prisma.InputJsonValue)
+        : Prisma.JsonNull,
+      duration: result.duration,
+      completedAt: result.status === "KEY_DRIFT" ? null : new Date(),
+    },
+  });
+}
+
+function applyDefaultErrorMessage(result: PushResult): void {
+  if (result.errorMessage) return;
+  if (result.status === "FAILED") {
+    result.errorMessage = "Gate push failed for all rows.";
+  } else if (result.status === "PARTIAL") {
+    result.errorMessage = "Gate push completed with row errors.";
+  }
+}
+
+async function markGateDelivered(gateId: string): Promise<void> {
+  await prisma.realmGate.update({
+    where: { id: gateId },
+    data: {
+      lastPushAt: new Date(),
+      pushCount: { increment: 1 },
+    },
+  });
+}
+
 async function truncateAndLoad(
   provider: ReturnType<typeof getProvider>,
   conn: Awaited<ReturnType<ReturnType<typeof getProvider>["connect"]>>,
@@ -217,12 +490,15 @@ async function truncateAndLoad(
   };
 
   const result: LoadResult = await provider.load(conn, rows, destConfig);
+  const rowsErrored = loadErrorCount(result, rows.length);
 
   return {
+    status: derivePushStatus({ attemptedRows: rows.length, rowsErrored }),
     rowCount: rows.length,
     rowsInserted: result.rowsLoaded,
     rowsUpdated: 0,
-    rowsErrored: result.errors.length,
+    rowsErrored,
+    blankRowsSkipped: 0,
     duration: 0,
   };
 }
@@ -243,14 +519,22 @@ async function appendRows(
   };
 
   const result: LoadResult = await provider.load(conn, rows, destConfig);
+  const rowsErrored = loadErrorCount(result, rows.length);
 
   return {
+    status: derivePushStatus({ attemptedRows: rows.length, rowsErrored }),
     rowCount: rows.length,
     rowsInserted: result.rowsLoaded,
     rowsUpdated: 0,
-    rowsErrored: result.errors.length,
+    rowsErrored,
+    blankRowsSkipped: 0,
     duration: 0,
   };
+}
+
+function loadErrorCount(result: LoadResult, attemptedRows: number): number {
+  if (result.errors.length === 0) return 0;
+  return Math.max(result.errors.length, attemptedRows - result.rowsLoaded);
 }
 
 async function upsertRows(
@@ -261,15 +545,7 @@ async function upsertRows(
   rows: Record<string, unknown>[],
   columnMapping: ColumnMap[]
 ): Promise<PushResult> {
-  // Map ALL PK source columns to destination names
-  const pkColumns = primaryKeyColumns.map((srcPk) => {
-    const mapped = columnMapping.find(
-      (m) => m.sourceColumn.toLowerCase() === srcPk.toLowerCase()
-    );
-    return mapped?.destinationColumn ?? srcPk;
-  });
-
-  if (pkColumns.length === 0) {
+  if (primaryKeyColumns.length === 0) {
     throw new Error("No primary key columns configured");
   }
 
@@ -280,6 +556,7 @@ async function upsertRows(
 
   const schema = gate.targetSchema || "public";
   const destColumns = columnMapping.map((m) => m.destinationColumn);
+  const pkColumns = primaryKeyColumns;
 
   let inserted = 0;
   let updated = 0;
@@ -302,16 +579,19 @@ async function upsertRows(
       // A real implementation would parse affected rows, but this works for V1
       inserted += batch.length;
     } catch (err) {
-      console.error(`[Gate] Upsert batch ${i}-${i + batch.length} failed:`, err);
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[Gate] Upsert batch ${i}-${i + batch.length} failed: ${message}`);
       errored += batch.length;
     }
   }
 
   return {
+    status: derivePushStatus({ attemptedRows: rows.length, rowsErrored: errored }),
     rowCount: rows.length,
     rowsInserted: inserted,
     rowsUpdated: updated,
     rowsErrored: errored,
+    blankRowsSkipped: 0,
     duration: 0,
   };
 }

@@ -16,11 +16,40 @@ interface GatePush {
   rowsInserted: number | null;
   rowsUpdated: number | null;
   rowsErrored: number | null;
+  blankRowsSkipped: number | null;
+  keyDrift: KeyDriftDetails | null;
   duration: number | null;
   errorMessage: string | null;
   schemaDiff: unknown | null;
   createdAt: string;
   completedAt: string | null;
+}
+
+interface KeyDriftDetails {
+  oldKey: string[];
+  reason: string;
+  duplicateExamples?: Array<{
+    keyValues: Record<string, string | number | boolean | null>;
+    rowIndexes: number[];
+  }>;
+  nullKeyExamples?: Array<{
+    rowIndex: number;
+    keyValues: Record<string, string | number | boolean | null>;
+    missingColumns: string[];
+  }>;
+}
+
+interface PushExecutionResult {
+  status: string;
+  rowCount: number;
+  rowsInserted: number;
+  rowsUpdated: number;
+  rowsErrored: number;
+  blankRowsSkipped: number;
+  duration: number;
+  keyDrift?: KeyDriftDetails;
+  error?: string;
+  errorMessage?: string;
 }
 
 interface AlterStatement {
@@ -76,8 +105,10 @@ function StatusBadge({ status }: { status: string }) {
     PAUSED: "text-amber-400 bg-amber-900/20 border-amber-700/30",
     ARCHIVED: "text-text-dim bg-void/50 border-[rgba(201,147,58,0.1)]",
     SUCCESS: "text-emerald-400",
+    PARTIAL: "text-amber-400",
     FAILED: "text-red-400",
     SCHEMA_DRIFT: "text-amber-400",
+    KEY_DRIFT: "text-amber-400",
     VALIDATED: "text-frost",
     PUSHING: "text-frost",
     VALIDATING: "text-text-dim",
@@ -101,14 +132,21 @@ function relativeTime(iso: string, now: number): string {
   return `${days}d ago`;
 }
 
-const CLEARABLE_PUSH_STATUSES = new Set(["VALIDATING", "VALIDATED", "SCHEMA_DRIFT", "FAILED"]);
+const CLEARABLE_PUSH_STATUSES = new Set(["VALIDATING", "VALIDATED", "SCHEMA_DRIFT", "KEY_DRIFT", "FAILED"]);
 
 function canClearPush(status: string): boolean {
   return CLEARABLE_PUSH_STATUSES.has(status);
 }
 
 function clearPushLabel(status: string): string {
+  if (status === "KEY_DRIFT") return "Clear key review";
   return status === "FAILED" ? "Clear failed attempt" : "Clear staged push";
+}
+
+function formatKeyValues(values: Record<string, string | number | boolean | null>): string {
+  return Object.entries(values)
+    .map(([key, value]) => `${key}=${value == null || value === "" ? "blank" : String(value)}`)
+    .join(", ");
 }
 
 // ─── Main Component ─────────────────────────────────
@@ -121,16 +159,10 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
 
   const [gate, setGate] = useState(initialGate);
   const [pushState, setPushState] = useState<
-    "idle" | "validating" | "confirmed" | "pushing" | "drift" | "success" | "failed"
+    "idle" | "validating" | "confirmed" | "pushing" | "drift" | "keyDrift" | "partial" | "success" | "failed"
   >("idle");
   const [validation, setValidation] = useState<PushValidationResult | null>(null);
-  const [pushResult, setPushResult] = useState<{
-    rowCount: number;
-    rowsInserted: number;
-    rowsUpdated: number;
-    rowsErrored: number;
-    duration: number;
-  } | null>(null);
+  const [pushResult, setPushResult] = useState<PushExecutionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Drift resolution state
@@ -139,6 +171,37 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
 
   const [expandedPush, setExpandedPush] = useState<string | null>(null);
   const [clearingPushId, setClearingPushId] = useState<string | null>(null);
+
+  const refreshGate = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/gates/${gate.id}`);
+      if (res.ok) {
+        setGate(await res.json());
+      }
+    } catch {
+      // best effort
+    }
+  }, [gate.id]);
+
+  const applyExecutionResult = useCallback((data: PushExecutionResult, successMessage?: string) => {
+    setPushResult(data);
+
+    if (data.status === "SUCCESS") {
+      setPushState("success");
+      toast.success(successMessage ?? `Pushed ${data.rowCount?.toLocaleString()} rows`);
+    } else if (data.status === "PARTIAL") {
+      setPushState("partial");
+      toast.info("Push completed with row errors");
+    } else if (data.status === "KEY_DRIFT") {
+      setPushState("keyDrift");
+      toast.info("Current key needs review before this upload can be pushed");
+    } else {
+      setError(data.error || data.errorMessage || "Push failed");
+      setPushState("failed");
+    }
+
+    refreshGate();
+  }, [refreshGate, toast]);
 
   // ── Drop handler ──────────────────────────────────
 
@@ -191,10 +254,7 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
               return;
             }
 
-            setPushResult(execData);
-            setPushState("success");
-            toast.success(`Pushed ${execData.rowCount?.toLocaleString()} rows`);
-            refreshGate();
+            applyExecutionResult(execData);
           } catch {
             setError("Network error during push execution");
             setPushState("failed");
@@ -205,7 +265,7 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
         setPushState("failed");
       }
     },
-    [gate.id]
+    [gate.id, applyExecutionResult]
   );
 
   const handleDrop = useCallback(
@@ -243,17 +303,12 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
         return;
       }
 
-      setPushResult(data);
-      setPushState("success");
-      toast.success(`Pushed ${data.rowCount} rows`);
-
-      // Refresh gate data
-      refreshGate();
+      applyExecutionResult(data);
     } catch {
       setError("Network error during push");
       setPushState("failed");
     }
-  }, [validation, gate.id, toast]);
+  }, [validation, gate.id, applyExecutionResult]);
 
   // ── Drift resolution ──────────────────────────────
 
@@ -272,7 +327,7 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
     } finally {
       setResolving(false);
     }
-  }, [validation, gate.id, toast]);
+  }, [validation, gate.id, toast, refreshGate]);
 
   const resolveAdjustDestination = useCallback(async () => {
     if (!validation?.resolutionOptions) return;
@@ -301,35 +356,16 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
         return;
       }
 
-      if (data.status === "SUCCESS") {
-        setPushResult(data);
-        setPushState("success");
-        toast.success(`Destination adjusted & ${data.rowCount} rows pushed`);
-      } else {
-        setError(data.error || "Push failed after adjustment");
-        setPushState("failed");
-      }
-      refreshGate();
+      applyExecutionResult(data, `Destination adjusted & ${data.rowCount} rows pushed`);
     } catch {
       setError("Network error");
       setPushState("failed");
     } finally {
       setResolving(false);
     }
-  }, [validation, gate.id, checkedStatements, toast]);
+  }, [validation, gate.id, checkedStatements, applyExecutionResult]);
 
   // ── Refresh gate ──────────────────────────────────
-
-  const refreshGate = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/gates/${gate.id}`);
-      if (res.ok) {
-        setGate(await res.json());
-      }
-    } catch {
-      // best effort
-    }
-  }, [gate.id]);
 
   const resetPush = useCallback(() => {
     setPushState("idle");
@@ -489,8 +525,81 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
               <div className="text-text-dim text-[9px] uppercase tracking-wider">Duration</div>
             </div>
           </div>
+          {pushResult.blankRowsSkipped > 0 && (
+            <p className="text-text-dim text-[10px] font-inconsolata">
+              {pushResult.blankRowsSkipped.toLocaleString()} fully blank mapped rows skipped.
+            </p>
+          )}
           <button onClick={resetPush} className="btn-ghost text-xs">
             Push another file
+          </button>
+        </div>
+      )}
+
+      {pushState === "partial" && pushResult && (
+        <div className="card-norse p-6 space-y-3 border-amber-700/30">
+          <h3 className="text-amber-400 text-sm font-cinzel uppercase tracking-wider">Push Partially Applied</h3>
+          <p className="text-text-dim text-xs font-inconsolata">
+            {pushResult.rowsErrored.toLocaleString()} rows errored. Hermod did not mark this push as successful.
+          </p>
+          <div className="grid grid-cols-4 gap-3 text-center">
+            <div>
+              <div className="text-text text-sm font-inconsolata">{pushResult.rowCount}</div>
+              <div className="text-text-dim text-[9px] uppercase tracking-wider">Total</div>
+            </div>
+            <div>
+              <div className="text-emerald-400 text-sm font-inconsolata">{pushResult.rowsInserted}</div>
+              <div className="text-text-dim text-[9px] uppercase tracking-wider">Inserted</div>
+            </div>
+            <div>
+              <div className="text-amber-400 text-sm font-inconsolata">{pushResult.rowsErrored}</div>
+              <div className="text-text-dim text-[9px] uppercase tracking-wider">Errored</div>
+            </div>
+            <div>
+              <div className="text-text-dim text-sm font-inconsolata">{pushResult.blankRowsSkipped}</div>
+              <div className="text-text-dim text-[9px] uppercase tracking-wider">Blank Skipped</div>
+            </div>
+          </div>
+          <button onClick={resetPush} className="btn-ghost text-xs">
+            Push another file
+          </button>
+        </div>
+      )}
+
+      {pushState === "keyDrift" && pushResult?.keyDrift && (
+        <div className="card-norse p-6 space-y-3 border-amber-700/30">
+          <h3 className="text-amber-400 text-sm font-cinzel uppercase tracking-wider">Key Review Needed</h3>
+          <p className="text-text-dim text-xs font-inconsolata">
+            {pushResult.keyDrift.reason} The staged upload is preserved for review.
+          </p>
+          <div className="text-text-dim text-[10px] font-inconsolata">
+            Current key: <span className="text-gold">{pushResult.keyDrift.oldKey.join(" + ")}</span>
+            {pushResult.blankRowsSkipped > 0 && (
+              <span> · {pushResult.blankRowsSkipped.toLocaleString()} fully blank rows skipped</span>
+            )}
+          </div>
+          {(pushResult.keyDrift.duplicateExamples?.length ?? 0) > 0 && (
+            <div className="space-y-1">
+              <div className="label-norse text-[9px]">Duplicate Examples</div>
+              {pushResult.keyDrift.duplicateExamples?.slice(0, 3).map((example) => (
+                <div key={`${formatKeyValues(example.keyValues)}-${example.rowIndexes.join("-")}`} className="text-text-dim text-[10px] font-inconsolata">
+                  Rows {example.rowIndexes.join(", ")} · {formatKeyValues(example.keyValues)}
+                </div>
+              ))}
+            </div>
+          )}
+          {(pushResult.keyDrift.nullKeyExamples?.length ?? 0) > 0 && (
+            <div className="space-y-1">
+              <div className="label-norse text-[9px]">Blank Key Examples</div>
+              {pushResult.keyDrift.nullKeyExamples?.slice(0, 3).map((example) => (
+                <div key={`${example.rowIndex}-${example.missingColumns.join("-")}`} className="text-text-dim text-[10px] font-inconsolata">
+                  Row {example.rowIndex} · missing {example.missingColumns.join(", ")} · {formatKeyValues(example.keyValues)}
+                </div>
+              ))}
+            </div>
+          )}
+          <button onClick={resetPush} className="btn-ghost text-xs">
+            Leave staged for review
           </button>
         </div>
       )}
@@ -551,7 +660,7 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
                         ? "bg-emerald-400"
                         : p.status === "FAILED"
                           ? "bg-red-400"
-                          : p.status === "SCHEMA_DRIFT"
+                          : p.status === "SCHEMA_DRIFT" || p.status === "KEY_DRIFT" || p.status === "PARTIAL"
                             ? "bg-amber-400"
                             : "bg-text-dim"
                     }`}
@@ -580,6 +689,29 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
                         Inserted: {p.rowsInserted} · Updated: {p.rowsUpdated ?? 0} · Errored: {p.rowsErrored ?? 0}
                       </div>
                     )}
+                    {p.blankRowsSkipped != null && p.blankRowsSkipped > 0 && (
+                      <div className="text-text-dim">
+                        Fully blank mapped rows skipped: {p.blankRowsSkipped}
+                      </div>
+                    )}
+                    {p.keyDrift && (
+                      <div className="space-y-1 border-t border-[rgba(201,147,58,0.08)] pt-2">
+                        <div className="text-amber-400 font-inconsolata">{p.keyDrift.reason}</div>
+                        <div className="text-text-dim">
+                          Current key: <span className="text-gold">{p.keyDrift.oldKey.join(" + ")}</span>
+                        </div>
+                        {p.keyDrift.duplicateExamples?.slice(0, 2).map((example) => (
+                          <div key={`${p.id}-dup-${example.rowIndexes.join("-")}`} className="text-text-dim font-inconsolata">
+                            Duplicate rows {example.rowIndexes.join(", ")}: {formatKeyValues(example.keyValues)}
+                          </div>
+                        ))}
+                        {p.keyDrift.nullKeyExamples?.slice(0, 2).map((example) => (
+                          <div key={`${p.id}-null-${example.rowIndex}`} className="text-text-dim font-inconsolata">
+                            Row {example.rowIndex} missing {example.missingColumns.join(", ")}: {formatKeyValues(example.keyValues)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {p.errorMessage && (
                       <div className="text-red-400 font-inconsolata">{p.errorMessage}</div>
                     )}
@@ -600,10 +732,7 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
                                   setPushState("failed");
                                   return;
                                 }
-                                setPushResult(data);
-                                setPushState("success");
-                                toast.success(`Pushed ${data.rowCount?.toLocaleString()} rows`);
-                                refreshGate();
+                                applyExecutionResult(data);
                               } catch {
                                 setError("Network error");
                                 setPushState("failed");
