@@ -142,7 +142,7 @@ function relativeTime(iso: string, now: number): string {
   return `${days}d ago`;
 }
 
-const CLEARABLE_PUSH_STATUSES = new Set(["VALIDATING", "VALIDATED", "SCHEMA_DRIFT", "KEY_DRIFT", "FAILED"]);
+const CLEARABLE_PUSH_STATUSES = new Set(["VALIDATING", "VALIDATED", "SCHEMA_DRIFT", "KEY_DRIFT", "PARTIAL", "FAILED"]);
 
 function canClearPush(status: string): boolean {
   return CLEARABLE_PUSH_STATUSES.has(status);

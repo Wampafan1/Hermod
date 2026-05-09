@@ -96,9 +96,56 @@ Phase 2 fully validates candidate uniqueness inside the uploaded nonblank mapped
 - `npm run build`
 - `npm run lint`
 
-### Remaining Phase 3
+## Phase 3 Key Approval And DDL Results
 
-- Destination table validation across existing rows plus staged upload rows.
-- Approval workflow for selecting a candidate key.
-- Destination DDL/key replacement.
-- Re-run push after explicit approval.
+Hermod can now turn a `KEY_DRIFT` review into an explicit, user-approved key hardening action. The staged upload is re-read, remapped, blank-row filtered, and revalidated against the selected key immediately before any destination DDL is generated or executed.
+
+### Provider Support
+
+- Postgres: unique constraint and primary key replacement SQL generation.
+- SQL Server: unique constraint and primary key replacement SQL generation.
+- MySQL: unique index and primary key replacement SQL generation.
+- Unsupported providers remain blocked from key replacement.
+
+### Safety Blocks
+
+- The selected key must match one of the verified `keyDrift.candidateKeys`.
+- The staged upload must still be null-free and unique for the selected key.
+- Existing destination rows are checked for nulls and duplicate key combinations before DDL.
+- Hermod drops only a known Hermod-managed constraint/index or an exact matching key constraint.
+- Primary key replacement is blocked when foreign key dependencies are detected.
+- Confirmed DDL must exactly match the current generated plan before execution.
+
+### DDL Preview
+
+`GET /api/gates/[gateId]/push/[pushId]/resolve?selectedKey=a,b,c` returns the generated DDL, warnings, blocked status, and confirmation requirement without executing anything.
+
+### Approval Flow
+
+`POST /api/gates/[gateId]/push/[pushId]/resolve` supports:
+
+- `CANCEL`: cancels the `KEY_DRIFT` review and removes the staged upload.
+- `APPROVE_KEY_HARDENING`: validates the approved key, applies confirmed DDL, updates `RealmGate.primaryKeyColumns`, records `RealmGate.keyConstraintName`, appends `RealmGate.keyHistory`, then re-runs the staged push.
+
+Post-DDL push status comes from the actual push result. `SUCCESS` is not returned when row errors occur, and staged files are deleted only on successful reviewed pushes or explicit cancel.
+
+### keyHistory Behavior
+
+Each approved hardening records the push id, old key, new destination key, stored source-key form, generated constraint name, applied DDL, warnings, and timestamp in `RealmGate.keyHistory`.
+
+### Tests Added
+
+- `src/__tests__/gates/key-ddl.test.ts`
+- `src/__tests__/gates/key-hardening-resolve.test.ts`
+
+### Validation Results
+
+- `npx prisma validate`
+- `npx prisma generate`
+- `npm run test`
+- `npm run build`
+- `npm run lint`
+
+### Remaining Phase 4
+
+- Build the UI review panel for candidate evidence, DDL preview, confirmation, cancel, and reviewed push results.

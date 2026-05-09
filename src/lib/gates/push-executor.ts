@@ -58,7 +58,7 @@ export interface KeyDriftDetails {
   aiUsed?: boolean;
   aiExplanation?: string | null;
   noReliableKeyReason?: string | null;
-  selectedKey: null;
+  selectedKey: string[] | null;
 }
 
 export interface PushResult {
@@ -252,7 +252,7 @@ export async function preflightGatePushKeyDrift(input: {
   };
 }
 
-async function loadRowsFromGateFile(
+export async function loadRowsFromGateFile(
   fileBuffer: Buffer,
   fileExtension: string
 ): Promise<Record<string, unknown>[]> {
