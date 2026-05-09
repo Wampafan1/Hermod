@@ -180,6 +180,42 @@ describe("Mjolnir blueprint status API lifecycle", () => {
     expect(mockBlueprintUpdate).not.toHaveBeenCalled();
   });
 
+  it("allows ARCHIVED to DRAFT as a status-only restore", async () => {
+    mockBlueprintFindFirst.mockResolvedValue(existingBlueprint("ARCHIVED"));
+    const { PUT } = await import("@/app/api/mjolnir/blueprints/[id]/route");
+
+    const response = await PUT(jsonRequest(
+      "http://localhost/api/mjolnir/blueprints/bp_1",
+      { status: "DRAFT" },
+      "PUT"
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mockBlueprintUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "DRAFT" }),
+    }));
+  });
+
+  it("rejects editing archived blueprint content during restore", async () => {
+    mockBlueprintFindFirst.mockResolvedValue(existingBlueprint("ARCHIVED"));
+    const { PUT } = await import("@/app/api/mjolnir/blueprints/[id]/route");
+
+    const response = await PUT(jsonRequest(
+      "http://localhost/api/mjolnir/blueprints/bp_1",
+      {
+        status: "DRAFT",
+        steps: [validStep({ description: "Edit while archived" })],
+      },
+      "PUT"
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "Archived blueprints must be restored to DRAFT before editing.",
+    });
+    expect(mockBlueprintUpdate).not.toHaveBeenCalled();
+  });
+
   it("demotes ACTIVE to DRAFT when steps change without validation evidence", async () => {
     mockBlueprintFindFirst.mockResolvedValue(existingBlueprint("ACTIVE"));
     const { PUT } = await import("@/app/api/mjolnir/blueprints/[id]/route");

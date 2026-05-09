@@ -78,7 +78,7 @@ export const PUT = withAuth(async (req, session) => {
   );
   const validationEvidence = hasValidationEvidence(parsed.data.validation);
 
-  if (!canEditBlueprintStatus(currentStatus) && hasNonStatusChanges && requestedStatus !== "DRAFT") {
+  if (!canEditBlueprintStatus(currentStatus) && hasNonStatusChanges) {
     return NextResponse.json(
       { error: "Archived blueprints must be restored to DRAFT before editing." },
       { status: 400 }

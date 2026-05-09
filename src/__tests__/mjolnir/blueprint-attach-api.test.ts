@@ -368,6 +368,30 @@ describe("Bifrost blueprint attach API", () => {
     expect(mockBifrostRouteUpdate).not.toHaveBeenCalled();
   });
 
+  it("rejects turning transform on with an existing DRAFT blueprint", async () => {
+    mockBifrostRouteFindFirst.mockResolvedValue(existingRoute({
+      transformEnabled: false,
+      blueprintId: "bp_draft",
+    }));
+    mockBlueprintFindFirst.mockResolvedValue(blueprint({
+      id: "bp_draft",
+      status: "DRAFT",
+    }));
+    const { PUT } = await import("@/app/api/bifrost/routes/[id]/route");
+
+    const response = await PUT(jsonRequest(
+      "http://localhost/api/bifrost/routes/route_1",
+      { transformEnabled: true },
+      "PUT"
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "Blueprint must be validated before it can be attached.",
+    });
+    expect(mockBifrostRouteUpdate).not.toHaveBeenCalled();
+  });
+
   it("rejects changing blueprintId to a stateful blueprint while transform is enabled", async () => {
     mockBifrostRouteFindFirst.mockResolvedValue(existingRoute({ transformEnabled: true }));
     mockBlueprintFindFirst.mockResolvedValue(blueprint({
@@ -423,6 +447,26 @@ describe("Bifrost blueprint attach API", () => {
     expect(mockBlueprintFindFirst).not.toHaveBeenCalled();
     expect(mockBifrostRouteUpdate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ name: "Renamed Route" }),
+    }));
+  });
+
+  it("allows turning transform off with a legacy DRAFT blueprint attached", async () => {
+    mockBifrostRouteFindFirst.mockResolvedValue(existingRoute({
+      transformEnabled: true,
+      blueprintId: "bp_draft",
+    }));
+    const { PUT } = await import("@/app/api/bifrost/routes/[id]/route");
+
+    const response = await PUT(jsonRequest(
+      "http://localhost/api/bifrost/routes/route_1",
+      { transformEnabled: false },
+      "PUT"
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mockBlueprintFindFirst).not.toHaveBeenCalled();
+    expect(mockBifrostRouteUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ transformEnabled: false }),
     }));
   });
 

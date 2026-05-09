@@ -76,8 +76,12 @@ export const PUT = withAuth(async (req, session) => {
 
   let blueprintId: string | null | undefined;
   const blueprintChanged = data.blueprintId !== undefined && data.blueprintId !== existing.blueprintId;
-  const transformChanged = data.transformEnabled !== undefined;
-  if (blueprintChanged || transformChanged) {
+  const transformChanged = data.transformEnabled !== undefined && data.transformEnabled !== existing.transformEnabled;
+  const shouldValidateBlueprint =
+    blueprintChanged ||
+    (transformChanged && (data.transformEnabled ?? existing.transformEnabled));
+
+  if (shouldValidateBlueprint) {
     const effectiveTransformEnabled = data.transformEnabled ?? existing.transformEnabled;
     const effectiveBlueprintId = data.blueprintId !== undefined ? data.blueprintId : existing.blueprintId;
     const blueprintValidation = await validateOptionalAttachableBlueprint({
