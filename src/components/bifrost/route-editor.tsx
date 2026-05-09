@@ -8,6 +8,12 @@ import { canBeSource, canBeDestination } from "@/lib/providers/capabilities";
 import type { ConnectionType } from "@/lib/providers/types";
 import { DaySelector } from "@/components/schedule/day-selector";
 import { COMMON_TIMEZONES, OTHER_TIMEZONES } from "@/lib/timezones";
+import {
+  blueprintOptionLabel,
+  filterAttachableBlueprintOptions,
+  findLegacyCurrentBlueprint,
+  legacyCurrentBlueprintLabel,
+} from "@/components/mjolnir/blueprint-status-badge";
 
 interface DataSourceOption {
   id: string;
@@ -124,6 +130,8 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
   const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEdit);
+  const attachableBlueprints = filterAttachableBlueprintOptions(blueprints);
+  const legacyCurrentBlueprint = findLegacyCurrentBlueprint(blueprints, blueprintId);
 
   // Derived: selected source type
   const selectedSource = dataSources.find((ds) => ds.id === sourceId);
@@ -767,19 +775,25 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
               className="select-norse"
             >
               <option value="">Select a blueprint...</option>
-              {blueprints.map((bp) => (
-                <option
-                  key={bp.id}
-                  value={bp.id}
-                  disabled={bp.status === "DRAFT" || bp.status === "ARCHIVED"}
-                >
-                  {bp.name} ({bp.status})
+              {legacyCurrentBlueprint && (
+                <option value={legacyCurrentBlueprint.id} disabled>
+                  {legacyCurrentBlueprintLabel(legacyCurrentBlueprint)}
+                </option>
+              )}
+              {attachableBlueprints.map((bp) => (
+                <option key={bp.id} value={bp.id}>
+                  {blueprintOptionLabel(bp)}
                 </option>
               ))}
             </select>
             <p className="text-text-dim text-[0.6rem] tracking-wider mt-1">
               Only stateless steps (rename, filter, calculate) are supported for streaming routes
             </p>
+            {legacyCurrentBlueprint && (
+              <p className="text-ember text-[0.6rem] tracking-wider mt-1">
+                {legacyCurrentBlueprintLabel(legacyCurrentBlueprint)}. It remains attached for legacy use but cannot be selected for new attachments.
+              </p>
+            )}
           </Label>
         )}
       </Section>

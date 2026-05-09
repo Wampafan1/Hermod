@@ -1,6 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import {
+  blueprintOptionLabel,
+  filterAttachableBlueprintOptions,
+  findLegacyCurrentBlueprint,
+  legacyCurrentBlueprintLabel,
+} from "@/components/mjolnir/blueprint-status-badge";
 
 interface Connection {
   id: string;
@@ -59,9 +65,8 @@ export function ReportConfig({
   const [emailConnections, setEmailConnections] = useState<EmailConnection[]>([]);
   const [testEmailConnectionId, setTestEmailConnectionId] = useState("");
   const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
-  const currentBlueprint = blueprints.find((bp) => bp.id === blueprintId);
-  const currentBlueprintBlocked =
-    currentBlueprint?.status === "DRAFT" || currentBlueprint?.status === "ARCHIVED";
+  const attachableBlueprints = filterAttachableBlueprintOptions(blueprints);
+  const legacyCurrentBlueprint = findLegacyCurrentBlueprint(blueprints, blueprintId);
 
   useEffect(() => {
     fetch("/api/email-connections")
@@ -143,20 +148,21 @@ export function ReportConfig({
       {/* Blueprint (Mjolnir Forge) */}
       <div>
         <label className="label-norse">Forge Blueprint</label>
-        {blueprints.length > 0 ? (
+        {attachableBlueprints.length > 0 || legacyCurrentBlueprint ? (
           <select
             value={blueprintId ?? ""}
             onChange={(e) => onBlueprintChange(e.target.value || null)}
             className="select-norse"
           >
             <option value="">None (raw query output)</option>
-            {blueprints.map((bp) => (
-              <option
-                key={bp.id}
-                value={bp.id}
-                disabled={bp.status === "DRAFT" || bp.status === "ARCHIVED"}
-              >
-                {bp.name} ({bp.status.toLowerCase()})
+            {legacyCurrentBlueprint && (
+              <option value={legacyCurrentBlueprint.id} disabled>
+                {legacyCurrentBlueprintLabel(legacyCurrentBlueprint)}
+              </option>
+            )}
+            {attachableBlueprints.map((bp) => (
+              <option key={bp.id} value={bp.id}>
+                {blueprintOptionLabel(bp)}
               </option>
             ))}
           </select>
@@ -171,9 +177,9 @@ export function ReportConfig({
         <p className="text-[0.5rem] text-text-dim tracking-wide mt-1">
           Applies transformation steps to query results before export
         </p>
-        {currentBlueprintBlocked && (
+        {legacyCurrentBlueprint && (
           <p className="text-[0.5rem] text-ember tracking-wide mt-1">
-            Current legacy blueprint is {currentBlueprint.status.toLowerCase()} and cannot be selected for new attachments.
+            {legacyCurrentBlueprintLabel(legacyCurrentBlueprint)}. It remains attached for legacy use but cannot be selected for new attachments.
           </p>
         )}
       </div>

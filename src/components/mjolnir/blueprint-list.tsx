@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useFocusTrap } from "@/lib/hooks/use-focus-trap";
+import {
+  BlueprintScopeBadge,
+  BlueprintStatusBadge,
+  getBlueprintStatusHelperText,
+  isAttachableBlueprintStatus,
+  usageSummaryText,
+} from "@/components/mjolnir/blueprint-status-badge";
 
 interface BlueprintUsageCounts {
   reports: number;
@@ -48,13 +55,6 @@ interface DeleteTarget {
   usage: BlueprintUsageSummary;
 }
 
-const STATUS_BADGES: Record<string, string> = {
-  DRAFT: "bg-gold/10 text-gold border border-gold/30",
-  VALIDATED: "bg-green-900/30 text-green-400 border border-green-400/30",
-  ACTIVE: "bg-frost/10 text-frost border border-frost/30",
-  ARCHIVED: "bg-void/50 text-text-dim border border-border",
-};
-
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString("en-US", {
@@ -62,21 +62,6 @@ function formatDate(iso: string): string {
     day: "numeric",
     year: "numeric",
   });
-}
-
-function usageSummaryText(usage?: BlueprintUsageCounts): string {
-  const reports = usage?.reports ?? 0;
-  const routes = usage?.bifrostRoutes ?? 0;
-  if (reports === 0 && routes === 0) return "Not attached";
-
-  const parts: string[] = [];
-  if (reports > 0) {
-    parts.push(`${reports} report${reports === 1 ? "" : "s"}`);
-  }
-  if (routes > 0) {
-    parts.push(`${routes} route${routes === 1 ? "" : "s"}`);
-  }
-  return `Used by ${parts.join(", ")}`;
 }
 
 function usageItemLabel(item: BlueprintUsageItem): string {
@@ -92,17 +77,11 @@ function usageItemLabel(item: BlueprintUsageItem): string {
   return pieces.length > 0 ? pieces.join(" - ") : "No tenant context";
 }
 
-function statusHint(status: string): string | null {
-  switch (status) {
-    case "DRAFT":
-      return "Validate before attaching";
-    case "ACTIVE":
-      return "Production-ready";
-    case "ARCHIVED":
-      return "Archived blueprints cannot be newly attached";
-    default:
-      return null;
+function rowStatusHint(status: string): string {
+  if (isAttachableBlueprintStatus(status)) {
+    return `Attachable - ${getBlueprintStatusHelperText(status)}`;
   }
+  return getBlueprintStatusHelperText(status);
 }
 
 interface BlueprintListProps {
@@ -117,6 +96,8 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
   const usageDialogTitleId = useId();
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [usageTarget, setUsageTarget] = useState<DeleteTarget | null>(null);
+  const [expandedUsage, setExpandedUsage] = useState<Record<string, boolean>>({});
+  const [usageDetails, setUsageDetails] = useState<Record<string, BlueprintUsageSummary>>({});
   const [loadingBlueprintId, setLoadingBlueprintId] = useState<string | null>(null);
   const [dialogLoading, setDialogLoading] = useState(false);
 
@@ -175,6 +156,24 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
       toast.error("Network error");
     } finally {
       setDialogLoading(false);
+    }
+  }
+
+  async function toggleUsage(blueprint: Blueprint) {
+    if (expandedUsage[blueprint.id]) {
+      setExpandedUsage((current) => ({ ...current, [blueprint.id]: false }));
+      return;
+    }
+
+    setLoadingBlueprintId(blueprint.id);
+    try {
+      const usage = usageDetails[blueprint.id] ?? await fetchUsage(blueprint.id);
+      setUsageDetails((current) => ({ ...current, [blueprint.id]: usage }));
+      setExpandedUsage((current) => ({ ...current, [blueprint.id]: true }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Usage lookup failed");
+    } finally {
+      setLoadingBlueprintId(null);
     }
   }
 
@@ -244,7 +243,9 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
       {blueprints.map((bp) => {
         const rowLoading = loadingBlueprintId === bp.id;
         const isArchived = bp.status === "ARCHIVED";
-        const hint = statusHint(bp.status);
+        const hint = rowStatusHint(bp.status);
+        const expanded = expandedUsage[bp.id];
+        const detailedUsage = usageDetails[bp.id];
 
         return (
           <div
@@ -257,13 +258,8 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
               <div className="space-y-1.5 min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-3">
                   <h3 className="text-text text-sm truncate">{bp.name}</h3>
-                  <span
-                    className={`inline-flex items-center px-2 py-0.5 text-[0.6875rem] tracking-[0.15em] uppercase ${
-                      STATUS_BADGES[bp.status] || STATUS_BADGES.DRAFT
-                    }`}
-                  >
-                    {bp.status}
-                  </span>
+                  <BlueprintStatusBadge status={bp.status} />
+                  <BlueprintScopeBadge />
                   <span className="text-text-dim/80 text-[0.625rem] tracking-wider">
                     v{bp.version}
                   </span>
@@ -275,17 +271,15 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
                   </p>
                 )}
 
-                {hint && (
-                  <p className={`text-[0.625rem] tracking-wider ${
-                    bp.status === "ACTIVE"
+                <p className={`text-[0.625rem] tracking-wider ${
+                    isAttachableBlueprintStatus(bp.status)
                       ? "text-frost"
                       : bp.status === "DRAFT"
                       ? "text-gold"
                       : "text-text-dim"
                   }`}>
                     {hint}
-                  </p>
-                )}
+                </p>
 
                 <div className="flex flex-wrap items-center gap-4 text-text-dim/80 text-[0.625rem] tracking-wider">
                   {bp.beforeSample && (
@@ -303,6 +297,13 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
               </div>
 
               <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => toggleUsage(bp)}
+                  disabled={rowLoading || dialogLoading}
+                  className="btn-ghost text-xs"
+                >
+                  {expanded ? "Hide Used By" : rowLoading ? "Loading..." : "Used By"}
+                </button>
                 {bp.status === "VALIDATED" && (
                   <button
                     onClick={() => activateBlueprint(bp)}
@@ -328,6 +329,51 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
                 </button>
               </div>
             </div>
+
+            {expanded && detailedUsage && (
+              <div className="mt-4 border border-border bg-void/40 p-3">
+                <p className="label-norse mb-2">Used By</p>
+                {detailedUsage.total === 0 ? (
+                  <p className="text-text-dim text-xs tracking-wide">
+                    This blueprint is not currently attached to any reports or Bifrost routes.
+                  </p>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {detailedUsage.reports.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-gold text-[0.625rem] tracking-[0.25em] uppercase">Reports</p>
+                        <div className="divide-y divide-border border border-border">
+                          {detailedUsage.reports.map((item) => (
+                            <div key={item.id} className="px-3 py-2">
+                              <p className="text-text text-xs tracking-wide">{item.name}</p>
+                              <p className="text-text-dim/80 text-[0.625rem] tracking-wider mt-1">
+                                {usageItemLabel(item)}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {detailedUsage.bifrostRoutes.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-frost text-[0.625rem] tracking-[0.25em] uppercase">Bifrost Routes</p>
+                        <div className="divide-y divide-border border border-border">
+                          {detailedUsage.bifrostRoutes.map((item) => (
+                            <div key={item.id} className="px-3 py-2">
+                              <p className="text-text text-xs tracking-wide">{item.name}</p>
+                              <p className="text-text-dim/80 text-[0.625rem] tracking-wider mt-1">
+                                {usageItemLabel(item)}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}
@@ -363,9 +409,9 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
             </div>
             <div className="px-5 py-4 space-y-4">
               <p className="text-text-dim text-xs tracking-wide leading-relaxed">
-                This blueprint is attached to the reports and routes below. Archiving
-                prevents new attachments but does not remove this blueprint from existing
-                reports/routes.
+                {usageTarget.usage.total > 0
+                  ? "This blueprint is attached to the reports and routes below. Archiving prevents new attachments but does not remove this blueprint from existing reports/routes."
+                  : "This blueprint is not currently attached to any reports or Bifrost routes."}
               </p>
 
               {usageTarget.usage.reports.length > 0 && (
@@ -408,13 +454,15 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
               >
                 Cancel
               </button>
-              <button
-                onClick={() => archiveBlueprint(usageTarget.blueprint)}
-                disabled={dialogLoading || usageTarget.blueprint.status === "ARCHIVED"}
-                className={`btn-primary text-xs ${usageTarget.blueprint.status === "ARCHIVED" ? "opacity-50 cursor-not-allowed" : ""}`}
-              >
-                {dialogLoading ? "Archiving..." : usageTarget.blueprint.status === "ARCHIVED" ? "Archived" : "Archive Blueprint"}
-              </button>
+              {usageTarget.usage.total > 0 && (
+                <button
+                  onClick={() => archiveBlueprint(usageTarget.blueprint)}
+                  disabled={dialogLoading || usageTarget.blueprint.status === "ARCHIVED"}
+                  className={`btn-primary text-xs ${usageTarget.blueprint.status === "ARCHIVED" ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  {dialogLoading ? "Archiving..." : usageTarget.blueprint.status === "ARCHIVED" ? "Archived" : "Archive Blueprint"}
+                </button>
+              )}
             </div>
           </div>
         </div>

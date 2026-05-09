@@ -383,6 +383,9 @@ export function MjolnirForge({ blueprints: initialBlueprints }: MjolnirForgeProp
           {state.currentStep === 0 && (
             <div className="space-y-4">
               <p className="label-norse">Step 1 — Upload Before File</p>
+              <p className="text-text-dim text-xs tracking-wide leading-relaxed">
+                Use small representative samples. Raw values are redacted before save by default.
+              </p>
               <FileUploadZone
                 label="BEFORE"
                 description="The original source file before any transformations."

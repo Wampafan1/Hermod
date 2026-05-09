@@ -1081,6 +1081,54 @@ Validation results:
 - `npm run build`: passed; pre-existing lint warnings were reported during the build.
 - `npm run lint`: passed with pre-existing warnings.
 
+## Production Safety UI Patch Results
+
+Status badges:
+
+- Added `src/components/mjolnir/blueprint-status-badge.tsx`.
+- Shared labels now cover `DRAFT`, `VALIDATED`, `ACTIVE`, and `ARCHIVED`.
+- Helper text is explicit:
+  - `DRAFT`: Validate before attaching.
+  - `VALIDATED`: Ready to attach.
+  - `ACTIVE`: Production-ready.
+  - `ARCHIVED`: Not attachable.
+- The Mjolnir saved blueprint list now uses the shared status badge and a personal-scope badge, and archived rows remain visually muted.
+
+Selector filtering:
+
+- Report and Bifrost production selectors use shared helpers to present only attachable `VALIDATED` and `ACTIVE` blueprints as normal options.
+- Native select labels include status, for example `Monthly Cleanup (VALIDATED)`.
+- DRAFT and ARCHIVED blueprints are not offered as normal new selections.
+
+Legacy blueprint warnings:
+
+- If an existing report or route already references a DRAFT or ARCHIVED blueprint, the selector displays `Current legacy blueprint: <name> (<status>)` as a disabled current option.
+- Warning copy explains that the legacy blueprint remains attached for existing use but cannot be selected for new attachments.
+
+Used-by visibility:
+
+- BlueprintList now exposes a lazy `Used By` action per blueprint.
+- The existing usage endpoint is fetched only when the user opens usage details.
+- Usage details show report and Bifrost route names, tenant context, and enabled/disabled state without exposing SQL, route configs, credentials, or source/destination configuration.
+
+Privacy cues:
+
+- The existing save-step retention notice remains in place.
+- The forge upload step now reminds users to use small representative samples and notes that raw values are redacted before save by default.
+
+Tests added:
+
+- `src/__tests__/mjolnir/blueprint-ui-helpers.test.ts`: status labels/helper text, attachable status checks, production selector filtering, native option labels, legacy current blueprint labels, and usage summary text.
+
+Validation results:
+
+- Focused blueprint UI helper tests passed: 1 test file and 6 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 91 test files and 1235 tests.
+- `npm run build`: passed with existing lint warnings reported during the build.
+- `npm run lint`: passed with existing warnings.
+
 ## Recommended Next Prompt
 
 Make the product decision for Mjolnir ownership and retention before the next schema change:

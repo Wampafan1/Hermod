@@ -18,6 +18,10 @@ import { canBeSource, canBeDestination } from "@/lib/providers/capabilities";
 import type { ConnectionType } from "@/lib/providers/types";
 import { CursorConfigPanel } from "./cursor-config-panel";
 import type { CursorConfig, ColumnSchema } from "@/lib/sync/types";
+import {
+  blueprintOptionLabel,
+  filterAttachableBlueprintOptions,
+} from "@/components/mjolnir/blueprint-status-badge";
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -310,11 +314,7 @@ export function SyncBuilder() {
     ])
       .then(([connections, bps, flds, ravens]) => {
         setDataSources(connections);
-        setBlueprints(
-          (bps as BlueprintOption[]).filter(
-            (b) => b.status === "VALIDATED" || b.status === "ACTIVE"
-          )
-        );
+        setBlueprints(filterAttachableBlueprintOptions(bps as BlueprintOption[]));
         setFolders(flds as FolderOption[]);
         setRavenAgents(Array.isArray(ravens) ? ravens : []);
       })
@@ -1165,7 +1165,7 @@ export function SyncBuilder() {
                     <option value="">Select a blueprint...</option>
                     {blueprints.map((bp) => (
                       <option key={bp.id} value={bp.id}>
-                        {bp.name} ({bp.status})
+                        {blueprintOptionLabel(bp)}
                       </option>
                     ))}
                   </select>
