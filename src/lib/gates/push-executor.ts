@@ -15,6 +15,14 @@ import type { ProviderConnection } from "@/lib/providers/types";
 import { Prisma } from "@prisma/client";
 import { normalizeDestinationColumnName } from "./alter-generator";
 import { fullSqlTableRef, quoteSqlIdentifier } from "./sql-identifiers";
+import {
+  buildKeyDriftRecommendation,
+  discoverUniqueColumnCombinations,
+  type CandidateKey,
+  type KeyDiscoveryStats,
+  type KeyRecommendation,
+} from "./key-discovery";
+import { recommendGateKey } from "./key-recommendation-ai";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -44,9 +52,12 @@ export interface KeyDriftDetails {
     missingColumns: string[];
   }>;
   reason: string;
-  candidateKeys: [];
-  recommendation: null;
-  validationStats: null;
+  candidateKeys: CandidateKey[];
+  recommendation: KeyRecommendation | null;
+  validationStats: KeyDiscoveryStats | null;
+  aiUsed?: boolean;
+  aiExplanation?: string | null;
+  noReliableKeyReason?: string | null;
   selectedKey: null;
 }
 
@@ -65,6 +76,12 @@ export interface PushResult {
 export interface PreparedGateRows {
   mappedRows: Record<string, unknown>[];
   indexedMappedRows: IndexedMappedRow[];
+  blankRowsSkipped: number;
+  keyDrift?: KeyDriftDetails;
+}
+
+export interface GateKeyDriftPreflightResult {
+  rowCount: number;
   blankRowsSkipped: number;
   keyDrift?: KeyDriftDetails;
 }
@@ -93,23 +110,7 @@ export async function executePush(
     ? (gate.primaryKeyColumns as string[])
     : [];
 
-  // 1. Load file into DuckDB
-  const session = await createAnalyticsSession();
-  let rows: Record<string, unknown>[];
-  try {
-    if (fileExtension === ".csv" || fileExtension === ".tsv") {
-      await session.loadCSV(fileBuffer, "staging", {
-        delimiter: fileExtension === ".tsv" ? "\t" : undefined,
-      });
-    } else {
-      await session.loadExcel(fileBuffer, "staging");
-    }
-
-    // Query all rows
-    rows = await session.query<Record<string, unknown>>("SELECT * FROM staging");
-  } finally {
-    await session.close();
-  }
+  const rows = await loadRowsFromGateFile(fileBuffer, fileExtension);
 
   if (rows.length === 0) {
     const result: PushResult = {
@@ -145,7 +146,7 @@ export async function executePush(
       columnMapping
     );
 
-    const prepared = prepareMappedRowsForPush({
+    const prepared = await prepareMappedRowsForPushWithRecommendation({
       rows,
       columnMapping: effectiveColumnMapping,
       primaryKeyColumns,
@@ -228,6 +229,48 @@ export async function executePush(
 }
 
 // ─── Strategy Implementations ───────────────────────
+
+export async function preflightGatePushKeyDrift(input: {
+  fileBuffer: Buffer;
+  fileExtension: string;
+  columnMapping: ColumnMap[];
+  primaryKeyColumns: string[];
+  mergeStrategy: string;
+}): Promise<GateKeyDriftPreflightResult> {
+  const rows = await loadRowsFromGateFile(input.fileBuffer, input.fileExtension);
+  const prepared = await prepareMappedRowsForPushWithRecommendation({
+    rows,
+    columnMapping: input.columnMapping,
+    primaryKeyColumns: input.primaryKeyColumns,
+    mergeStrategy: input.mergeStrategy,
+  });
+
+  return {
+    rowCount: rows.length,
+    blankRowsSkipped: prepared.blankRowsSkipped,
+    keyDrift: prepared.keyDrift,
+  };
+}
+
+async function loadRowsFromGateFile(
+  fileBuffer: Buffer,
+  fileExtension: string
+): Promise<Record<string, unknown>[]> {
+  const session = await createAnalyticsSession();
+  try {
+    if (fileExtension === ".csv" || fileExtension === ".tsv") {
+      await session.loadCSV(fileBuffer, "staging", {
+        delimiter: fileExtension === ".tsv" ? "\t" : undefined,
+      });
+    } else {
+      await session.loadExcel(fileBuffer, "staging");
+    }
+
+    return await session.query<Record<string, unknown>>("SELECT * FROM staging");
+  } finally {
+    await session.close();
+  }
+}
 
 async function resolveDestinationColumnMapping(
   provider: ConnectionProvider,
@@ -324,6 +367,23 @@ export function prepareMappedRowsForPush(input: {
   return prepared;
 }
 
+async function prepareMappedRowsForPushWithRecommendation(input: {
+  rows: Record<string, unknown>[];
+  columnMapping: ColumnMap[];
+  primaryKeyColumns: string[];
+  mergeStrategy: string;
+}): Promise<PreparedGateRows> {
+  const prepared = prepareMappedRowsForPush(input);
+  if (!prepared.keyDrift) return prepared;
+
+  prepared.keyDrift = await enrichKeyDriftRecommendation({
+    keyDrift: prepared.keyDrift,
+    mappedRows: prepared.mappedRows,
+    columns: input.columnMapping.map((mapping) => mapping.destinationColumn),
+  });
+  return prepared;
+}
+
 export function derivePushStatus(input: {
   attemptedRows: number;
   rowsErrored: number;
@@ -402,9 +462,53 @@ export function preflightUpsertKey(input: {
       candidateKeys: [],
       recommendation: null,
       validationStats: null,
+      aiUsed: false,
+      aiExplanation: null,
+      noReliableKeyReason: null,
       selectedKey: null,
     },
   };
+}
+
+async function enrichKeyDriftRecommendation(input: {
+  keyDrift: KeyDriftDetails;
+  mappedRows: Record<string, unknown>[];
+  columns: string[];
+}): Promise<KeyDriftDetails> {
+  const discovery = discoverUniqueColumnCombinations(input.mappedRows, input.columns);
+  const deterministic = buildKeyDriftRecommendation({
+    candidateKeys: discovery.candidates,
+    validationStats: discovery.stats,
+    noReliableKeyReason: discovery.noReliableKeyReason,
+  });
+  const aiResult = await recommendGateKey({
+    candidateKeys: deterministic.candidateKeys,
+    validationStats: deterministic.validationStats,
+    currentKeyFailure: {
+      oldKey: input.keyDrift.oldKey,
+      reason: input.keyDrift.reason,
+      duplicateExampleCount: input.keyDrift.duplicateExamples.length,
+      nullKeyExampleCount: input.keyDrift.nullKeyExamples.length,
+    },
+    useAi: shouldUseAiKeyRecommendation(),
+  });
+
+  return {
+    ...input.keyDrift,
+    candidateKeys: deterministic.candidateKeys,
+    recommendation: aiResult.recommendation,
+    validationStats: deterministic.validationStats,
+    aiUsed: aiResult.aiUsed,
+    aiExplanation: aiResult.aiExplanation,
+    noReliableKeyReason: deterministic.noReliableKeyReason,
+    selectedKey: null,
+  };
+}
+
+function shouldUseAiKeyRecommendation(): boolean {
+  return ["1", "true", "yes"].includes(
+    (process.env.GATE_KEY_RECOMMENDATION_AI ?? "").toLowerCase()
+  );
 }
 
 function buildSafeKeyValues(

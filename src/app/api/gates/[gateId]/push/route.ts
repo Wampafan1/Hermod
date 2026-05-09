@@ -10,6 +10,7 @@ import {
   type GateColumnMapping,
 } from "@/lib/gates/alter-generator";
 import { saveTempFile } from "@/lib/gates/temp-files";
+import { preflightGatePushKeyDrift, type ColumnMap } from "@/lib/gates/push-executor";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -188,6 +189,44 @@ export const POST = withAuth(async (req, ctx) => {
   }
 
   // No drift — create VALIDATED push (awaiting user confirmation to execute)
+  const primaryKeyColumns: string[] = Array.isArray(gate.primaryKeyColumns)
+    ? (gate.primaryKeyColumns as string[])
+    : [];
+  const keyPreflight = await preflightGatePushKeyDrift({
+    fileBuffer: buffer,
+    fileExtension: extension,
+    columnMapping: columnMapping as unknown as ColumnMap[],
+    primaryKeyColumns,
+    mergeStrategy: gate.mergeStrategy,
+  });
+
+  if (keyPreflight.keyDrift) {
+    const push = await prisma.gatePush.create({
+      data: {
+        gateId: gate.id,
+        tenantId: ctx.tenantId,
+        fileName: file.name,
+        fileSize: file.size,
+        fileMimeType: file.type || null,
+        status: "KEY_DRIFT",
+        rowCount: keyPreflight.rowCount,
+        blankRowsSkipped: keyPreflight.blankRowsSkipped,
+        keyDrift: keyPreflight.keyDrift as unknown as Prisma.InputJsonValue,
+        tempFileId,
+      },
+    });
+
+    return NextResponse.json({
+      pushId: push.id,
+      status: "KEY_DRIFT",
+      rowCount: keyPreflight.rowCount,
+      blankRowsSkipped: keyPreflight.blankRowsSkipped,
+      keyDrift: keyPreflight.keyDrift,
+      fileName: file.name,
+      fileSize: file.size,
+    });
+  }
+
   const push = await prisma.gatePush.create({
     data: {
       gateId: gate.id,

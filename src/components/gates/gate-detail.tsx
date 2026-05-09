@@ -28,6 +28,14 @@ interface GatePush {
 interface KeyDriftDetails {
   oldKey: string[];
   reason: string;
+  recommendation?: {
+    columns: string[];
+    source?: string;
+    reason?: string;
+  } | null;
+  noReliableKeyReason?: string | null;
+  aiUsed?: boolean;
+  aiExplanation?: string | null;
   duplicateExamples?: Array<{
     keyValues: Record<string, string | number | boolean | null>;
     rowIndexes: number[];
@@ -94,6 +102,8 @@ interface PushValidationResult {
   rowCount: number;
   fileName?: string;
   schemaDiff?: unknown;
+  blankRowsSkipped?: number;
+  keyDrift?: KeyDriftDetails;
   resolutionOptions?: DriftResolution;
 }
 
@@ -237,6 +247,17 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
           setCheckedStatements(
             new Set(stmts.map((_, i) => i).filter((i) => !stmts[i].isComment))
           );
+        } else if (data.status === "KEY_DRIFT") {
+          applyExecutionResult({
+            status: "KEY_DRIFT",
+            rowCount: data.rowCount,
+            rowsInserted: 0,
+            rowsUpdated: 0,
+            rowsErrored: 0,
+            blankRowsSkipped: data.blankRowsSkipped ?? 0,
+            duration: 0,
+            keyDrift: data.keyDrift,
+          });
         } else if (data.status === "VALIDATED") {
           setValidation(data);
           // Auto-execute — no confirmation step needed
@@ -578,6 +599,16 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
               <span> · {pushResult.blankRowsSkipped.toLocaleString()} fully blank rows skipped</span>
             )}
           </div>
+          {pushResult.keyDrift.recommendation ? (
+            <div className="bg-frost/[0.04] border border-frost/10 px-3 py-2 text-[10px] font-inconsolata text-text-dim">
+              Recommended key: <span className="text-frost">{pushResult.keyDrift.recommendation.columns.join(" + ")}</span>
+              <div>{pushResult.keyDrift.recommendation.reason}</div>
+            </div>
+          ) : pushResult.keyDrift.noReliableKeyReason ? (
+            <div className="bg-amber-900/10 border border-amber-700/30 px-3 py-2 text-[10px] font-inconsolata text-amber-400">
+              {pushResult.keyDrift.noReliableKeyReason}
+            </div>
+          ) : null}
           {(pushResult.keyDrift.duplicateExamples?.length ?? 0) > 0 && (
             <div className="space-y-1">
               <div className="label-norse text-[9px]">Duplicate Examples</div>
@@ -700,6 +731,13 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
                         <div className="text-text-dim">
                           Current key: <span className="text-gold">{p.keyDrift.oldKey.join(" + ")}</span>
                         </div>
+                        {p.keyDrift.recommendation ? (
+                          <div className="text-frost font-inconsolata">
+                            Recommended key: {p.keyDrift.recommendation.columns.join(" + ")}
+                          </div>
+                        ) : p.keyDrift.noReliableKeyReason ? (
+                          <div className="text-amber-400 font-inconsolata">{p.keyDrift.noReliableKeyReason}</div>
+                        ) : null}
                         {p.keyDrift.duplicateExamples?.slice(0, 2).map((example) => (
                           <div key={`${p.id}-dup-${example.rowIndexes.join("-")}`} className="text-text-dim font-inconsolata">
                             Duplicate rows {example.rowIndexes.join(", ")}: {formatKeyValues(example.keyValues)}

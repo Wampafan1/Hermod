@@ -68,7 +68,7 @@ function GateCard({ gate, now }: { gate: GateItem; now: number }) {
         });
         const data = await res.json();
 
-        if (data.status === "VALIDATED" || data.status === "SCHEMA_DRIFT") {
+        if (data.status === "VALIDATED" || data.status === "SCHEMA_DRIFT" || data.status === "KEY_DRIFT") {
           // Navigate to detail page with pushId for confirmation/resolution
           router.push(`/gates/${gate.id}?pushId=${data.pushId}&pushStatus=${data.status}`);
         } else {
