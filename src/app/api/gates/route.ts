@@ -292,7 +292,7 @@ export const POST = withAuth(async (req, ctx) => {
   }
 
   // Clean up temp file
-  if (initialPush?.status !== "KEY_DRIFT") {
+  if (initialPush?.status === "SUCCESS") {
     await deleteTempFile(tempFileId);
   }
 

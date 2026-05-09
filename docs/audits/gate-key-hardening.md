@@ -299,3 +299,66 @@ Hermod no longer dead-ends a `KEY_DRIFT` review when automatic discovery misses,
 
 - Existing destination-table validation still runs in the approval/preview path, not automatic upload discovery.
 - Provider-specific DDL limitations remain governed by the existing key DDL safety checks.
+
+## End-to-End Acceptance Results
+
+The Gate key hardening flow is now covered as one product path from repeat upload through reviewed execution.
+
+### Regression Path
+
+- The acceptance fixture reproduces the `job_number + 7501_line_number` failure where rows `1144/1145`, `1205/1206`, and `1548/1549` duplicate under the current key.
+- The stronger key `job_number + 7501_line_number + line_entered_value` is verified in the staged upload.
+- One fully blank mapped row is skipped and counted separately.
+
+### KEY_DRIFT Creation
+
+- Repeat upload validation creates a `GatePush` with `status = KEY_DRIFT` before any destination provider query runs.
+- `keyDrift.oldKey` records the current key.
+- Duplicate examples include only current-key values and row indexes.
+- Fully blank mapped rows do not appear in blank-key examples.
+- Raw non-key row values are intentionally omitted from `keyDrift` API responses and UI helper output.
+
+### Candidate And Manual Selection
+
+- Automatic candidate discovery finds the stronger regression key.
+- Manual selected keys are also accepted for preview when they are not already verified candidates.
+- Manual keys re-read the staged file, remap rows, skip fully blank mapped rows, and validate nulls/duplicates before DDL preview.
+- Invalid manual keys return `409 KEY_DRIFT`, include safe evidence, and keep the staged upload in review.
+
+### DDL Preview And Approval
+
+- DDL preview validates the selected key against the staged upload and existing destination table before returning SQL.
+- Generated DDL uses the provider-specific quoting and safety checks in `key-ddl.ts`.
+- Mismatched `confirmedDdl` is rejected before any key metadata changes.
+- DDL execution still requires explicit user approval.
+- Destination validation failures, DDL failures, and expired staged files do not change the key constraint or mark the push successful.
+
+### Reviewed Push Status
+
+- After approval, Hermod updates `RealmGate.primaryKeyColumns`, stores `RealmGate.keyConstraintName`, appends `RealmGate.keyHistory`, and re-runs the staged push.
+- Final status comes from the actual push result.
+- `SUCCESS` is returned only when there are no row errors.
+- Post-DDL UPSERT failures are recorded as `FAILED` or `PARTIAL`, never `SUCCESS`.
+
+### Staged Temp Files
+
+- Staged files are preserved while a push is in `KEY_DRIFT`.
+- Staged files are deleted on successful reviewed push.
+- Staged files are deleted on explicit cancel.
+- Staged files are preserved after failed or partial execution so the attempt is not silently abandoned before review or expiry.
+
+### Tests Added
+
+- `src/__tests__/gates/gate-key-hardening-e2e.test.ts`
+- Expanded `src/__tests__/gates-api.test.ts` for failed execution temp-file preservation.
+
+### Validation Results
+
+- Focused Gate acceptance tests passed.
+- Full validation results are recorded in the implementation commit.
+
+### Remaining Follow-Ups
+
+- Add real provider integration tests for Postgres, SQL Server, and MySQL key replacement when test containers are available.
+- Document operator guidance for approving key changes in production.
+- Continue to improve combined destination-plus-upload validation limits for very large destination tables.

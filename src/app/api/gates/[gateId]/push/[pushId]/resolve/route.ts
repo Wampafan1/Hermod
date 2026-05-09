@@ -438,7 +438,7 @@ async function resolveSchemaDriftPush(input: {
 
   try {
     const result = await executePush(input.gateId, input.pushId, tempFile.buffer, tempFile.extension);
-    if (result.status !== "KEY_DRIFT" && result.status !== "PARTIAL" && input.push.tempFileId) {
+    if (result.status === "SUCCESS" && input.push.tempFileId) {
       await deleteTempFile(input.push.tempFileId);
     }
 

@@ -50,7 +50,7 @@ export const POST = withAuth(async (req, ctx) => {
   try {
     const result = await executePush(gateId, pushId, tempFile.buffer, tempFile.extension);
 
-    if (result.status !== "KEY_DRIFT") {
+    if (result.status === "SUCCESS") {
       await deleteTempFile(push.tempFileId);
     }
 

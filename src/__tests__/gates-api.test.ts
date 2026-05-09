@@ -120,6 +120,12 @@ function gatePushDeleteRequest(gateId = "gate_1", pushId = "push_1") {
   });
 }
 
+function gatePushExecuteRequest(gateId = "gate_1", pushId = "push_1") {
+  return new Request(`http://localhost/api/gates/${gateId}/push/${pushId}/execute`, {
+    method: "POST",
+  });
+}
+
 function forgeBlueprint(overrides: Record<string, unknown> = {}) {
   return {
     id: "forge_tenant_b",
@@ -449,6 +455,45 @@ describe("gates API", () => {
     expect(response.status).toBe(409);
     expect(payload).toEqual({ error: "Push is already running and cannot be cleared" });
     expect(mockGatePushUpdate).not.toHaveBeenCalled();
+    expect(mockDeleteTempFile).not.toHaveBeenCalled();
+  });
+
+  it("preserves staged temp files when execution fails after validation", async () => {
+    mockGatePushFindFirst.mockResolvedValue({
+      id: "push_1",
+      gateId: "gate_1",
+      tenantId: "tenant_b",
+      status: "VALIDATED",
+      tempFileId: "tmp_1",
+    });
+    mockReadTempFile.mockResolvedValue({
+      buffer: Buffer.from("fixture"),
+      extension: ".csv",
+    });
+    mockExecutePush.mockResolvedValue({
+      status: "FAILED",
+      rowCount: 2,
+      rowsInserted: 0,
+      rowsUpdated: 0,
+      rowsErrored: 2,
+      blankRowsSkipped: 0,
+      errorMessage: "Gate push failed for all rows.",
+      duration: 10,
+    });
+
+    const { POST } = await import("@/app/api/gates/[gateId]/push/[pushId]/execute/route");
+    const response = await POST(gatePushExecuteRequest());
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      status: "FAILED",
+      rowsErrored: 2,
+    });
+    expect(mockGatePushUpdate).toHaveBeenCalledWith({
+      where: { id: "push_1" },
+      data: { status: "PUSHING" },
+    });
     expect(mockDeleteTempFile).not.toHaveBeenCalled();
   });
 });
