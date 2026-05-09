@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import Link from "next/link";
 import type { DashboardUpcoming } from "@/lib/dashboard/queries";
+import { useNow } from "@/lib/use-now";
 
 function formatCountdown(targetIso: string, now: number): string {
   const diff = new Date(targetIso).getTime() - now;
@@ -35,15 +35,11 @@ function urgencyStyle(targetIso: string, now: number): { className: string; immi
 
 interface Props {
   runs: DashboardUpcoming[];
+  initialNow: number;
 }
 
-export function UpcomingRuns({ runs }: Props) {
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(interval);
-  }, []);
+export function UpcomingRuns({ runs, initialNow }: Props) {
+  const now = useNow(initialNow);
 
   return (
     <div className="bg-deep border border-border overflow-hidden h-full flex flex-col">

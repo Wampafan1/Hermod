@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
+import { useNow } from "@/lib/use-now";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -89,8 +90,8 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+function relativeTime(iso: string, now: number): string {
+  const diff = now - new Date(iso).getTime();
   const minutes = Math.floor(diff / 60000);
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m ago`;
@@ -102,10 +103,11 @@ function relativeTime(iso: string): string {
 
 // ─── Main Component ─────────────────────────────────
 
-export function GateDetail({ gate: initialGate }: { gate: GateData }) {
+export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; initialNow: number }) {
   const router = useRouter();
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const now = useNow(initialNow);
 
   const [gate, setGate] = useState(initialGate);
   const [pushState, setPushState] = useState<
@@ -512,7 +514,7 @@ export function GateDetail({ gate: initialGate }: { gate: GateData }) {
                       {p.rowCount.toLocaleString()} rows
                     </span>
                   )}
-                  <span className="text-text-dim">{relativeTime(p.createdAt)}</span>
+                  <span className="text-text-dim">{relativeTime(p.createdAt, now)}</span>
                 </button>
 
                 {expandedPush === p.id && (

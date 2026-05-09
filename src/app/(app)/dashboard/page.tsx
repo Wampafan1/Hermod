@@ -12,7 +12,8 @@ export default async function DashboardPage() {
   const session = await requireAuth();
   const data = await getDashboardData(session.user.id, session.user.tenantId);
 
-  const now = new Date();
+  const initialNow = Date.now();
+  const now = new Date(initialNow);
   const dayInfo = DAILY_GREETINGS[now.getDay()];
   const dateStr = now.toLocaleDateString("en-US", {
     weekday: "long",
@@ -67,8 +68,8 @@ export default async function DashboardPage() {
           className="grid gap-6"
           style={{ gridTemplateColumns: "2fr 1fr" }}
         >
-          <RouteHealthGrid routes={data.routes} />
-          <UpcomingRuns runs={data.upcomingRuns} />
+          <RouteHealthGrid routes={data.routes} initialNow={initialNow} />
+          <UpcomingRuns runs={data.upcomingRuns} initialNow={initialNow} />
         </div>
       </div>
 
@@ -77,6 +78,7 @@ export default async function DashboardPage() {
         <ExecutionTimeline
           initialRuns={data.recentRuns}
           initialTotal={data.totalRunCount}
+          initialNow={initialNow}
         />
       </div>
 

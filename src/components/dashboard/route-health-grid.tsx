@@ -6,6 +6,7 @@ import { useToast } from "@/components/toast";
 import type { DashboardRoute } from "@/lib/dashboard/queries";
 import { REALM_ICONS } from "@/lib/realm-config";
 import { getErrorNarrative } from "@/lib/error-narratives";
+import { useNow } from "@/lib/use-now";
 
 const STATUS_STYLE: Record<string, { dot: string; label: string }> = {
   completed: { dot: "bg-success", label: "Arrived" },
@@ -14,8 +15,8 @@ const STATUS_STYLE: Record<string, { dot: string; label: string }> = {
   partial:   { dot: "bg-ember", label: "Wounded" },
 };
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+function relativeTime(iso: string, now: number): string {
+  const diff = now - new Date(iso).getTime();
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
@@ -44,9 +45,12 @@ function formatNextRun(iso: string | null): string {
 
 interface Props {
   routes: DashboardRoute[];
+  initialNow: number;
 }
 
-export function RouteHealthGrid({ routes }: Props) {
+export function RouteHealthGrid({ routes, initialNow }: Props) {
+  const now = useNow(initialNow);
+
   if (routes.length === 0) {
     return (
       <div className="bg-deep border border-border p-12 text-center">
@@ -72,13 +76,13 @@ export function RouteHealthGrid({ routes }: Props) {
       style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}
     >
       {routes.map((route) => (
-        <RouteCard key={route.id} route={route} />
+        <RouteCard key={route.id} route={route} now={now} />
       ))}
     </div>
   );
 }
 
-function RouteCard({ route }: { route: DashboardRoute }) {
+function RouteCard({ route, now }: { route: DashboardRoute; now: number }) {
   const [triggering, setTriggering] = useState(false);
   const toast = useToast();
 
@@ -167,11 +171,11 @@ function RouteCard({ route }: { route: DashboardRoute }) {
           isFailed ? (
             <span className="text-ember" title={route.lastRun.errorCount > 0 ? "Click route for details" : undefined}>
               {getErrorNarrative(null)}
-              <span className="text-text-muted ml-1">· {relativeTime(route.lastRun.startedAt)}</span>
+              <span className="text-text-muted ml-1">· {relativeTime(route.lastRun.startedAt, now)}</span>
             </span>
           ) : (
             <span className="text-text-dim">
-              Last rode {relativeTime(route.lastRun.startedAt)}
+              Last rode {relativeTime(route.lastRun.startedAt, now)}
               {route.lastRun.rowsLoaded !== null && (
                 <> · {route.lastRun.rowsLoaded.toLocaleString()} scrolls</>
               )}

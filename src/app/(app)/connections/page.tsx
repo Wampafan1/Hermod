@@ -7,6 +7,7 @@ import { RealmBanner } from "@/components/realm-banner";
 export default async function ConnectionsPage() {
   const session = await requireAuth();
   const { id: userId, tenantId } = session.user;
+  const initialNow = Date.now();
 
   const [connections, emailConnections, folders, ravenCount] = await Promise.all([
     prisma.connection.findMany({
@@ -86,6 +87,7 @@ export default async function ConnectionsPage() {
         emailConnections={emailConnections}
         folders={serializedFolders}
         ravenCount={ravenCount}
+        initialNow={initialNow}
       />
     </div>
   );

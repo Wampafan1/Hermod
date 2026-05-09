@@ -26,9 +26,10 @@ interface InitialData {
 
 interface Props {
   initialData: InitialData;
+  initialNow: number;
 }
 
-export function HelheimDashboard({ initialData }: Props) {
+export function HelheimDashboard({ initialData, initialNow }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [stats, setStats] = useState<Stats>({
@@ -92,6 +93,7 @@ export function HelheimDashboard({ initialData }: Props) {
           onSelect={setSelectedId}
           onRefresh={() => setRefreshKey((k) => k + 1)}
           refreshKey={refreshKey}
+          initialNow={initialNow}
         />
         <EntryDetail
           selectedId={selectedId}

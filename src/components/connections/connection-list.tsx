@@ -11,6 +11,7 @@ import { EmailConnectionForm } from "@/components/connections/email-connection-f
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { RuneDivider } from "@/components/rune-divider";
 import { useToast } from "@/components/toast";
+import { useNow } from "@/lib/use-now";
 
 type AuthType = "NONE" | "PLAIN" | "OAUTH2";
 
@@ -43,6 +44,7 @@ interface ConnectionListProps {
   emailConnections: EmailConnection[];
   folders: FolderInfo[];
   ravenCount: number;
+  initialNow: number;
 }
 
 const FILE_TYPES = new Set(["CSV_FILE", "EXCEL_FILE"]);
@@ -67,6 +69,7 @@ export function ConnectionList({
   emailConnections: initialEmail,
   folders: initialFolders,
   ravenCount,
+  initialNow,
 }: ConnectionListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -81,10 +84,12 @@ export function ConnectionList({
   const [confirmTarget, setConfirmTarget] = useState<{ id: string; type: "connection" | "email" | "folder" } | null>(null);
 
   // Data Agent banner dismiss
-  const [agentBannerDismissed, setAgentBannerDismissed] = useState(() => {
-    if (typeof window === "undefined") return true;
-    return localStorage.getItem(AGENT_BANNER_KEY) === "1";
-  });
+  const [agentBannerDismissed, setAgentBannerDismissed] = useState(true);
+  const now = useNow(initialNow);
+
+  useEffect(() => {
+    setAgentBannerDismissed(localStorage.getItem(AGENT_BANNER_KEY) === "1");
+  }, []);
 
   function dismissAgentBanner() {
     localStorage.setItem(AGENT_BANNER_KEY, "1");
@@ -295,6 +300,7 @@ export function ConnectionList({
                 onEdit={() => handleEdit(conn)}
                 onDelete={() => handleDelete(conn.id)}
                 onMove={moveConnection}
+                now={now}
               />
             ))}
           </div>
@@ -420,6 +426,7 @@ export function ConnectionList({
                     onEdit={() => handleEdit(conn)}
                     onDelete={() => handleDelete(conn.id)}
                     onMove={moveConnection}
+                    now={now}
                   />
                 ))}
               </div>
@@ -574,6 +581,7 @@ function ConnectionCardWithActions({
   onEdit,
   onDelete,
   onMove,
+  now,
 }: {
   connection: ConnectionWithFolder;
   folders: FolderInfo[];
@@ -582,6 +590,7 @@ function ConnectionCardWithActions({
   onEdit: () => void;
   onDelete: () => void;
   onMove: (connectionId: string, folderId: string | null) => void;
+  now: number;
 }) {
   const isFileType = FILE_TYPES.has(connection.type);
   const showMoveMenu = moveTarget === connection.id;
@@ -592,6 +601,7 @@ function ConnectionCardWithActions({
         connection={connection}
         onEdit={onEdit}
         onDelete={onDelete}
+        now={now}
       />
       {/* Action strip */}
       <div className="absolute top-2 right-2 flex gap-1">

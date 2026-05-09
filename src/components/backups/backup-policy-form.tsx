@@ -6,6 +6,7 @@ import { useToast } from "@/components/toast";
 import { COMMON_TIMEZONES, OTHER_TIMEZONES } from "@/lib/timezones";
 import { StoragePathPreview } from "./storage-path-preview";
 import { StorageTargetForm } from "./storage-target-form";
+import { PostgresWalSetupModal } from "./postgres-wal-setup-modal";
 
 interface ConnectionOption {
   id: string;
@@ -91,11 +92,19 @@ export function BackupPolicyForm({ policyId }: BackupPolicyFormProps) {
   const [walEnabled, setWalEnabled] = useState(false);
   const [replicationSlot, setReplicationSlot] = useState("");
   const [enabled, setEnabled] = useState(true);
+  const [showWalSetupModal, setShowWalSetupModal] = useState(false);
 
   const selectedSource = connections.find((connection) => connection.id === sourceConnectionId) ?? null;
   const selectedTarget = targets.find((target) => target.id === storageTargetId) ?? null;
   const sourceScope = connectionScope(selectedSource);
   const sourceDatabase = configuredDatabase(selectedSource);
+  const selectedSourceHost =
+    typeof selectedSource?.config?.host === "string" ? selectedSource.config.host : null;
+  const selectedSourcePort =
+    typeof selectedSource?.config?.port === "number" || typeof selectedSource?.config?.port === "string"
+      ? selectedSource.config.port
+      : null;
+  const selectedSourceSsl = selectedSource?.config?.ssl === false ? false : true;
 
   const loadTargets = useCallback(async () => {
     const res = await fetch("/api/backups/storage-targets");
@@ -526,6 +535,22 @@ export function BackupPolicyForm({ policyId }: BackupPolicyFormProps) {
               />
               <span className="text-text-dim text-xs tracking-wider">Enable WAL/PITR coverage</span>
             </label>
+            {walEnabled && (
+              <div className="border border-frost/30 bg-frost/10 p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-text-dim text-xs tracking-wide leading-6">
+                    WAL archive jobs require a PostgreSQL replication user, replication slot, and pg_hba.conf entry for the Hermod worker.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowWalSetupModal(true)}
+                    className="btn-ghost px-3 py-2 text-[0.65rem] tracking-[0.15em] uppercase"
+                  >
+                    View Setup Guide
+                  </button>
+                </div>
+              </div>
+            )}
             {walEnabled && sourceScope !== "SERVER" && (
               <div className="border border-ember/30 bg-ember/10 p-3 text-ember text-xs tracking-wide leading-6">
                 WAL transaction logs are server-level. Choose a SERVER-scoped PostgreSQL connection to enable PITR coverage.
@@ -592,6 +617,14 @@ export function BackupPolicyForm({ policyId }: BackupPolicyFormProps) {
           }}
         />
       </div>
+      <PostgresWalSetupModal
+        open={showWalSetupModal}
+        onClose={() => setShowWalSetupModal(false)}
+        host={selectedSourceHost}
+        port={selectedSourcePort}
+        ssl={selectedSourceSsl}
+        context="policy"
+      />
     </div>
   );
 }

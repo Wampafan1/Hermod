@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistance } from "date-fns";
 import { useToast } from "@/components/toast";
 import type { ConnectionType } from "@/lib/providers/types";
 
@@ -18,6 +18,7 @@ interface ConnectionCardProps {
   connection: UnifiedConnection;
   onEdit: () => void;
   onDelete: () => void;
+  now: number;
 }
 
 export const TYPE_LABELS: Record<string, string> = {
@@ -82,7 +83,7 @@ function getDetailLine(connection: UnifiedConnection): string | null {
   }
 }
 
-export function ConnectionCard({ connection, onEdit, onDelete }: ConnectionCardProps) {
+export function ConnectionCard({ connection, onEdit, onDelete, now }: ConnectionCardProps) {
   const detail = getDetailLine(connection);
   const toast = useToast();
   const [testing, setTesting] = useState(false);
@@ -144,7 +145,7 @@ export function ConnectionCard({ connection, onEdit, onDelete }: ConnectionCardP
             />
             <span className="text-[0.6rem] text-text-dim tracking-wider">
               {connection.lastTestedAt
-                ? `Tested ${formatDistanceToNow(new Date(connection.lastTestedAt), { addSuffix: true })}`
+                ? `Tested ${formatDistance(new Date(connection.lastTestedAt), new Date(now), { addSuffix: true })}`
                 : "Never tested"}
             </span>
           </div>

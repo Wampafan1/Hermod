@@ -5,6 +5,7 @@ import { useToast } from "@/components/toast";
 import { TYPE_LABELS, type UnifiedConnection } from "@/components/connections/connection-card";
 import { useFocusTrap } from "@/lib/hooks/use-focus-trap";
 import { PasswordInput } from "@/components/password-input";
+import { PostgresWalSetupModal } from "@/components/backups/postgres-wal-setup-modal";
 
 type ConnectionType = "POSTGRES" | "MSSQL" | "MYSQL" | "BIGQUERY" | "NETSUITE" | "SFTP";
 
@@ -33,7 +34,6 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef, true, onClose);
   const isEditing = !!initial;
   const initialConfig = initial?.config as Record<string, unknown> | undefined;
 
@@ -77,6 +77,9 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
   const [discoveringDatabases, setDiscoveringDatabases] = useState(false);
   const [discoveredDatabases, setDiscoveredDatabases] = useState<Array<{ name: string; sizeBytes?: string; canConnect?: boolean }>>([]);
   const [saving, setSaving] = useState(false);
+  const [showWalSetupModal, setShowWalSetupModal] = useState(false);
+  const [closeAfterWalSetup, setCloseAfterWalSetup] = useState(false);
+  useFocusTrap(panelRef, !showWalSetupModal, onClose);
 
   const isBigQuery = type === "BIGQUERY";
   const isNetSuite = type === "NETSUITE";
@@ -326,6 +329,11 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
         return;
       }
       toast.success(isEditing ? "Connection updated" : "Connection created");
+      if (isPostgres && pgScope === "SERVER" && (!isEditing || initialConfig?.scope !== "SERVER")) {
+        setCloseAfterWalSetup(true);
+        setShowWalSetupModal(true);
+        return;
+      }
       onSaved();
     } catch {
       toast.error("Network error");
@@ -501,6 +509,18 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
                       ? "SQL Server requires connecting to a database. Hermod uses master by default to discover and manage user databases on the instance."
                       : "PostgreSQL requires connecting to a database. Hermod uses this maintenance database only to discover and manage databases on the server."}
                   </p>
+                  {isPostgres && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCloseAfterWalSetup(false);
+                        setShowWalSetupModal(true);
+                      }}
+                      className="btn-ghost mt-3 px-3 py-2 text-[0.65rem] tracking-[0.15em] uppercase"
+                    >
+                      View WAL/PITR Setup
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div>
@@ -736,6 +756,20 @@ export function ConnectionForm({ onSaved, onClose, initial }: ConnectionFormProp
           </button>
         </div>
       </div>
+      <PostgresWalSetupModal
+        open={showWalSetupModal}
+        onClose={() => {
+          setShowWalSetupModal(false);
+          if (closeAfterWalSetup) {
+            setCloseAfterWalSetup(false);
+            onSaved();
+          }
+        }}
+        host={host}
+        port={port}
+        ssl={ssl}
+        context="connection"
+      />
     </div>
   );
 }

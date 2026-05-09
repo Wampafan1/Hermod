@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
+import { useNow } from "@/lib/use-now";
 
 // ─── Types ────���─────────────────────────────────────
 
@@ -24,8 +25,8 @@ interface GateItem {
 
 // ─── Helpers ───────��────────────────────────────────
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+function relativeTime(iso: string, now: number): string {
+  const diff = now - new Date(iso).getTime();
   const minutes = Math.floor(diff / 60000);
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m ago`;
@@ -37,7 +38,7 @@ function relativeTime(iso: string): string {
 
 // ─── Gate Card ──────────────────────────────────────
 
-function GateCard({ gate }: { gate: GateItem }) {
+function GateCard({ gate, now }: { gate: GateItem; now: number }) {
   const router = useRouter();
   const toast = useToast();
   const [dragOver, setDragOver] = useState(false);
@@ -134,7 +135,7 @@ function GateCard({ gate }: { gate: GateItem }) {
         {gate.pushCount > 0 && (
           <span>{gate.pushCount} push{gate.pushCount !== 1 ? "es" : ""}</span>
         )}
-        {gate.lastPushAt && <span>Last: {relativeTime(gate.lastPushAt)}</span>}
+        {gate.lastPushAt && <span>Last: {relativeTime(gate.lastPushAt, now)}</span>}
       </div>
 
       {/* Drop zone hint */}
@@ -156,7 +157,9 @@ function GateCard({ gate }: { gate: GateItem }) {
 
 // ─── Main Component ──���──────────────────────────────
 
-export function GateList({ gates }: { gates: GateItem[] }) {
+export function GateList({ gates, initialNow }: { gates: GateItem[]; initialNow: number }) {
+  const now = useNow(initialNow);
+
   if (gates.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
@@ -175,7 +178,7 @@ export function GateList({ gates }: { gates: GateItem[] }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {gates.map((gate) => (
-        <GateCard key={gate.id} gate={gate} />
+        <GateCard key={gate.id} gate={gate} now={now} />
       ))}
     </div>
   );

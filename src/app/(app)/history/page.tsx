@@ -7,6 +7,7 @@ const PAGE_SIZE = 50;
 export default async function HistoryPage() {
   const session = await requireAuth();
   const { id: userId, tenantId } = session.user;
+  const initialNow = Date.now();
 
   const [runsRaw, reports] = await Promise.all([
     prisma.runLog.findMany({
@@ -54,6 +55,7 @@ export default async function HistoryPage() {
         initialRuns={serialized}
         initialCursor={nextCursor}
         reports={reports}
+        initialNow={initialNow}
       />
     </div>
   );

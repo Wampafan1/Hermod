@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import Link from "next/link";
 import type { DashboardRecentRun } from "@/lib/dashboard/queries";
 import { getErrorNarrative } from "@/lib/error-narratives";
+import { useNow } from "@/lib/use-now";
 
 const STATUS_FILTERS = ["all", "completed", "failed", "running", "partial"] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
@@ -30,15 +31,15 @@ function formatDuration(ms: number | null): string {
   return `${m}m ${Math.floor(s % 60)}s`;
 }
 
-function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+function formatRelativeTime(iso: string, now: number): string {
+  const diff = now - new Date(iso).getTime();
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   const d = new Date(iso);
-  const yesterday = new Date();
+  const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   if (d.toDateString() === yesterday.toDateString()) {
     return `Yesterday ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
@@ -54,14 +55,16 @@ function formatRelativeTime(iso: string): string {
 interface Props {
   initialRuns: DashboardRecentRun[];
   initialTotal: number;
+  initialNow: number;
 }
 
-export function ExecutionTimeline({ initialRuns, initialTotal }: Props) {
+export function ExecutionTimeline({ initialRuns, initialTotal, initialNow }: Props) {
   const [runs, setRuns] = useState(initialRuns);
   const [total] = useState(initialTotal);
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const now = useNow(initialNow);
 
   const filteredRuns =
     filter === "all" ? runs : runs.filter((r) => r.status === filter);
@@ -143,6 +146,7 @@ export function ExecutionTimeline({ initialRuns, initialTotal }: Props) {
                 <RunRow
                   key={run.id}
                   run={run}
+                  now={now}
                   expanded={expandedId === run.id}
                   onToggle={() =>
                     setExpandedId(expandedId === run.id ? null : run.id)
@@ -172,10 +176,12 @@ export function ExecutionTimeline({ initialRuns, initialTotal }: Props) {
 
 function RunRow({
   run,
+  now,
   expanded,
   onToggle,
 }: {
   run: DashboardRecentRun;
+  now: number;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -227,7 +233,7 @@ function RunRow({
           className="px-4 py-3 text-right font-inconsolata text-[10px] text-text-muted"
           title={new Date(run.startedAt).toLocaleString()}
         >
-          {formatRelativeTime(run.startedAt)}
+          {formatRelativeTime(run.startedAt, now)}
         </td>
       </tr>
       {expanded && run.error && (

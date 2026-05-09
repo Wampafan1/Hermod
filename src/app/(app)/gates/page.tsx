@@ -5,6 +5,7 @@ import { GateList } from "@/components/gates/gate-list";
 
 export default async function GatesPage() {
   const session = await requireAuth();
+  const initialNow = Date.now();
 
   const gates = await prisma.realmGate.findMany({
     where: {
@@ -49,7 +50,7 @@ export default async function GatesPage() {
         </Link>
       </div>
 
-      <GateList gates={serialized} />
+      <GateList gates={serialized} initialNow={initialNow} />
     </div>
   );
 }

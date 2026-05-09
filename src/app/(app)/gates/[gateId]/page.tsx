@@ -10,6 +10,7 @@ interface Props {
 export default async function GateDetailPage({ params }: Props) {
   const session = await requireAuth();
   const { gateId } = await params;
+  const initialNow = Date.now();
 
   const gate = await prisma.realmGate.findFirst({
     where: { id: gateId, tenantId: session.user.tenantId },
@@ -37,5 +38,10 @@ export default async function GateDetailPage({ params }: Props) {
     })),
   };
 
-  return <GateDetail gate={serialized as Parameters<typeof GateDetail>[0]["gate"]} />;
+  return (
+    <GateDetail
+      gate={serialized as Parameters<typeof GateDetail>[0]["gate"]}
+      initialNow={initialNow}
+    />
+  );
 }

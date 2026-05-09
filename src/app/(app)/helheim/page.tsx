@@ -7,6 +7,7 @@ export default async function HelheimPage() {
   const session = await requireAuth();
   const userId = session.user.id;
   const tenantId = session.user.tenantId;
+  const initialNow = Date.now();
 
   const [entries, statusCounts] = await Promise.all([
     prisma.helheimEntry.findMany({
@@ -77,7 +78,7 @@ export default async function HelheimPage() {
         objectPosition="center 53%"
       />
 
-      <HelheimDashboard initialData={initialData} />
+      <HelheimDashboard initialData={initialData} initialNow={initialNow} />
     </div>
   );
 }

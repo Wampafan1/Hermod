@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useNow } from "@/lib/use-now";
 
 const STATUS_FILTERS = ["all", "pending", "dead", "recovered"] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
@@ -27,8 +28,8 @@ const ERROR_BADGE: Record<string, { text: string; border: string; label: string 
   timeout:           { text: "text-frost", border: "border-frost/30", label: "TIMEOUT" },
 };
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+function relativeTime(iso: string, now: number): string {
+  const diff = now - new Date(iso).getTime();
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
@@ -37,9 +38,9 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function relativeCountdown(iso: string | null): string {
+function relativeCountdown(iso: string | null, now: number): string {
   if (!iso) return "—";
-  const diff = new Date(iso).getTime() - Date.now();
+  const diff = new Date(iso).getTime() - now;
   if (diff <= 0) return "due";
   const mins = Math.floor(diff / 60_000);
   if (mins < 60) return `in ${mins}m`;
@@ -70,13 +71,15 @@ interface Props {
   onSelect: (id: string) => void;
   onRefresh: () => void;
   refreshKey: number;
+  initialNow: number;
 }
 
-export function EntryList({ entries, selectedId, onSelect, onRefresh, refreshKey }: Props) {
+export function EntryList({ entries, selectedId, onSelect, onRefresh, refreshKey, initialNow }: Props) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [errorTypeFilter, setErrorTypeFilter] = useState<string | null>(null);
   const [routeFilter, setRouteFilter] = useState<string | null>(null);
   const [fetchedEntries, setFetchedEntries] = useState(entries);
+  const now = useNow(initialNow);
 
   // Re-fetch when filters change or after actions
   useEffect(() => {
@@ -222,11 +225,11 @@ export function EntryList({ entries, selectedId, onSelect, onRefresh, refreshKey
                       {entry.retryCount}/{entry.maxRetries}
                     </td>
                     <td className="px-3 py-2.5 text-right font-inconsolata text-[10px] text-text-muted">
-                      {relativeTime(entry.createdAt)}
+                      {relativeTime(entry.createdAt, now)}
                     </td>
                     <td className="px-3 py-2.5 text-right font-inconsolata text-[10px] text-text-muted">
                       {entry.status === "pending" || entry.status === "retrying"
-                        ? relativeCountdown(entry.nextRetryAt)
+                        ? relativeCountdown(entry.nextRetryAt, now)
                         : "—"}
                     </td>
                   </tr>

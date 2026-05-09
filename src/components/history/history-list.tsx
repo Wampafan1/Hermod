@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { REALM_ILLUSTRATIONS } from "@/lib/constants";
+import { useNow } from "@/lib/use-now";
 
 interface RunLog {
   id: string;
@@ -25,6 +26,7 @@ interface HistoryListProps {
   initialRuns: RunLog[];
   initialCursor: string | null;
   reports: ReportOption[];
+  initialNow: number;
 }
 
 const STATUS_BADGES: Record<string, string> = {
@@ -33,7 +35,7 @@ const STATUS_BADGES: Record<string, string> = {
   RUNNING: "badge-running",
 };
 
-export function HistoryList({ initialRuns, initialCursor, reports }: HistoryListProps) {
+export function HistoryList({ initialRuns, initialCursor, reports, initialNow }: HistoryListProps) {
   const toast = useToast();
   const [runs, setRuns] = useState<RunLog[]>(initialRuns);
   const [cursor, setCursor] = useState<string | null>(initialCursor);
@@ -43,6 +45,7 @@ export function HistoryList({ initialRuns, initialCursor, reports }: HistoryList
   const [errorModal, setErrorModal] = useState<string | null>(null);
   const [rerunTarget, setRerunTarget] = useState<RunLog | null>(null);
   const [rerunning, setRerunning] = useState(false);
+  const now = useNow(initialNow);
 
   const fetchRuns = useCallback(async (status: string, reportId: string, pageCursor?: string) => {
     const params = new URLSearchParams();
@@ -212,7 +215,7 @@ export function HistoryList({ initialRuns, initialCursor, reports }: HistoryList
                     )}
                   </td>
                   <td className="px-4 py-3 text-text-dim">{run.rowCount ?? "\u2014"}</td>
-                  <td className="px-4 py-3 text-text-dim text-xs">{relativeTime(run.startedAt)}</td>
+                  <td className="px-4 py-3 text-text-dim text-xs">{relativeTime(run.startedAt, now)}</td>
                   <td className="px-4 py-3 text-text-dim text-xs">
                     {formatDuration(run.startedAt, run.completedAt)}
                   </td>
@@ -277,8 +280,7 @@ export function HistoryList({ initialRuns, initialCursor, reports }: HistoryList
   );
 }
 
-function relativeTime(dateStr: string): string {
-  const now = Date.now();
+function relativeTime(dateStr: string, now: number): string {
   const then = new Date(dateStr).getTime();
   const diffMs = now - then;
   const diffMin = Math.floor(diffMs / 60000);
