@@ -49,7 +49,7 @@ describe("Mjolnir retention helpers", () => {
     expect(JSON.stringify(sanitized)).not.toContain("Acme Corp");
   });
 
-  it("sanitizeAfterFormatting removes header values in the default mode", () => {
+  it("sanitizeAfterFormatting redacts sensitive header values in STANDARD default mode", () => {
     const sanitized = sanitizeAfterFormatting({
       headerRowCount: 2,
       columnWidths: [12],
@@ -65,10 +65,25 @@ describe("Mjolnir retention helpers", () => {
       columns: ["Customer"],
     });
 
-    expect(sanitized.headerValues).toEqual({});
+    expect(sanitized.headerValues).toEqual({
+      "0:0": REDACTED_SAMPLE_VALUE,
+      "1:0": REDACTED_SAMPLE_VALUE,
+    });
     expect(sanitized.columns).toEqual(["Customer"]);
     expect(sanitized.columnWidths).toEqual([12]);
     expect(sanitized.freeze).toEqual({ row: 2, col: 1 });
+  });
+
+  it("sanitizeAfterFormatting removes header values in MINIMAL mode", () => {
+    const sanitized = sanitizeAfterFormatting({
+      headerValues: {
+        "0:0": "Acme Corp",
+        "0:1": "Total",
+      },
+      columns: ["Customer"],
+    }, "MINIMAL") as { headerValues: Record<string, unknown> };
+
+    expect(sanitized.headerValues).toEqual({});
   });
 
   it("sanitizeAfterFormatting redacts sensitive header values in STANDARD mode", () => {
@@ -105,7 +120,7 @@ describe("Mjolnir retention helpers", () => {
     expect(sanitized[0].description).not.toContain("Acme Corp");
   });
 
-  it("sanitizeBlueprintCreatePayload omits sample filenames and raw sample details by default", () => {
+  it("sanitizeBlueprintCreatePayload sanitizes sample filenames and raw sample details by default", () => {
     const sanitized = sanitizeBlueprintCreatePayload({
       name: "Monthly Cleanup",
       description: 'Built from "Acme Corp" sample',
@@ -137,10 +152,30 @@ describe("Mjolnir retention helpers", () => {
       afterSample: "C:\\Customers\\Acme After.xlsx",
     });
 
+    expect(sanitized.beforeSample).toBe("Acme Before.xlsx");
+    expect(sanitized.afterSample).toBe("Acme After.xlsx");
+    expect((sanitized.afterFormatting as { headerValues: Record<string, unknown> }).headerValues).toEqual({
+      "0:0": REDACTED_SAMPLE_VALUE,
+    });
+    expect(JSON.stringify(sanitized)).not.toContain("Acme Corp");
+  });
+
+  it("MINIMAL mode omits beforeSample and afterSample", () => {
+    const sanitized = sanitizeBlueprintCreatePayload({
+      name: "Minimal Blueprint",
+      steps: [{
+        order: 0,
+        type: "remove_columns",
+        confidence: 1,
+        config: { columns: ["Unused"] },
+        description: "Remove unused column",
+      }] satisfies ForgeStep[],
+      beforeSample: "C:\\Customers\\Before.xlsx",
+      afterSample: "C:\\Customers\\After.xlsx",
+    }, "MINIMAL");
+
     expect(sanitized.beforeSample).toBeNull();
     expect(sanitized.afterSample).toBeNull();
-    expect((sanitized.afterFormatting as { headerValues: Record<string, unknown> }).headerValues).toEqual({});
-    expect(JSON.stringify(sanitized)).not.toContain("Acme Corp");
   });
 
   it("FULL_DEBUG preserves rich sample detail only when explicitly configured", () => {
@@ -167,7 +202,7 @@ describe("Mjolnir retention helpers", () => {
       beforeSample: "Acme Before.xlsx",
     };
 
-    expect(getMjolnirRetentionMode()).toBe("MINIMAL");
+    expect(getMjolnirRetentionMode()).toBe("STANDARD");
     expect(JSON.stringify(sanitizeBlueprintCreatePayload(payload))).not.toContain("Acme Corp");
 
     vi.stubEnv("MJOLNIR_RETENTION_MODE", "FULL_DEBUG");

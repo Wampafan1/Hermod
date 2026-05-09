@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { withAuth } from "@/lib/api";
 import {
-  cleanupExpiredMjolnirTempFiles,
   cleanupMjolnirFile,
+  cleanupUserExpiredTempFiles,
   getMjolnirUserTempDir,
 } from "@/lib/mjolnir/cleanup";
 
@@ -23,16 +23,14 @@ export const POST = withAuth(async (req, session) => {
   }
 
   if (parsed.data.expiredOnly) {
-    const result = await cleanupExpiredMjolnirTempFiles({
-      userId: session.user.id,
-    });
+    const result = await cleanupUserExpiredTempFiles(session.user.id);
     return NextResponse.json(result);
   }
 
-  const deletedCount = await cleanupMjolnirFile(
+  const result = await cleanupMjolnirFile(
     getMjolnirUserTempDir(session.user.id)
   );
-  return NextResponse.json({ deletedCount });
+  return NextResponse.json(result);
 });
 
 async function readOptionalJson(req: Request): Promise<unknown> {

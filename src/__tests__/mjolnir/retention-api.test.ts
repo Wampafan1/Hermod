@@ -8,6 +8,7 @@ const {
   mockCleanupExpired,
   mockCleanupFile,
   mockCleanupUser,
+  mockCleanupUserExpired,
 } = vi.hoisted(() => ({
   authState: { authorized: true },
   mockBlueprintCreate: vi.fn(),
@@ -16,6 +17,7 @@ const {
   mockCleanupExpired: vi.fn(),
   mockCleanupFile: vi.fn(),
   mockCleanupUser: vi.fn(),
+  mockCleanupUserExpired: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -46,6 +48,7 @@ vi.mock("@/lib/mjolnir/cleanup", () => ({
   cleanupExpiredMjolnirTempFiles: mockCleanupExpired,
   cleanupMjolnirFile: mockCleanupFile,
   cleanupUserTempFiles: mockCleanupUser,
+  cleanupUserExpiredTempFiles: mockCleanupUserExpired,
   getMjolnirUserTempDir: (userId: string) => `C:\\Temp\\hermod-mjolnir\\${userId}`,
 }));
 
@@ -75,9 +78,10 @@ describe("Mjolnir retention API boundaries", () => {
     mockBlueprintCreate.mockImplementation(async ({ data }) => ({ id: "bp_1", ...data }));
     mockBlueprintFindFirst.mockResolvedValue({ id: "bp_1", userId: "user_1" });
     mockBlueprintUpdate.mockImplementation(async ({ data }) => ({ id: "bp_1", ...data }));
-    mockCleanupExpired.mockResolvedValue({ deletedCount: 0 });
-    mockCleanupFile.mockResolvedValue(3);
+    mockCleanupExpired.mockResolvedValue({ filesDeleted: 0, dirsDeleted: 0 });
+    mockCleanupFile.mockResolvedValue({ filesDeleted: 2, dirsDeleted: 1 });
     mockCleanupUser.mockResolvedValue(undefined);
+    mockCleanupUserExpired.mockResolvedValue({ filesDeleted: 1, dirsDeleted: 0 });
   });
 
   it("blueprint create persists sanitized payload", async () => {
@@ -110,9 +114,11 @@ describe("Mjolnir retention API boundaries", () => {
 
     expect(response.status).toBe(201);
     const createArg = mockBlueprintCreate.mock.calls[0][0];
-    expect(createArg.data.beforeSample).toBeNull();
-    expect(createArg.data.afterSample).toBeNull();
-    expect(createArg.data.afterFormatting.headerValues).toEqual({});
+    expect(createArg.data.beforeSample).toBe("Acme Before.xlsx");
+    expect(createArg.data.afterSample).toBe("Acme After.xlsx");
+    expect(createArg.data.afterFormatting.headerValues).toEqual({
+      "0:0": "[REDACTED_SAMPLE]",
+    });
     expect(JSON.stringify(createArg.data)).not.toContain("Acme Corp");
     expect(mockCleanupUser).toHaveBeenCalledWith("user_1");
   });
@@ -140,9 +146,11 @@ describe("Mjolnir retention API boundaries", () => {
 
     expect(response.status).toBe(200);
     const updateArg = mockBlueprintUpdate.mock.calls[0][0];
-    expect(updateArg.data.beforeSample).toBeNull();
-    expect(updateArg.data.afterSample).toBeNull();
-    expect(updateArg.data.afterFormatting.headerValues).toEqual({});
+    expect(updateArg.data.beforeSample).toBe("Acme Before.xlsx");
+    expect(updateArg.data.afterSample).toBe("Acme After.xlsx");
+    expect(updateArg.data.afterFormatting.headerValues).toEqual({
+      "0:0": "[REDACTED_SAMPLE]",
+    });
     expect(JSON.stringify(updateArg.data)).not.toContain("Acme Corp");
   });
 
@@ -179,7 +187,21 @@ describe("Mjolnir retention API boundaries", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ deletedCount: 3 });
+    expect(body).toEqual({ filesDeleted: 2, dirsDeleted: 1 });
     expect(mockCleanupFile).toHaveBeenCalledWith("C:\\Temp\\hermod-mjolnir\\user_1");
+  });
+
+  it("cleanup endpoint can delete only expired current-user temp files", async () => {
+    const { POST } = await import("@/app/api/mjolnir/cleanup/route");
+
+    const response = await POST(jsonRequest("http://localhost/api/mjolnir/cleanup", {
+      expiredOnly: true,
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ filesDeleted: 1, dirsDeleted: 0 });
+    expect(mockCleanupUserExpired).toHaveBeenCalledWith("user_1");
+    expect(mockCleanupFile).not.toHaveBeenCalled();
   });
 });

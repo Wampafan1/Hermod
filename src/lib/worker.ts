@@ -50,8 +50,9 @@ async function main() {
   const startupCleanupNow = new Date();
 
   const mjolnirCleanup = await cleanupExpiredMjolnirTempFiles({ now: startupCleanupNow });
-  if (mjolnirCleanup.deletedCount > 0) {
-    console.log(`[Worker] Cleaned up ${mjolnirCleanup.deletedCount} expired Mjolnir temp item(s)`);
+  const mjolnirDeleted = mjolnirCleanup.filesDeleted + mjolnirCleanup.dirsDeleted;
+  if (mjolnirDeleted > 0) {
+    console.log(`[Worker] Cleaned up ${mjolnirDeleted} expired Mjolnir temp item(s)`);
   }
 
   // Clean up stale "running" route logs from previous crashed runs

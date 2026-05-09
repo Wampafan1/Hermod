@@ -6,6 +6,7 @@ import { tmpdir } from "os";
 import {
   cleanupExpiredMjolnirTempFiles,
   cleanupMjolnirFile,
+  cleanupUserExpiredTempFiles,
   cleanupUserTempFiles,
   getMjolnirTempRoot,
   getMjolnirUserTempDir,
@@ -40,7 +41,7 @@ describe("Mjolnir temp cleanup", () => {
       now: new Date(),
     });
 
-    expect(result.deletedCount).toBeGreaterThanOrEqual(1);
+    expect(result.filesDeleted).toBe(1);
     await expect(access(filePath)).rejects.toThrow();
   });
 
@@ -54,7 +55,7 @@ describe("Mjolnir temp cleanup", () => {
       now: new Date(),
     });
 
-    expect(result.deletedCount).toBe(0);
+    expect(result).toEqual({ filesDeleted: 0, dirsDeleted: 0 });
     await expect(access(filePath)).resolves.toBeUndefined();
   });
 
@@ -66,7 +67,10 @@ describe("Mjolnir temp cleanup", () => {
     await writeFile(outsideFile, "outside");
 
     expect(isSafeMjolnirTempPath(outsideFile)).toBe(false);
-    await expect(cleanupMjolnirFile(outsideFile)).resolves.toBe(0);
+    await expect(cleanupMjolnirFile(outsideFile)).resolves.toEqual({
+      filesDeleted: 0,
+      dirsDeleted: 0,
+    });
     await expect(access(outsideFile)).resolves.toBeUndefined();
   });
 
@@ -87,13 +91,37 @@ describe("Mjolnir temp cleanup", () => {
     const traversalUserId = `..${sep}outside-${randomUUID()}`;
 
     expect(isSafeMjolnirTempPath(traversalPath)).toBe(false);
-    await expect(cleanupMjolnirFile(traversalPath)).resolves.toBe(0);
+    await expect(cleanupMjolnirFile(traversalPath)).resolves.toEqual({
+      filesDeleted: 0,
+      dirsDeleted: 0,
+    });
 
     const result = await cleanupExpiredMjolnirTempFiles({
       userId: traversalUserId,
       ttlHours: 0,
     });
-    expect(result.deletedCount).toBe(0);
+    expect(result).toEqual({ filesDeleted: 0, dirsDeleted: 0 });
+  });
+
+  it("cleanupUserExpiredTempFiles deletes only expired files for one user", async () => {
+    const userA = testUserId();
+    const userB = testUserId();
+    const expiredA = await writeUserTempFile(userA, "expired-a.xlsx");
+    const freshA = await writeUserTempFile(userA, "fresh-a.xlsx");
+    const expiredB = await writeUserTempFile(userB, "expired-b.xlsx");
+    const oldDate = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    await utimes(expiredA, oldDate, oldDate);
+    await utimes(expiredB, oldDate, oldDate);
+
+    const result = await cleanupUserExpiredTempFiles(userA, {
+      ttlHours: 24,
+      now: new Date(),
+    });
+
+    expect(result.filesDeleted).toBe(1);
+    await expect(access(expiredA)).rejects.toThrow();
+    await expect(access(freshA)).resolves.toBeUndefined();
+    await expect(access(expiredB)).resolves.toBeUndefined();
   });
 });
 

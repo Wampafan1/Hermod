@@ -15,7 +15,7 @@ export const POST = withAuth(async (req, session) => {
   const denied = await requireTierFeature(session.tenantId, "mjolnirAiForge", "Mjölnir AI Forge");
   if (denied) return denied;
 
-  await cleanupExpiredMjolnirTempFiles({ maxEntries: 100 });
+  void cleanupExpiredMjolnirTempFiles({ maxEntries: 100 }).catch(() => {});
 
   const body = await req.json();
   const parsed = analyzeSchema.safeParse(body);

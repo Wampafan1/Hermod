@@ -620,16 +620,17 @@ Files changed:
 
 Default retention mode:
 
-- Default is `MINIMAL`.
+- Default is `STANDARD`.
+- `MINIMAL` can be selected through `MJOLNIR_RETENTION_MODE=MINIMAL` or `MJOLNIR_SAMPLE_RETENTION_MODE=MINIMAL`.
 - `FULL_DEBUG` is available only through explicit `MJOLNIR_RETENTION_MODE=FULL_DEBUG` or `MJOLNIR_SAMPLE_RETENTION_MODE=FULL_DEBUG`.
-- `STANDARD` can be selected through the same environment variables.
+- `FULL_DEBUG` is not the default because it can retain sample-derived data.
 
 What is redacted or omitted by default:
 
-- `Blueprint.beforeSample` and `Blueprint.afterSample` are stored as `null`.
+- `Blueprint.beforeSample` and `Blueprint.afterSample` are sanitized to base filenames in `STANDARD` mode and stored as `null` in `MINIMAL` mode.
 - `analysisLog.formatChanges` keeps structural fields such as `column` and `changeType`, but removes raw before/after/sample values.
-- raw sample row collections and AI prompt/sample context keys are omitted from retained metadata.
-- `afterFormatting.headerValues` is replaced with `{}` in `MINIMAL` mode.
+- raw sample row collections, examples, before/after values, old/new values, source/target values, top/min/max values, and AI prompt/sample context keys are omitted or redacted from retained metadata.
+- `afterFormatting.headerValues` redacts sensitive-looking values in `STANDARD` mode and is replaced with `{}` in `MINIMAL` mode.
 - forge step descriptions are scrubbed for sensitive quoted literals and before/after sample snippets.
 - forge step config literals are redacted when they look like sensitive sample values.
 - blueprint update now runs the same sanitizer for `steps`, `analysisLog`, `afterFormatting`, `sourceSchema`, `beforeSample`, and `afterSample`.
@@ -646,7 +647,7 @@ Temp file TTL and cleanup:
 - Temp root remains `tmpdir()/hermod-mjolnir`.
 - Default TTL is 24 hours.
 - TTL can be configured with `MJOLNIR_TEMP_FILE_TTL_HOURS`.
-- Expired cleanup is recursive, bounded for request-time calls, and path-safe.
+- Expired cleanup is recursive, bounded for request-time calls, best-effort, and path-safe.
 - Cleanup errors are logged without full sensitive filenames.
 - Expired cleanup runs in upload, analyze, validate, and worker startup.
 - Successful blueprint save still cleans the current user's temp directory.
@@ -659,7 +660,7 @@ Cleanup endpoint:
 - Rejects arbitrary path fields.
 - `expiredOnly: true` deletes only expired files for the current user.
 - `expiredOnly: false` deletes the current user's Mjolnir temp directory.
-- Returns `{ deletedCount }` when practical.
+- Returns `{ filesDeleted, dirsDeleted }` when practical.
 
 UI changes:
 
@@ -669,14 +670,14 @@ UI changes:
 Tests added:
 
 - `src/__tests__/mjolnir/retention.test.ts`: filename sanitization, analysis log redaction, after-formatting header handling, forge step redaction, blueprint payload sanitization, and explicit `FULL_DEBUG` behavior.
-- `src/__tests__/mjolnir/temp-cleanup.test.ts`: expired deletion, non-expired preservation, outside-root safety, per-user cleanup, and traversal rejection.
-- `src/__tests__/mjolnir/retention-api.test.ts`: sanitized blueprint create/update persistence, auth-required cleanup endpoint, arbitrary-path rejection, and current-user cleanup.
+- `src/__tests__/mjolnir/temp-cleanup.test.ts`: expired deletion, non-expired preservation, outside-root safety, per-user cleanup, per-user expired cleanup, legacy `cleanupUserTempFiles`, and traversal rejection.
+- `src/__tests__/mjolnir/retention-api.test.ts`: sanitized blueprint create/update persistence, auth-required cleanup endpoint, arbitrary-path rejection, current-user cleanup, and current-user expired cleanup.
 
 Validation results:
 
 - `npx prisma validate`: passed.
 - `npx prisma generate`: initially hit the known Windows EPERM Prisma DLL rename issue, then passed after moving `node_modules/.prisma` aside and regenerating.
-- `npm run test`: passed, 81 test files and 1139 tests.
+- `npm run test`: passed, 81 test files and 1143 tests.
 - `npm run build`: passed; pre-existing lint warnings were reported during the build.
 - `npm run lint`: passed with pre-existing warnings.
 

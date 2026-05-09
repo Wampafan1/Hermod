@@ -13,7 +13,8 @@ const DEFAULT_TEMP_FILE_TTL_HOURS = 24;
 const DEFAULT_MAX_CLEANUP_ENTRIES = 250;
 
 export interface MjolnirCleanupResult {
-  deletedCount: number;
+  filesDeleted: number;
+  dirsDeleted: number;
 }
 
 export interface ExpiredMjolnirTempCleanupOptions {
@@ -43,18 +44,18 @@ export function getMjolnirUserTempDir(userId: string): string {
   return join(getMjolnirTempRoot(), sanitizeTempPathSegment(userId));
 }
 
-export async function cleanupMjolnirFile(filePath: string): Promise<number> {
+export async function cleanupMjolnirFile(filePath: string): Promise<MjolnirCleanupResult> {
   if (!isSafeMjolnirTempPath(filePath)) {
-    return 0;
+    return emptyCleanupResult();
   }
 
-  const deletedCount = await countEntries(filePath);
+  const deleted = await countEntries(filePath);
   try {
     await rm(filePath, { recursive: true, force: true });
-    return deletedCount;
+    return deleted;
   } catch (err) {
     logCleanupError("direct cleanup", err);
-    return 0;
+    return emptyCleanupResult();
   }
 }
 
@@ -64,6 +65,13 @@ export async function cleanupMjolnirFile(filePath: string): Promise<number> {
  */
 export async function cleanupUserTempFiles(userId: string): Promise<void> {
   await cleanupMjolnirFile(getMjolnirUserTempDir(userId));
+}
+
+export async function cleanupUserExpiredTempFiles(
+  userId: string,
+  options: Omit<ExpiredMjolnirTempCleanupOptions, "userId"> = {}
+): Promise<MjolnirCleanupResult> {
+  return cleanupExpiredMjolnirTempFiles({ ...options, userId });
 }
 
 export async function cleanupExpiredMjolnirTempFiles(
@@ -77,25 +85,27 @@ export async function cleanupExpiredMjolnirTempFiles(
     : getMjolnirTempRoot();
 
   if (!isSafeMjolnirTempPath(startPath)) {
-    return { deletedCount: 0 };
+    return emptyCleanupResult();
   }
 
   const state = {
     visited: 0,
-    deletedCount: 0,
+    filesDeleted: 0,
+    dirsDeleted: 0,
     maxEntries,
     cutoffMs,
   };
 
   await cleanupExpiredUnder(startPath, state);
-  return { deletedCount: state.deletedCount };
+  return { filesDeleted: state.filesDeleted, dirsDeleted: state.dirsDeleted };
 }
 
 async function cleanupExpiredUnder(
   currentPath: string,
   state: {
     visited: number;
-    deletedCount: number;
+    filesDeleted: number;
+    dirsDeleted: number;
     maxEntries: number;
     cutoffMs: number;
   }
@@ -114,7 +124,7 @@ async function cleanupExpiredUnder(
 
   if (!currentStat.isDirectory()) {
     if (currentStat.mtimeMs < state.cutoffMs) {
-      state.deletedCount += await cleanupMjolnirFile(currentPath);
+      addCleanupResult(state, await cleanupMjolnirFile(currentPath));
       return true;
     }
     return false;
@@ -143,7 +153,7 @@ async function cleanupExpiredUnder(
   if (!hasRemainingEntries && currentPath !== getMjolnirTempRoot()) {
     try {
       await rmdir(currentPath);
-      state.deletedCount++;
+      state.dirsDeleted++;
       return true;
     } catch {
       return false;
@@ -153,29 +163,41 @@ async function cleanupExpiredUnder(
   return false;
 }
 
-async function countEntries(filePath: string): Promise<number> {
-  if (!isSafeMjolnirTempPath(filePath)) return 0;
+async function countEntries(filePath: string): Promise<MjolnirCleanupResult> {
+  if (!isSafeMjolnirTempPath(filePath)) return emptyCleanupResult();
 
   let currentStat;
   try {
     currentStat = await stat(filePath);
   } catch {
-    return 0;
+    return emptyCleanupResult();
   }
 
-  if (!currentStat.isDirectory()) return 1;
+  if (!currentStat.isDirectory()) return { filesDeleted: 1, dirsDeleted: 0 };
 
-  let count = 1;
+  const count = { filesDeleted: 0, dirsDeleted: 1 };
   try {
     const entries = await readdir(filePath);
     for (const entry of entries) {
-      count += await countEntries(join(filePath, entry));
+      addCleanupResult(count, await countEntries(join(filePath, entry)));
     }
   } catch (err) {
     logCleanupError("count entries", err);
   }
 
   return count;
+}
+
+function emptyCleanupResult(): MjolnirCleanupResult {
+  return { filesDeleted: 0, dirsDeleted: 0 };
+}
+
+function addCleanupResult(
+  target: MjolnirCleanupResult,
+  source: MjolnirCleanupResult
+): void {
+  target.filesDeleted += source.filesDeleted;
+  target.dirsDeleted += source.dirsDeleted;
 }
 
 function resolveTtlHours(explicitTtlHours?: number): number {

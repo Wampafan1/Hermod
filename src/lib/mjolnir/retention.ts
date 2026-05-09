@@ -7,7 +7,7 @@ export type MjolnirRetentionMode =
 
 export const REDACTED_SAMPLE_VALUE = "[REDACTED_SAMPLE]";
 
-const DEFAULT_RETENTION_MODE: MjolnirRetentionMode = "MINIMAL";
+const DEFAULT_RETENTION_MODE: MjolnirRetentionMode = "STANDARD";
 const MAX_FILENAME_LENGTH = 120;
 
 const OMIT = Symbol("omit");
@@ -37,13 +37,40 @@ const SAMPLE_CONTEXT_DROP_KEYS = new Set([
 const SAMPLE_SCALAR_KEYS = new Set([
   "aftersample",
   "aftervalue",
-  "beforeSample",
   "beforesample",
   "beforevalue",
+  "example",
+  "examples",
   "maxvalue",
   "minvalue",
+  "newvalue",
+  "oldvalue",
   "sample",
   "samplevalue",
+  "samplevalues",
+  "sourcevalue",
+  "targetvalue",
+  "topvalues",
+  "value",
+  "values",
+]);
+
+const STEP_SAMPLE_SCALAR_KEYS = new Set([
+  "aftersample",
+  "aftervalue",
+  "beforesample",
+  "beforevalue",
+  "example",
+  "examples",
+  "maxvalue",
+  "minvalue",
+  "newvalue",
+  "oldvalue",
+  "sample",
+  "samplevalue",
+  "samplevalues",
+  "sourcevalue",
+  "targetvalue",
   "topvalues",
 ]);
 
@@ -272,7 +299,7 @@ function sanitizeStepConfigValue(
   const normalizedKey = normalizeKey(key);
   if (SAMPLE_CONTEXT_DROP_KEYS.has(normalizedKey)) return OMIT;
 
-  if (SAMPLE_SCALAR_KEYS.has(normalizedKey)) {
+  if (STEP_SAMPLE_SCALAR_KEYS.has(normalizedKey)) {
     return redactSampleValue(value);
   }
 
