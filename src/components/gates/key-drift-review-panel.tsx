@@ -27,14 +27,51 @@ export interface KeyDriftDetails {
   aiExplanation?: string | null;
   validationStats?: {
     rowCount: number;
+    inputRowCount?: number;
+    blankRowsSkipped?: number;
     columnsAnalyzed: number;
     combinationsTested: number;
     maxWidth: number;
+    maxColumns?: number;
     maxCombinations: number;
     truncated: boolean;
     destinationValidated: boolean;
     destinationValidationMode?: string;
+    discoveryMode?: "QUICK" | "DUPLICATE_DISCRIMINATOR" | "THOROUGH" | "CAPPED";
+    searchExhaustive?: boolean;
+    columnsConsidered?: string[];
+    columnsExcluded?: Array<{ column: string; reason: string }>;
+    discriminatorColumns?: Array<{
+      column: string;
+      duplicateGroupsSeparated: number;
+      nullCount: number;
+      distinctCount: number;
+    }>;
+    currentKeyDuplicateGroupCount?: number;
+    candidateSearchLimits?: {
+      maxWidth: number;
+      maxColumns: number;
+      maxCombinations: number;
+      combinationsTested: number;
+    };
   } | null;
+  discoveryMode?: "QUICK" | "DUPLICATE_DISCRIMINATOR" | "THOROUGH" | "CAPPED";
+  searchExhaustive?: boolean;
+  columnsConsidered?: string[];
+  columnsExcluded?: Array<{ column: string; reason: string }>;
+  discriminatorColumns?: Array<{
+    column: string;
+    duplicateGroupsSeparated: number;
+    nullCount: number;
+    distinctCount: number;
+  }>;
+  currentKeyDuplicateGroupCount?: number;
+  candidateSearchLimits?: {
+    maxWidth: number;
+    maxColumns: number;
+    maxCombinations: number;
+    combinationsTested: number;
+  };
   duplicateExamples?: Array<{
     keyValues: Record<string, string | number | boolean | null>;
     rowIndexes: number[];
@@ -155,6 +192,46 @@ export function getNoReliableKeyMessage(keyDrift: KeyDriftDetails): string | nul
   return keyDrift.noReliableKeyReason ?? "No reliable key was found in this upload.";
 }
 
+export function getDiscoveryDiagnostics(keyDrift: KeyDriftDetails) {
+  const discriminatorColumns = (
+    keyDrift.discriminatorColumns ?? keyDrift.validationStats?.discriminatorColumns ?? []
+  ).map((column) => ({
+    column: column.column,
+    duplicateGroupsSeparated: column.duplicateGroupsSeparated,
+    nullCount: column.nullCount,
+    distinctCount: column.distinctCount,
+  }));
+  const columnsExcluded = (
+    keyDrift.columnsExcluded ?? keyDrift.validationStats?.columnsExcluded ?? []
+  ).map((column) => ({
+    column: column.column,
+    reason: column.reason,
+  }));
+
+  return {
+    discoveryMode: keyDrift.discoveryMode ?? keyDrift.validationStats?.discoveryMode ?? "QUICK",
+    searchExhaustive: keyDrift.searchExhaustive ?? keyDrift.validationStats?.searchExhaustive ?? false,
+    columnsConsidered: keyDrift.columnsConsidered ?? keyDrift.validationStats?.columnsConsidered ?? [],
+    columnsExcluded,
+    discriminatorColumns,
+    currentKeyDuplicateGroupCount:
+      keyDrift.currentKeyDuplicateGroupCount ??
+      keyDrift.validationStats?.currentKeyDuplicateGroupCount ??
+      0,
+    candidateSearchLimits:
+      keyDrift.candidateSearchLimits ??
+      keyDrift.validationStats?.candidateSearchLimits ??
+      (keyDrift.validationStats
+        ? {
+            maxWidth: keyDrift.validationStats.maxWidth,
+            maxColumns: keyDrift.validationStats.maxColumns ?? keyDrift.validationStats.columnsAnalyzed,
+            maxCombinations: keyDrift.validationStats.maxCombinations,
+            combinationsTested: keyDrift.validationStats.combinationsTested,
+          }
+        : null),
+  };
+}
+
 export function KeyDriftReviewPanel({
   gateId,
   pushId,
@@ -176,6 +253,7 @@ export function KeyDriftReviewPanel({
   const [actionResult, setActionResult] = useState<Record<string, unknown> | null>(null);
   const noReliableKeyMessage = getNoReliableKeyMessage(keyDrift);
   const recommendedColumns = keyDrift.recommendation?.columns ?? null;
+  const discoveryDiagnostics = getDiscoveryDiagnostics(keyDrift);
 
   useEffect(() => {
     setSelectedColumns(defaultCandidate?.columns ?? null);
@@ -307,6 +385,47 @@ export function KeyDriftReviewPanel({
           {formatBlankRowsSkipped(blankRowsSkipped)}
         </div>
       )}
+
+      <div className="border border-[rgba(201,147,58,0.08)] bg-void/30 p-3 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="label-norse text-[9px]">Discovery Diagnostics</div>
+          <span className="text-[9px] uppercase tracking-[0.18em] text-text-dim">
+            {discoveryDiagnostics.searchExhaustive ? "Exhaustive search" : "Bounded search"}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] text-text-dim font-inconsolata">
+          <Metric label="Mode" value={discoveryDiagnostics.discoveryMode} />
+          <Metric label="Columns" value={discoveryDiagnostics.columnsConsidered.length} />
+          <Metric
+            label="Combos"
+            value={discoveryDiagnostics.candidateSearchLimits?.combinationsTested ?? keyDrift.validationStats?.combinationsTested ?? 0}
+          />
+          <Metric label="Duplicate Groups" value={discoveryDiagnostics.currentKeyDuplicateGroupCount} />
+        </div>
+        {discoveryDiagnostics.discriminatorColumns.length > 0 && (
+          <div className="space-y-1">
+            <div className="text-[9px] uppercase tracking-[0.16em] text-frost">
+              Discriminator columns
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {discoveryDiagnostics.discriminatorColumns.slice(0, 8).map((column) => (
+                <span
+                  key={column.column}
+                  className="border border-frost/20 bg-frost/[0.04] px-2 py-1 text-[10px] text-frost font-inconsolata"
+                  title={`${column.duplicateGroupsSeparated} duplicate groups separated, ${column.nullCount} blanks, ${column.distinctCount} distinct values`}
+                >
+                  {column.column}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {discoveryDiagnostics.discoveryMode === "CAPPED" && (
+          <div className="border border-amber-700/30 bg-amber-900/10 px-3 py-2 text-[11px] text-amber-400 font-inconsolata">
+            Discovery hit search limits. You can still select and validate a key manually.
+          </div>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <ExampleList

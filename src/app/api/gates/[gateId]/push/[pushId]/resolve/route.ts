@@ -672,6 +672,15 @@ function parseKeyDrift(value: unknown): KeyDriftDetails {
     aiUsed: keyDrift?.aiUsed ?? false,
     aiExplanation: keyDrift?.aiExplanation ?? null,
     noReliableKeyReason: keyDrift?.noReliableKeyReason ?? null,
+    discoveryMode: keyDrift?.discoveryMode,
+    searchExhaustive: keyDrift?.searchExhaustive,
+    columnsConsidered: Array.isArray(keyDrift?.columnsConsidered) ? keyDrift.columnsConsidered : undefined,
+    columnsExcluded: Array.isArray(keyDrift?.columnsExcluded) ? keyDrift.columnsExcluded : undefined,
+    discriminatorColumns: Array.isArray(keyDrift?.discriminatorColumns) ? keyDrift.discriminatorColumns : undefined,
+    currentKeyDuplicateGroupCount: typeof keyDrift?.currentKeyDuplicateGroupCount === "number"
+      ? keyDrift.currentKeyDuplicateGroupCount
+      : undefined,
+    candidateSearchLimits: keyDrift?.candidateSearchLimits,
     selectedKey: Array.isArray(keyDrift?.selectedKey) ? keyDrift.selectedKey : null,
   };
 }

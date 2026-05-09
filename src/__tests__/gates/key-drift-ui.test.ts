@@ -4,6 +4,7 @@ import {
   canApproveKeyHardening,
   formatBlankRowsSkipped,
   formatDuplicateExample,
+  getDiscoveryDiagnostics,
   formatKeyDriftReason,
   formatNullKeyExample,
   getNoReliableKeyMessage,
@@ -147,6 +148,35 @@ describe("Gate key drift UI helpers", () => {
       confirmedDdl: ["ALTER TABLE example;"],
       confirm: true,
     });
+  });
+
+  it("exposes discovery diagnostics without raw rows", () => {
+    const diagnostics = getDiscoveryDiagnostics({
+      ...baseKeyDrift,
+      discoveryMode: "CAPPED",
+      searchExhaustive: false,
+      columnsConsidered: ["job_number", "line_number", "line_value"],
+      discriminatorColumns: [
+        {
+          column: "line_value",
+          duplicateGroupsSeparated: 2,
+          nullCount: 0,
+          distinctCount: 3,
+          rawRows: [{ secret: "hidden" }],
+        } as never,
+      ],
+      candidateSearchLimits: {
+        maxWidth: 6,
+        maxColumns: 3,
+        maxCombinations: 10,
+        combinationsTested: 10,
+      },
+    });
+
+    expect(diagnostics.discoveryMode).toBe("CAPPED");
+    expect(diagnostics.searchExhaustive).toBe(false);
+    expect(diagnostics.columnsConsidered).toHaveLength(3);
+    expect(JSON.stringify(diagnostics)).not.toContain("hidden");
   });
 
   it("formats fallback reason without raw row values", () => {

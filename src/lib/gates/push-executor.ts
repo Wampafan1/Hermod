@@ -19,6 +19,10 @@ import {
   buildKeyDriftRecommendation,
   discoverUniqueColumnCombinations,
   type CandidateKey,
+  type CandidateSearchLimits,
+  type ColumnExclusion,
+  type DiscriminatorColumnStats,
+  type KeyDiscoveryMode,
   type KeyDiscoveryStats,
   type KeyRecommendation,
 } from "./key-discovery";
@@ -58,6 +62,13 @@ export interface KeyDriftDetails {
   aiUsed?: boolean;
   aiExplanation?: string | null;
   noReliableKeyReason?: string | null;
+  discoveryMode?: KeyDiscoveryMode;
+  searchExhaustive?: boolean;
+  columnsConsidered?: string[];
+  columnsExcluded?: ColumnExclusion[];
+  discriminatorColumns?: DiscriminatorColumnStats[];
+  currentKeyDuplicateGroupCount?: number;
+  candidateSearchLimits?: CandidateSearchLimits;
   selectedKey: string[] | null;
 }
 
@@ -465,6 +476,13 @@ export function preflightUpsertKey(input: {
       aiUsed: false,
       aiExplanation: null,
       noReliableKeyReason: null,
+      discoveryMode: undefined,
+      searchExhaustive: undefined,
+      columnsConsidered: undefined,
+      columnsExcluded: undefined,
+      discriminatorColumns: undefined,
+      currentKeyDuplicateGroupCount: undefined,
+      candidateSearchLimits: undefined,
       selectedKey: null,
     },
   };
@@ -475,7 +493,9 @@ async function enrichKeyDriftRecommendation(input: {
   mappedRows: Record<string, unknown>[];
   columns: string[];
 }): Promise<KeyDriftDetails> {
-  const discovery = discoverUniqueColumnCombinations(input.mappedRows, input.columns);
+  const discovery = discoverUniqueColumnCombinations(input.mappedRows, input.columns, {
+    currentKeyColumns: input.keyDrift.oldKey,
+  });
   const deterministic = buildKeyDriftRecommendation({
     candidateKeys: discovery.candidates,
     validationStats: discovery.stats,
@@ -501,6 +521,13 @@ async function enrichKeyDriftRecommendation(input: {
     aiUsed: aiResult.aiUsed,
     aiExplanation: aiResult.aiExplanation,
     noReliableKeyReason: deterministic.noReliableKeyReason,
+    discoveryMode: discovery.stats.discoveryMode,
+    searchExhaustive: discovery.stats.searchExhaustive,
+    columnsConsidered: discovery.stats.columnsConsidered,
+    columnsExcluded: discovery.stats.columnsExcluded,
+    discriminatorColumns: discovery.stats.discriminatorColumns,
+    currentKeyDuplicateGroupCount: discovery.stats.currentKeyDuplicateGroupCount,
+    candidateSearchLimits: discovery.stats.candidateSearchLimits,
     selectedKey: null,
   };
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildKeyDriftRecommendation,
   discoverUniqueColumnCombinations,
+  validateSelectedGateKey,
 } from "@/lib/gates/key-discovery";
 import { prepareMappedRowsForPush, type ColumnMap } from "@/lib/gates/push-executor";
 
@@ -42,10 +43,10 @@ describe("Gate key discovery", () => {
   it("rejects candidates with nulls", () => {
     const result = discoverUniqueColumnCombinations(
       [
-        { customer_id: "C-1" },
-        { customer_id: null },
+        { customer_id: "C-1", status: "open" },
+        { customer_id: null, status: "open" },
       ],
-      ["customer_id"]
+      ["customer_id", "status"]
     );
 
     expect(result.candidates).toEqual([]);
@@ -159,5 +160,123 @@ describe("Gate key discovery", () => {
       "7501 Line Number",
       "Line Entered Value",
     ]);
+  });
+
+  it("finds a differentiating column outside the quick top 24", () => {
+    const fillerColumns = Array.from({ length: 28 }, (_, index) => `stable_number_${index + 1}`);
+    const rows = [
+      { job_number: "J1", line_number: "1", line_entered_value: "A" },
+      { job_number: "J1", line_number: "1", line_entered_value: "B" },
+      { job_number: "J2", line_number: "1", line_entered_value: "A" },
+      { job_number: "J3", line_number: "1", line_entered_value: "A" },
+    ].map((row) => ({
+      ...Object.fromEntries(fillerColumns.map((column) => [column, "same"])),
+      ...row,
+    }));
+
+    const result = discoverUniqueColumnCombinations(
+      rows,
+      ["job_number", "line_number", ...fillerColumns, "line_entered_value"],
+      { currentKeyColumns: ["job_number", "line_number"] }
+    );
+
+    expect(result.candidates.some((candidate) =>
+      candidate.columns.join("|") === "job_number|line_number|line_entered_value"
+    )).toBe(true);
+    expect(result.stats.discriminatorColumns.map((column) => column.column)).toContain("line_entered_value");
+  });
+
+  it("allows value and amount columns to participate in verified keys", () => {
+    const result = discoverUniqueColumnCombinations(
+      [
+        { job_number: "J1", line_number: "1", entered_amount: 10 },
+        { job_number: "J1", line_number: "1", entered_amount: 11 },
+        { job_number: "J2", line_number: "1", entered_amount: 10 },
+      ],
+      ["job_number", "line_number", "entered_amount"],
+      { currentKeyColumns: ["job_number", "line_number"] }
+    );
+
+    expect(result.candidates.some((candidate) =>
+      candidate.columns.join("|") === "job_number|line_number|entered_amount"
+    )).toBe(true);
+    expect(result.noReliableKeyReason).toBeNull();
+  });
+
+  it("reports capped search limits instead of false exhaustive no-key-found", () => {
+    const result = discoverUniqueColumnCombinations(
+      [
+        { a: "1", b: "1", c: "1" },
+        { a: "1", b: "1", c: "2" },
+        { a: "1", b: "2", c: "1" },
+        { a: "1", b: "2", c: "2" },
+        { a: "2", b: "1", c: "1" },
+        { a: "2", b: "1", c: "2" },
+        { a: "2", b: "2", c: "1" },
+        { a: "2", b: "2", c: "2" },
+      ],
+      ["a", "b", "c"],
+      { maxWidth: 2, maxCombinations: 100 }
+    );
+
+    expect(result.candidates).toEqual([]);
+    expect(result.stats.discoveryMode).toBe("CAPPED");
+    expect(result.stats.searchExhaustive).toBe(false);
+    expect(result.noReliableKeyReason).toContain("current search limits");
+  });
+
+  it("validates a manually selected key against nonblank rows", () => {
+    const result = validateSelectedGateKey({
+      rows: [
+        { job_number: "J1", line_number: "1", value: "A" },
+        { job_number: "J1", line_number: "1", value: "B" },
+        { job_number: "", line_number: "", value: " " },
+      ],
+      selectedKey: ["job_number", "line_number", "value"],
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      nullCount: 0,
+      duplicateCount: 0,
+      duplicateExamples: [],
+      nullKeyExamples: [],
+    });
+  });
+
+  it("fully blank rows do not produce null-key examples during manual validation", () => {
+    const result = validateSelectedGateKey({
+      rows: [
+        { customer_id: "C-1", name: "Ada" },
+        { customer_id: " ", name: " " },
+        { customer_id: "", name: "Nonblank name" },
+      ],
+      selectedKey: ["customer_id"],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.nullCount).toBe(1);
+    expect(result.nullKeyExamples).toEqual([
+      {
+        rowIndex: 2,
+        keyValues: { customer_id: "" },
+        missingColumns: ["customer_id"],
+      },
+    ]);
+  });
+
+  it("only reports exhaustive no-key-found when all bounded combinations were checked", () => {
+    const result = discoverUniqueColumnCombinations(
+      [
+        { status: "open", type: "invoice" },
+        { status: "open", type: "invoice" },
+      ],
+      ["status", "type"],
+      { maxWidth: 2 }
+    );
+
+    expect(result.stats.searchExhaustive).toBe(true);
+    expect(result.stats.discoveryMode).toBe("THOROUGH");
+    expect(result.noReliableKeyReason).toContain("after checking all mapped columns up to width 2");
   });
 });

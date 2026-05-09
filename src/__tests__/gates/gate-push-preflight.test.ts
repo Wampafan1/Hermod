@@ -74,6 +74,27 @@ describe("gate push key preflight", () => {
     expect(JSON.stringify(prepared.keyDrift)).not.toContain("Ada Updated");
   });
 
+  it("does not report fully blank mapped rows as blank current-key examples", () => {
+    const prepared = prepareMappedRowsForPush({
+      rows: [
+        { "Customer ID": " ", Name: "", Email: null },
+        { "Customer ID": "", Name: "Ada", Email: "ada@example.com" },
+      ],
+      columnMapping: mapping,
+      primaryKeyColumns: ["Customer ID"],
+      mergeStrategy: "UPSERT",
+    });
+
+    expect(prepared.blankRowsSkipped).toBe(1);
+    expect(prepared.keyDrift?.nullKeyExamples).toEqual([
+      {
+        rowIndex: 2,
+        keyValues: { customer_id: "" },
+        missingColumns: ["customer_id"],
+      },
+    ]);
+  });
+
   it("passes UPSERT preflight when current-key combinations are unique and nonblank", () => {
     const prepared = prepareMappedRowsForPush({
       rows: [

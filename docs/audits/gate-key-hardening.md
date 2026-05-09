@@ -96,6 +96,65 @@ Phase 2 fully validates candidate uniqueness inside the uploaded nonblank mapped
 - `npm run build`
 - `npm run lint`
 
+## Key Discovery Fortification Results
+
+Hermod now uses a multi-stage candidate discovery path so it does not falsely report `No reliable key found` when a verified key exists in the mapped upload rows.
+
+### Multi-Stage Discovery
+
+- Stage A keeps the quick heuristic search for simple files.
+- Stage B runs duplicate-cluster discriminator search when the current key fails on duplicate groups.
+- Stage C runs a thorough all-column UCC search up to the configured width and combination limits.
+- The default thorough search width is 6.
+- Candidate discovery now considers all mapped destination columns by default instead of only the top 24 heuristic columns.
+
+### Duplicate Discriminator Search
+
+- Duplicate current-key groups are inspected across all mapped destination columns.
+- Columns that differ inside duplicate groups are forced into the search even when their names look like `value`, `amount`, `date`, or other historically volatile fields.
+- Hermod explicitly tests current key plus one, two, and three discriminator columns when width limits allow.
+- The regression case `job_number + 7501_line_number + line_entered_value` is now found and ranked as a verified candidate.
+
+### Thorough UCC Search And Caps
+
+- `keyDrift` metadata now records discovery mode, search exhaustiveness, columns considered, excluded columns, discriminator stats, duplicate group count, and candidate search limits.
+- If discovery is capped by width, column, or combination limits, `searchExhaustive` is false and the no-key message says the search hit limits.
+- If discovery is exhaustive within the configured bounds, the no-key message says all mapped columns were checked up to the configured width.
+- Hermod no longer uses column-name volatility as an exclusion rule; name heuristics affect ranking only after uniqueness is verified.
+
+### Blank Row Handling
+
+- Fully blank mapped rows are excluded before current-key preflight, duplicate detection, and key discovery.
+- Fully blank mapped rows increment `blankRowsSkipped` and do not appear as blank current-key examples.
+- Nonblank rows with blank key values still enter `KEY_DRIFT`.
+
+### Manual Key Validation
+
+- Added `validateSelectedGateKey()` to validate a user-selected key against nonblank mapped rows.
+- The helper returns null counts, duplicate counts, and safe examples that include only selected key fields and row indexes.
+- The UI now shows discovery diagnostics and warns when discovery hit search limits. A full manual key selection UI remains a follow-up.
+
+### Tests Added
+
+- `src/__tests__/gates/key-discovery-regression.test.ts`
+- Expanded `src/__tests__/gates/key-discovery.test.ts`
+- Expanded `src/__tests__/gates/gate-push-preflight.test.ts`
+- Expanded `src/__tests__/gates/key-drift-ui.test.ts`
+
+### Validation Results
+
+- Focused Gate key discovery tests passed: 5 files, 34 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed after the existing Windows Prisma DLL-lock workaround.
+- `npm run test`: passed, 107 files and 1365 tests.
+- `npm run build`: passed with existing warnings.
+- `npm run lint`: passed with existing warnings.
+
+### Remaining Follow-Up
+
+- Destination-table combined validation currently remains part of the approval/DDL path, not Phase 2 upload discovery.
+- Add a manual key selection UI that calls the selected-key validation helper before DDL preview.
+
 ## Phase 3 Key Approval And DDL Results
 
 Hermod can now turn a `KEY_DRIFT` review into an explicit, user-approved key hardening action. The staged upload is re-read, remapped, blank-row filtered, and revalidated against the selected key immediately before any destination DDL is generated or executed.
