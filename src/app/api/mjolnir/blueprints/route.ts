@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { createBlueprintSchema } from "@/lib/validations/mjolnir";
 import { cleanupUserTempFiles } from "@/lib/mjolnir/cleanup";
-import type { BlueprintFormatting } from "@/lib/mjolnir";
+import { sanitizeBlueprintCreatePayload } from "@/lib/mjolnir/retention";
 
 // GET /api/mjolnir/blueprints — list user's blueprints
 // Supports ?status=ACTIVE,VALIDATED to filter by status
@@ -45,8 +45,9 @@ export const POST = withAuth(async (req, session) => {
     );
   }
 
+  const sanitized = sanitizeBlueprintCreatePayload(parsed.data);
   const { name, description, steps, sourceSchema, analysisLog, afterFormatting, beforeSample, afterSample } =
-    parsed.data;
+    sanitized;
 
   const blueprint = await prisma.blueprint.create({
     data: {

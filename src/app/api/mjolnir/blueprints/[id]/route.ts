@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { updateBlueprintSchema } from "@/lib/validations/mjolnir";
+import { sanitizeBlueprintCreatePayload } from "@/lib/mjolnir/retention";
 
 /**
  * Extract the blueprint ID from the request URL.
@@ -55,11 +57,31 @@ export const PUT = withAuth(async (req, session) => {
     return NextResponse.json({ error: "Blueprint not found" }, { status: 404 });
   }
 
+  const sanitized = sanitizeBlueprintCreatePayload(parsed.data);
   const updateData: Record<string, unknown> = {};
-  if (parsed.data.name !== undefined) updateData.name = parsed.data.name;
-  if (parsed.data.description !== undefined) updateData.description = parsed.data.description;
-  if (parsed.data.steps !== undefined) updateData.steps = parsed.data.steps;
-  if (parsed.data.status !== undefined) updateData.status = parsed.data.status;
+  if (sanitized.name !== undefined) updateData.name = sanitized.name;
+  if (sanitized.description !== undefined) updateData.description = sanitized.description;
+  if (sanitized.steps !== undefined) {
+    updateData.steps = sanitized.steps as unknown as Prisma.InputJsonValue;
+  }
+  if (sanitized.sourceSchema !== undefined) {
+    updateData.sourceSchema = sanitized.sourceSchema
+      ? (sanitized.sourceSchema as unknown as Prisma.InputJsonValue)
+      : Prisma.JsonNull;
+  }
+  if (sanitized.analysisLog !== undefined) {
+    updateData.analysisLog = sanitized.analysisLog
+      ? (sanitized.analysisLog as unknown as Prisma.InputJsonValue)
+      : Prisma.JsonNull;
+  }
+  if (sanitized.afterFormatting !== undefined) {
+    updateData.afterFormatting = sanitized.afterFormatting
+      ? (sanitized.afterFormatting as unknown as Prisma.InputJsonValue)
+      : Prisma.JsonNull;
+  }
+  if (sanitized.beforeSample !== undefined) updateData.beforeSample = sanitized.beforeSample;
+  if (sanitized.afterSample !== undefined) updateData.afterSample = sanitized.afterSample;
+  if (sanitized.status !== undefined) updateData.status = sanitized.status;
 
   const updated = await prisma.blueprint.update({
     where: { id },

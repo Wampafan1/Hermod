@@ -2,14 +2,16 @@ import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { requireTierFeature } from "@/lib/tier-gate";
 import { parseExcelBuffer } from "@/lib/mjolnir/file-parser";
+import { cleanupExpiredMjolnirTempFiles, getMjolnirUserTempDir } from "@/lib/mjolnir/cleanup";
 import { randomUUID } from "crypto";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
-import { tmpdir } from "os";
 
 export const POST = withAuth(async (req, session) => {
   const denied = await requireTierFeature(session.tenantId, "mjolnirAiForge", "Mjölnir AI Forge");
   if (denied) return denied;
+
+  await cleanupExpiredMjolnirTempFiles({ maxEntries: 100 });
 
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
@@ -38,7 +40,7 @@ export const POST = withAuth(async (req, session) => {
   const buffer = Buffer.from(await file.arrayBuffer());
 
   // Save to temp directory
-  const userDir = join(tmpdir(), "hermod-mjolnir", session.user.id);
+  const userDir = getMjolnirUserTempDir(session.user.id);
   await mkdir(userDir, { recursive: true });
   await writeFile(join(userDir, `${fileId}.xlsx`), buffer);
 

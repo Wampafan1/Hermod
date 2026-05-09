@@ -42,3 +42,16 @@ export { fingerprintColumn, fingerprintAllColumns } from "./engine/fingerprint";
 
 // Style extraction
 export { extractStyleTemplate } from "./engine/style-extractor";
+
+// Retention
+export {
+  getMjolnirRetentionMode,
+  sanitizeBlueprintCreatePayload,
+  sanitizeAnalysisLog,
+  sanitizeForgeSteps,
+  sanitizeAfterFormatting,
+  sanitizeSampleFilename,
+  redactSampleValue,
+  isSensitiveSampleValueLike,
+} from "./retention";
+export type { MjolnirRetentionMode } from "./retention";

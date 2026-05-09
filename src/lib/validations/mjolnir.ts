@@ -2,6 +2,7 @@ import { z } from "zod";
 
 // ForgeStep validation
 export const forgeStepSchema = z.object({
+  stepId: z.string().optional(),
   order: z.number().int().min(0),
   type: z.enum([
     "remove_columns",
@@ -32,14 +33,19 @@ export const createBlueprintSchema = z.object({
   sourceSchema: z.record(z.unknown()).optional(),
   analysisLog: z.record(z.unknown()).optional(),
   afterFormatting: z.record(z.unknown()).optional(),
-  beforeSample: z.string().optional(),
-  afterSample: z.string().optional(),
+  beforeSample: z.string().nullable().optional(),
+  afterSample: z.string().nullable().optional(),
 });
 
 export const updateBlueprintSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).optional().nullable(),
   steps: z.array(forgeStepSchema).min(1).optional(),
+  sourceSchema: z.record(z.unknown()).optional().nullable(),
+  analysisLog: z.record(z.unknown()).optional().nullable(),
+  afterFormatting: z.record(z.unknown()).optional().nullable(),
+  beforeSample: z.string().optional().nullable(),
+  afterSample: z.string().optional().nullable(),
   status: z.enum(["DRAFT", "VALIDATED", "ACTIVE", "ARCHIVED"]).optional(),
 });
 

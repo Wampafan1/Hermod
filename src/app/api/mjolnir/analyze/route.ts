@@ -4,8 +4,8 @@ import { requireTierFeature } from "@/lib/tier-gate";
 import { analyzeSchema } from "@/lib/validations/mjolnir";
 import { readFile } from "fs/promises";
 import { join } from "path";
-import { tmpdir } from "os";
 import { parseExcelBuffer } from "@/lib/mjolnir/file-parser";
+import { cleanupExpiredMjolnirTempFiles, getMjolnirUserTempDir } from "@/lib/mjolnir/cleanup";
 import { computeStructuralDiff } from "@/lib/mjolnir/engine/structural-diff";
 import { runAiInference } from "@/lib/mjolnir/engine/ai-inference";
 import { extractStyleTemplate } from "@/lib/mjolnir/engine/style-extractor";
@@ -14,6 +14,8 @@ import { extractStyleTemplate } from "@/lib/mjolnir/engine/style-extractor";
 export const POST = withAuth(async (req, session) => {
   const denied = await requireTierFeature(session.tenantId, "mjolnirAiForge", "Mjölnir AI Forge");
   if (denied) return denied;
+
+  await cleanupExpiredMjolnirTempFiles({ maxEntries: 100 });
 
   const body = await req.json();
   const parsed = analyzeSchema.safeParse(body);
@@ -25,7 +27,7 @@ export const POST = withAuth(async (req, session) => {
   }
 
   const { beforeFileId, afterFileId, description } = parsed.data;
-  const userDir = join(tmpdir(), "hermod-mjolnir", session.user.id);
+  const userDir = getMjolnirUserTempDir(session.user.id);
 
   // Load uploaded files from temp storage
   let beforeBuffer: Buffer, afterBuffer: Buffer;

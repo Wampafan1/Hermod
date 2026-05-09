@@ -4,14 +4,16 @@ import { requireTierFeature } from "@/lib/tier-gate";
 import { validateSchema } from "@/lib/validations/mjolnir";
 import { readFile } from "fs/promises";
 import { join } from "path";
-import { tmpdir } from "os";
 import { parseExcelBuffer } from "@/lib/mjolnir/file-parser";
+import { cleanupExpiredMjolnirTempFiles, getMjolnirUserTempDir } from "@/lib/mjolnir/cleanup";
 import { validateBlueprint } from "@/lib/mjolnir/engine/validation";
 
 // POST /api/mjolnir/validate — validate a blueprint against BEFORE/AFTER data
 export const POST = withAuth(async (req, session) => {
   const denied = await requireTierFeature(session.tenantId, "mjolnirAiForge", "Mjölnir AI Forge");
   if (denied) return denied;
+
+  await cleanupExpiredMjolnirTempFiles({ maxEntries: 100 });
 
   const body = await req.json();
   const parsed = validateSchema.safeParse(body);
@@ -23,7 +25,7 @@ export const POST = withAuth(async (req, session) => {
   }
 
   const { steps, beforeFileId, afterFileId, mode } = parsed.data;
-  const userDir = join(tmpdir(), "hermod-mjolnir", session.user.id);
+  const userDir = getMjolnirUserTempDir(session.user.id);
 
   // Load uploaded files from temp storage
   let beforeBuffer: Buffer, afterBuffer: Buffer;

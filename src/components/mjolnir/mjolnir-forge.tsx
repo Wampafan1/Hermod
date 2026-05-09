@@ -254,6 +254,18 @@ export function MjolnirForge({ blueprints: initialBlueprints }: MjolnirForgeProp
     }
   }, [state, toast, router]);
 
+  const handleStartOver = useCallback(() => {
+    dispatch({ type: "RESET" });
+
+    void fetch("/api/mjolnir/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expiredOnly: false }),
+    }).catch(() => {
+      // Best-effort cleanup; local reset should never wait on temp file removal.
+    });
+  }, []);
+
   // ─── Step navigation helpers ──────────────────────
 
   function canNavigateTo(step: number): boolean {
@@ -578,6 +590,18 @@ export function MjolnirForge({ blueprints: initialBlueprints }: MjolnirForgeProp
                 />
               </div>
 
+              <div className="border border-gold/10 bg-void/40 p-3 max-w-2xl">
+                <p className="text-gold text-[0.625rem] tracking-[0.35em] uppercase font-bold">
+                  Privacy & Retention
+                </p>
+                <p className="text-text-dim text-xs tracking-wide leading-relaxed mt-2">
+                  Hermod stores transformation rules and formatting metadata.
+                  Sample files are temporary and cleaned up after save or expiry.
+                  Raw sample values are redacted by default, and filenames may be
+                  sanitized or omitted depending on the retention policy.
+                </p>
+              </div>
+
               {/* Summary */}
               <div className="flex flex-wrap gap-4 text-xs text-text-dim tracking-wide pt-2">
                 <span>
@@ -627,7 +651,7 @@ export function MjolnirForge({ blueprints: initialBlueprints }: MjolnirForgeProp
       {state.currentStep > 0 && !state.loading && (
         <div className="flex justify-end">
           <button
-            onClick={() => dispatch({ type: "RESET" })}
+            onClick={handleStartOver}
             className="btn-subtle"
           >
             Start Over

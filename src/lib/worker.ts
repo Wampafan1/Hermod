@@ -22,6 +22,7 @@ import {
 } from "./bifrost/helheim/dead-letter";
 import { inferSchemaFromRows, normalizeRowDates, getDateColumns } from "./bifrost/engine";
 import { getProvider, toConnectionLike } from "./providers";
+import { cleanupExpiredMjolnirTempFiles } from "./mjolnir/cleanup";
 import { mapWithConcurrency, withTimeout, safeErrorMessage } from "./async-utils";
 import {
   buildJobSingletonKey,
@@ -47,6 +48,11 @@ interface SendReportJob {
 async function main() {
   console.log("[Worker] Starting Hermod worker...");
   const startupCleanupNow = new Date();
+
+  const mjolnirCleanup = await cleanupExpiredMjolnirTempFiles({ now: startupCleanupNow });
+  if (mjolnirCleanup.deletedCount > 0) {
+    console.log(`[Worker] Cleaned up ${mjolnirCleanup.deletedCount} expired Mjolnir temp item(s)`);
+  }
 
   // Clean up stale "running" route logs from previous crashed runs
   const staleResult = await prisma.routeLog.updateMany({

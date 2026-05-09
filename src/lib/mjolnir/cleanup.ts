@@ -1,24 +1,213 @@
 /**
- * Mjolnir — Temp file cleanup utility.
+ * Mjolnir temp file cleanup utilities.
  *
- * Removes the per-user temporary directory used for uploaded
- * BEFORE/AFTER Excel files during the forge workflow.
+ * Uploaded BEFORE/AFTER workbooks live under:
+ *   tmpdir()/hermod-mjolnir/{userId}/{fileId}.xlsx
  */
 
-import { rm } from "fs/promises";
-import { join } from "path";
+import { readdir, rm, rmdir, stat } from "fs/promises";
+import { join, resolve, sep } from "path";
 import { tmpdir } from "os";
+
+const DEFAULT_TEMP_FILE_TTL_HOURS = 24;
+const DEFAULT_MAX_CLEANUP_ENTRIES = 250;
+
+export interface MjolnirCleanupResult {
+  deletedCount: number;
+}
+
+export interface ExpiredMjolnirTempCleanupOptions {
+  ttlHours?: number;
+  now?: Date;
+  maxEntries?: number;
+  userId?: string;
+}
+
+export function getMjolnirTempRoot(): string {
+  return join(tmpdir(), "hermod-mjolnir");
+}
+
+export function isSafeMjolnirTempPath(filePath: string): boolean {
+  const root = resolve(getMjolnirTempRoot());
+  const target = resolve(filePath);
+  const comparableRoot = normalizePathForCompare(root);
+  const comparableTarget = normalizePathForCompare(target);
+
+  return (
+    comparableTarget === comparableRoot ||
+    comparableTarget.startsWith(`${comparableRoot}${sep}`)
+  );
+}
+
+export function getMjolnirUserTempDir(userId: string): string {
+  return join(getMjolnirTempRoot(), sanitizeTempPathSegment(userId));
+}
+
+export async function cleanupMjolnirFile(filePath: string): Promise<number> {
+  if (!isSafeMjolnirTempPath(filePath)) {
+    return 0;
+  }
+
+  const deletedCount = await countEntries(filePath);
+  try {
+    await rm(filePath, { recursive: true, force: true });
+    return deletedCount;
+  } catch (err) {
+    logCleanupError("direct cleanup", err);
+    return 0;
+  }
+}
 
 /**
  * Remove all temporary Mjolnir files for a given user.
- * Silently ignores errors (files may already be gone or locked).
+ * Kept for existing call sites; errors are logged without sensitive filenames.
  */
 export async function cleanupUserTempFiles(userId: string): Promise<void> {
-  const userDir = join(tmpdir(), "hermod-mjolnir", userId);
-  try {
-    await rm(userDir, { recursive: true, force: true });
-  } catch (err) {
-    // Issue #18: Log errors instead of silently swallowing (Windows locked files can accumulate)
-    console.error(`[Mjolnir] Cleanup failed for ${userDir}:`, err instanceof Error ? err.message : err);
+  await cleanupMjolnirFile(getMjolnirUserTempDir(userId));
+}
+
+export async function cleanupExpiredMjolnirTempFiles(
+  options: ExpiredMjolnirTempCleanupOptions = {}
+): Promise<MjolnirCleanupResult> {
+  const ttlHours = resolveTtlHours(options.ttlHours);
+  const cutoffMs = (options.now ?? new Date()).getTime() - ttlHours * 60 * 60 * 1000;
+  const maxEntries = Math.max(1, options.maxEntries ?? DEFAULT_MAX_CLEANUP_ENTRIES);
+  const startPath = options.userId
+    ? getMjolnirUserTempDir(options.userId)
+    : getMjolnirTempRoot();
+
+  if (!isSafeMjolnirTempPath(startPath)) {
+    return { deletedCount: 0 };
   }
+
+  const state = {
+    visited: 0,
+    deletedCount: 0,
+    maxEntries,
+    cutoffMs,
+  };
+
+  await cleanupExpiredUnder(startPath, state);
+  return { deletedCount: state.deletedCount };
+}
+
+async function cleanupExpiredUnder(
+  currentPath: string,
+  state: {
+    visited: number;
+    deletedCount: number;
+    maxEntries: number;
+    cutoffMs: number;
+  }
+): Promise<boolean> {
+  if (state.visited >= state.maxEntries) return false;
+  if (!isSafeMjolnirTempPath(currentPath)) return false;
+
+  state.visited++;
+
+  let currentStat;
+  try {
+    currentStat = await stat(currentPath);
+  } catch {
+    return false;
+  }
+
+  if (!currentStat.isDirectory()) {
+    if (currentStat.mtimeMs < state.cutoffMs) {
+      state.deletedCount += await cleanupMjolnirFile(currentPath);
+      return true;
+    }
+    return false;
+  }
+
+  let entries;
+  try {
+    entries = await readdir(currentPath, { withFileTypes: true });
+  } catch (err) {
+    logCleanupError("read directory", err);
+    return false;
+  }
+
+  let hasRemainingEntries = false;
+  for (const entry of entries) {
+    if (state.visited >= state.maxEntries) {
+      hasRemainingEntries = true;
+      break;
+    }
+
+    const childPath = join(currentPath, entry.name);
+    const deleted = await cleanupExpiredUnder(childPath, state);
+    if (!deleted) hasRemainingEntries = true;
+  }
+
+  if (!hasRemainingEntries && currentPath !== getMjolnirTempRoot()) {
+    try {
+      await rmdir(currentPath);
+      state.deletedCount++;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+async function countEntries(filePath: string): Promise<number> {
+  if (!isSafeMjolnirTempPath(filePath)) return 0;
+
+  let currentStat;
+  try {
+    currentStat = await stat(filePath);
+  } catch {
+    return 0;
+  }
+
+  if (!currentStat.isDirectory()) return 1;
+
+  let count = 1;
+  try {
+    const entries = await readdir(filePath);
+    for (const entry of entries) {
+      count += await countEntries(join(filePath, entry));
+    }
+  } catch (err) {
+    logCleanupError("count entries", err);
+  }
+
+  return count;
+}
+
+function resolveTtlHours(explicitTtlHours?: number): number {
+  if (explicitTtlHours !== undefined && Number.isFinite(explicitTtlHours)) {
+    return Math.max(0, explicitTtlHours);
+  }
+
+  const parsed = Number(process.env.MJOLNIR_TEMP_FILE_TTL_HOURS);
+  if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  return DEFAULT_TEMP_FILE_TTL_HOURS;
+}
+
+function normalizePathForCompare(filePath: string): string {
+  const normalized = filePath.endsWith(sep) ? filePath.slice(0, -1) : filePath;
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function sanitizeTempPathSegment(segment: string): string {
+  return segment.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 160) || "unknown";
+}
+
+function logCleanupError(action: string, err: unknown): void {
+  const code = isErrorWithCode(err) ? err.code : undefined;
+  const label = code ?? (err instanceof Error ? err.name : "unknown error");
+  console.warn(`[Mjolnir] Temp cleanup ${action} failed (${label})`);
+}
+
+function isErrorWithCode(err: unknown): err is { code: string } {
+  return (
+    err !== null &&
+    typeof err === "object" &&
+    "code" in err &&
+    typeof (err as { code?: unknown }).code === "string"
+  );
 }

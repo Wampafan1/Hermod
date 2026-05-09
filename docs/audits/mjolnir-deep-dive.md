@@ -597,6 +597,104 @@ Validation results:
 - `npm run build`: compiled successfully and completed lint/type checking, then failed during Next page-data collection timeouts across many unrelated routes.
 - `npx tsc --noEmit --pretty false`: failed on pre-existing test type errors in backup, provider, Mjolnir engine, Raven jobs, and report runner tests; no errors pointed at the first hardening patch files.
 
+## Sensitive Retention Patch Results
+
+Files changed:
+
+- `src/lib/mjolnir/retention.ts`
+- `src/lib/mjolnir/cleanup.ts`
+- `src/lib/mjolnir/index.ts`
+- `src/lib/validations/mjolnir.ts`
+- `src/app/api/mjolnir/upload/route.ts`
+- `src/app/api/mjolnir/analyze/route.ts`
+- `src/app/api/mjolnir/validate/route.ts`
+- `src/app/api/mjolnir/blueprints/route.ts`
+- `src/app/api/mjolnir/blueprints/[id]/route.ts`
+- `src/app/api/mjolnir/cleanup/route.ts`
+- `src/components/mjolnir/mjolnir-forge.tsx`
+- `src/lib/worker.ts`
+- `src/__tests__/mjolnir/retention.test.ts`
+- `src/__tests__/mjolnir/temp-cleanup.test.ts`
+- `src/__tests__/mjolnir/retention-api.test.ts`
+- `docs/audits/mjolnir-deep-dive.md`
+
+Default retention mode:
+
+- Default is `MINIMAL`.
+- `FULL_DEBUG` is available only through explicit `MJOLNIR_RETENTION_MODE=FULL_DEBUG` or `MJOLNIR_SAMPLE_RETENTION_MODE=FULL_DEBUG`.
+- `STANDARD` can be selected through the same environment variables.
+
+What is redacted or omitted by default:
+
+- `Blueprint.beforeSample` and `Blueprint.afterSample` are stored as `null`.
+- `analysisLog.formatChanges` keeps structural fields such as `column` and `changeType`, but removes raw before/after/sample values.
+- raw sample row collections and AI prompt/sample context keys are omitted from retained metadata.
+- `afterFormatting.headerValues` is replaced with `{}` in `MINIMAL` mode.
+- forge step descriptions are scrubbed for sensitive quoted literals and before/after sample snippets.
+- forge step config literals are redacted when they look like sensitive sample values.
+- blueprint update now runs the same sanitizer for `steps`, `analysisLog`, `afterFormatting`, `sourceSchema`, `beforeSample`, and `afterSample`.
+
+What is still retained:
+
+- executable transformation structure: step order, type, confidence, column names, mappings, formula structure, format patterns, sort settings, and reorder metadata.
+- structural diff metadata such as matched/added/removed columns, row counts, sort detection, reorder detection, and ambiguous-case structural context.
+- formatting metadata needed to reproduce output shape: widths, row heights, styles, merges, freeze panes, data row styles, and formatting column mapping.
+- column names remain where needed for replay and schema validation.
+
+Temp file TTL and cleanup:
+
+- Temp root remains `tmpdir()/hermod-mjolnir`.
+- Default TTL is 24 hours.
+- TTL can be configured with `MJOLNIR_TEMP_FILE_TTL_HOURS`.
+- Expired cleanup is recursive, bounded for request-time calls, and path-safe.
+- Cleanup errors are logged without full sensitive filenames.
+- Expired cleanup runs in upload, analyze, validate, and worker startup.
+- Successful blueprint save still cleans the current user's temp directory.
+
+Cleanup endpoint:
+
+- Added `POST /api/mjolnir/cleanup`.
+- Requires `withAuth`.
+- Accepts only `{ expiredOnly?: boolean }`.
+- Rejects arbitrary path fields.
+- `expiredOnly: true` deletes only expired files for the current user.
+- `expiredOnly: false` deletes the current user's Mjolnir temp directory.
+- Returns `{ deletedCount }` when practical.
+
+UI changes:
+
+- The save step now shows a compact privacy and retention notice.
+- Start Over resets local state immediately and calls `POST /api/mjolnir/cleanup` with `expiredOnly: false` without blocking the UI.
+
+Tests added:
+
+- `src/__tests__/mjolnir/retention.test.ts`: filename sanitization, analysis log redaction, after-formatting header handling, forge step redaction, blueprint payload sanitization, and explicit `FULL_DEBUG` behavior.
+- `src/__tests__/mjolnir/temp-cleanup.test.ts`: expired deletion, non-expired preservation, outside-root safety, per-user cleanup, and traversal rejection.
+- `src/__tests__/mjolnir/retention-api.test.ts`: sanitized blueprint create/update persistence, auth-required cleanup endpoint, arbitrary-path rejection, and current-user cleanup.
+
+Validation results:
+
+- `npx prisma validate`: passed.
+- `npx prisma generate`: initially hit the known Windows EPERM Prisma DLL rename issue, then passed after moving `node_modules/.prisma` aside and regenerating.
+- `npm run test`: passed, 81 test files and 1139 tests.
+- `npm run build`: passed; pre-existing lint warnings were reported during the build.
+- `npm run lint`: passed with pre-existing warnings.
+
+What was intentionally not changed:
+
+- No backup code or backup behavior was changed.
+- No `tenantId` was added to `Blueprint`.
+- No ownership model migration was introduced.
+- No blueprint version pinning was introduced.
+- The AI prompt/sample-processing product decision remains deferred; this patch controls what is retained after analysis, not whether samples may be sent for AI analysis.
+
+Remaining product decisions:
+
+- tenant-level retention controls.
+- AI sample analysis opt-out.
+- personal vs tenant-published ownership.
+- immutable version pinning.
+
 ## Recommended Next Prompt
 
 Make the product decision for Mjolnir ownership and retention before the next schema change:
