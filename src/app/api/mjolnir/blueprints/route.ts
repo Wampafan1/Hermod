@@ -16,11 +16,18 @@ import {
 export const GET = withAuth(async (req, session) => {
   const url = new URL(req.url);
   const statusParam = url.searchParams.get("status");
+  const hasStatusFilter = url.searchParams.has("status");
   const includeId = url.searchParams.get("include");
 
   const where: Record<string, unknown> = { userId: session.user.id };
-  if (statusParam) {
-    const statuses = statusParam.split(",").map((s) => s.trim()).filter(Boolean);
+  if (hasStatusFilter) {
+    const statuses = (statusParam ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (statuses.length === 0) {
+      return NextResponse.json(
+        { error: "At least one blueprint status is required." },
+        { status: 400 }
+      );
+    }
     const invalidStatus = statuses.find((status) => !isBlueprintStatus(status));
     if (invalidStatus) {
       return NextResponse.json(
@@ -28,12 +35,10 @@ export const GET = withAuth(async (req, session) => {
         { status: 400 }
       );
     }
-    if (statuses.length > 0) {
-      where.OR = [
-        { status: { in: statuses } },
-        ...(includeId ? [{ id: includeId, userId: session.user.id }] : []),
-      ];
-    }
+    where.OR = [
+      { status: { in: statuses } },
+      ...(includeId ? [{ id: includeId, userId: session.user.id }] : []),
+    ];
   }
 
   const blueprints = await prisma.blueprint.findMany({

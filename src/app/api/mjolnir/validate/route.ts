@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { requireTierFeature } from "@/lib/tier-gate";
-import { validateSchema } from "@/lib/validations/mjolnir";
+import { validateParsedFileAnalysisLimits, validateSchema } from "@/lib/validations/mjolnir";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { parseExcelBuffer } from "@/lib/mjolnir/file-parser";
@@ -46,6 +46,17 @@ export const POST = withAuth(async (req, session) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to parse uploaded file";
     return NextResponse.json({ error: msg }, { status: 422 });
+  }
+
+  for (const [label, workbook] of [["BEFORE workbook", before], ["AFTER workbook", after]] as const) {
+    const limits = validateParsedFileAnalysisLimits({
+      columns: workbook.columns,
+      rowCount: workbook.rowCount,
+      label,
+    });
+    if (!limits.ok) {
+      return NextResponse.json({ error: limits.error }, { status: 400 });
+    }
   }
 
   // Run validation

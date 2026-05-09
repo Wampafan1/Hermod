@@ -2,16 +2,31 @@ import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { rollbackToVersion } from "@/lib/mjolnir/blueprint-versioning";
+import { rollbackBlueprintSchema } from "@/lib/validations/mjolnir";
 
 // POST /api/blueprints/[routeId]/rollback
 export const POST = withAuth(async (req, session) => {
   const routeId = req.url.split("/blueprints/")[1]?.split("/")[0];
-  const body = await req.json();
-  const { targetVersion, reason } = body;
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Malformed JSON body" }, { status: 400 });
+  }
 
-  if (!routeId || typeof targetVersion !== "number") {
+  const parsed = rollbackBlueprintSchema.safeParse(body);
+
+  if (!routeId) {
     return NextResponse.json({ error: "routeId and targetVersion are required" }, { status: 400 });
   }
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.errors[0].message },
+      { status: 400 }
+    );
+  }
+
+  const { targetVersion, reason } = parsed.data;
 
   const blueprint = await prisma.forgeBlueprint.findFirst({
     where: { routeId, route: { userId: session.user.id, tenantId: session.tenantId } },

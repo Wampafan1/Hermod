@@ -3,6 +3,7 @@ import { withAuth } from "@/lib/api";
 import { requireTierFeature } from "@/lib/tier-gate";
 import { parseExcelBuffer } from "@/lib/mjolnir/file-parser";
 import { cleanupExpiredMjolnirTempFiles, getMjolnirUserTempDir } from "@/lib/mjolnir/cleanup";
+import { validateParsedFileAnalysisLimits } from "@/lib/validations/mjolnir";
 import { randomUUID } from "crypto";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
@@ -45,7 +46,22 @@ export const POST = withAuth(async (req, session) => {
   await writeFile(join(userDir, `${fileId}.xlsx`), buffer);
 
   // Parse the file
-  const parsed = await parseExcelBuffer(buffer, file.name, fileId);
+  let parsed;
+  try {
+    parsed = await parseExcelBuffer(buffer, file.name, fileId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to parse uploaded file";
+    return NextResponse.json({ error: msg }, { status: 422 });
+  }
+
+  const limits = validateParsedFileAnalysisLimits({
+    columns: parsed.columns,
+    rowCount: parsed.rowCount,
+    label: "Uploaded workbook",
+  });
+  if (!limits.ok) {
+    return NextResponse.json({ error: limits.error }, { status: 400 });
+  }
 
   return NextResponse.json({
     fileId: parsed.fileId,

@@ -854,6 +854,50 @@ Remaining follow-ups:
 - publish-to-tenant flow.
 - legacy DRAFT attachment migration.
 
+## API Validation Hardening Patch Results
+
+Limits added:
+
+- `MAX_BLUEPRINT_STEPS = 100`.
+- `MAX_STEP_CONFIG_DEPTH = 8`.
+- `MAX_STEP_CONFIG_JSON_BYTES = 250,000`.
+- `MAX_ANALYSIS_LOG_JSON_BYTES = 500,000`.
+- `MAX_AFTER_FORMATTING_JSON_BYTES = 500,000`.
+- `MAX_BLUEPRINT_NAME_LENGTH = 200`.
+- `MAX_DESCRIPTION_LENGTH = 5,000`.
+- `MAX_UPLOAD_ROWS_FOR_ANALYSIS = 10,000`.
+- `MAX_UPLOAD_COLUMNS_FOR_ANALYSIS = 500`.
+
+What is rejected:
+
+- Blueprint create/update payloads with arbitrary status strings.
+- Empty or unknown `status` query filters on `GET /api/mjolnir/blueprints`.
+- Blueprint step arrays above the step cap.
+- Step configs that are not plain JSON objects.
+- Step configs with non-JSON values, excessive depth, circular references, too many entries, or excessive serialized byte size.
+- Oversized `sourceSchema`, `analysisLog`, and `afterFormatting` metadata.
+- Uploaded workbooks whose parsed row or column counts exceed the Mjolnir analysis caps.
+- Malformed rollback bodies, invalid rollback versions, and rollback reasons above the allowed length.
+
+What remains flexible:
+
+- Step configs are still schema-flexible by step type so existing valid forge workflows keep working.
+- Structural metadata, column names, formatting metadata, and validation evidence remain accepted within the size/depth limits.
+- Upload parsing still supports the existing `.xlsx` flow and workbook shape detection before enforcing the analysis caps.
+
+Tests added:
+
+- `src/__tests__/mjolnir/mjolnir-validation.test.ts`: valid create payloads, step count cap, huge/deep config rejection, invalid status rejection, status query rejection, oversized metadata rejection, upload row/column cap behavior, and rollback body validation.
+
+Validation results:
+
+- Focused Mjolnir validation test passed: 1 test file and 15 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 87 test files and 1200 tests.
+- `npm run build`: passed; pre-existing lint warnings were reported during the build.
+- `npm run lint`: passed with pre-existing warnings.
+
 ## Recommended Next Prompt
 
 Make the product decision for Mjolnir ownership and retention before the next schema change:
