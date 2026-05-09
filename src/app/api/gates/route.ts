@@ -9,7 +9,7 @@ import type { ConnectionType } from "@/lib/providers/types";
 import { readTempFile, deleteTempFile } from "@/lib/gates/temp-files";
 import { executePush } from "@/lib/gates/push-executor";
 import { analyzeCSV, analyzeExcel } from "@/lib/duckdb/file-analyzer";
-import { validateAttachableForgeBlueprint } from "@/lib/mjolnir/forge-blueprint-attach";
+import { validateRealmGateBlueprintAttachment } from "@/lib/mjolnir/realm-gate-blueprint-attach";
 
 // ─── GET /api/gates — list tenant gates ─────────────
 
@@ -44,6 +44,8 @@ export const GET = withAuth(async (_req, ctx) => {
         mergeStrategy: g.mergeStrategy,
         primaryKeyColumns: pkColumns,
         forgeEnabled: g.forgeEnabled,
+        blueprintVersionId: g.blueprintVersionId,
+        forgeBlueprintId: g.forgeBlueprintId,
         lastPushAt: g.lastPushAt?.toISOString() ?? null,
         pushCount: g.pushCount,
         createdAt: g.createdAt.toISOString(),
@@ -73,6 +75,7 @@ export const POST = withAuth(async (req, ctx) => {
     forgeEnabled,
     createTable,
     forgeBlueprintId,
+    blueprintVersionId,
   } = body as {
     name: string;
     tempFileId: string;
@@ -94,6 +97,7 @@ export const POST = withAuth(async (req, ctx) => {
     }>;
     forgeEnabled: boolean;
     forgeBlueprintId: string | null;
+    blueprintVersionId?: string | null;
   };
 
   // Resolve PK columns — prefer array, fall back to singular for backward compat
@@ -155,16 +159,17 @@ export const POST = withAuth(async (req, ctx) => {
     );
   }
 
-  const forgeBlueprintValidation = await validateAttachableForgeBlueprint({
-    forgeBlueprintId: forgeEnabled ? forgeBlueprintId : null,
+  const blueprintAttachment = await validateRealmGateBlueprintAttachment({
+    blueprintVersionId,
+    legacyForgeBlueprintId: forgeBlueprintId,
     tenantId: ctx.tenantId,
     userId: ctx.userId,
-    context: "realm-gate",
+    forgeEnabled: Boolean(forgeEnabled),
   });
-  if (!forgeBlueprintValidation.ok) {
+  if (!blueprintAttachment.ok) {
     return NextResponse.json(
-      { error: forgeBlueprintValidation.error },
-      { status: forgeBlueprintValidation.status }
+      { error: blueprintAttachment.error },
+      { status: blueprintAttachment.status }
     );
   }
 
@@ -245,9 +250,8 @@ export const POST = withAuth(async (req, ctx) => {
       columnMapping,
       savedSchema,
       forgeEnabled: forgeEnabled ?? false,
-      forgeBlueprintId: forgeEnabled
-        ? forgeBlueprintValidation.forgeBlueprint?.id ?? null
-        : null,
+      blueprintVersionId: blueprintAttachment.data.blueprintVersionId,
+      forgeBlueprintId: blueprintAttachment.data.forgeBlueprintId,
     },
     include: {
       connection: { select: { id: true, name: true, type: true } },

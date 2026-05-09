@@ -1393,6 +1393,58 @@ What is intentionally not changed:
 - `BifrostRoute.blueprintId` remains in schema and runtime fallback.
 - No legacy fallback removal was performed.
 
+## Phase 5 RealmGate Version Pinning Results
+
+RealmGate create/update behavior:
+
+- Added `src/lib/mjolnir/realm-gate-blueprint-attach.ts` for a version-first RealmGate attach path.
+- Gate create/update now accepts `blueprintVersionId` while preserving legacy `forgeBlueprintId`.
+- If both `blueprintVersionId` and `forgeBlueprintId` are provided, `blueprintVersionId` wins.
+- Pinned attachment stores `RealmGate.blueprintVersionId` and clears `RealmGate.forgeBlueprintId`.
+- Legacy Forge blueprint attachment still uses the existing `validateAttachableForgeBlueprint()` tenant/route boundary validation.
+- Invalid, cross-tenant, unlocked, non-tenant-published, DRAFT, or ARCHIVED BlueprintVersion attachments are rejected before persistence.
+
+RealmGate execution/push behavior:
+
+- Existing Gate push/key-hardening execution was intentionally left unchanged.
+- The current Gate push executor does not apply a separate ForgeBlueprint transform pipeline, so no new transform execution path was invented in this phase.
+- Pinned version metadata is now validated and persisted for RealmGates; legacy `forgeBlueprintId` fallback remains for existing gates.
+- Gate key-drift, staged upload, DDL preview/approval, and reviewed push behavior were not changed.
+
+UI selector behavior:
+
+- Gate creation can fetch `/api/mjolnir/published-blueprints?includeVersions=true`.
+- New Forge-enabled gates can save a published BlueprintVersion through `blueprintVersionId`.
+- Gate list/detail views show whether a gate is using pinned Forge metadata or a legacy Forge blueprint.
+- Pinned display shows version number and short `stepsHash` without exposing raw steps or analysis metadata.
+
+Usage helper:
+
+- `getBlueprintVersionUsage()` now includes RealmGates that reference a pinned `blueprintVersionId`.
+- Usage results include names, tenant context, status, and update time without exposing SQL, connection config, credentials, or push payloads.
+
+Tests added:
+
+- `src/__tests__/gates/realm-gate-blueprint-attach.test.ts`: no attachment when Forge is disabled, valid/cross-tenant/unlocked/DRAFT/ARCHIVED pinned versions, legacy valid/cross-tenant Forge blueprints, and version-wins behavior.
+- `src/__tests__/gates-api.test.ts`: Gate create/update storage for `blueprintVersionId`, legacy field clearing, invalid version rejection, and legacy Forge compatibility.
+
+Validation results:
+
+- Focused RealmGate attach/API tests passed: 2 test files and 24 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed after applying the existing Windows Prisma DLL-lock workaround.
+- `npm run test`: passed, 110 test files and 1394 tests.
+- `npm run build`: passed with existing lint warnings.
+- `npm run lint`: passed with existing warnings.
+
+What is intentionally not changed:
+
+- Report behavior was already handled in Phase 3 and was not changed here.
+- Bifrost behavior was already handled in Phase 4 and was not changed here.
+- No production backfill was added.
+- `RealmGate.forgeBlueprintId` remains in schema and legacy fallback.
+- No Gate key-hardening behavior was changed.
+
 ## Open Product Decisions
 
 1. Should published blueprint parent reuse `Blueprint` with `scope = TENANT_PUBLISHED`, or use a separate `PublishedBlueprint` model?

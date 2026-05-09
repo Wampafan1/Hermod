@@ -8,6 +8,7 @@ const {
   mockGatePushCreate,
   mockGatePushFindFirst,
   mockGatePushUpdate,
+  mockBlueprintVersionFindFirst,
   mockForgeBlueprintFindFirst,
   mockReadTempFile,
   mockDeleteTempFile,
@@ -21,6 +22,7 @@ const {
   mockGatePushCreate: vi.fn(),
   mockGatePushFindFirst: vi.fn(),
   mockGatePushUpdate: vi.fn(),
+  mockBlueprintVersionFindFirst: vi.fn(),
   mockForgeBlueprintFindFirst: vi.fn(),
   mockReadTempFile: vi.fn(),
   mockDeleteTempFile: vi.fn(),
@@ -53,6 +55,9 @@ vi.mock("@/lib/db", () => ({
       create: mockGatePushCreate,
       findFirst: mockGatePushFindFirst,
       update: mockGatePushUpdate,
+    },
+    blueprintVersion: {
+      findFirst: mockBlueprintVersionFindFirst,
     },
     forgeBlueprint: {
       findFirst: mockForgeBlueprintFindFirst,
@@ -137,6 +142,23 @@ function forgeBlueprint(overrides: Record<string, unknown> = {}) {
       id: "route_1",
       userId: "user_1",
       tenantId: "tenant_b",
+    },
+    ...overrides,
+  };
+}
+
+function blueprintVersion(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "bv_1",
+    blueprintId: "bp_published",
+    tenantId: "tenant_b",
+    version: 1,
+    steps: [{ type: "rename_columns" }],
+    stepsHash: "steps_hash",
+    isLocked: true,
+    blueprint: {
+      scope: "TENANT_PUBLISHED",
+      status: "VALIDATED",
     },
     ...overrides,
   };
@@ -302,6 +324,55 @@ describe("gates API", () => {
     }));
   });
 
+  it("creates gates with blueprintVersionId and clears legacy forgeBlueprintId", async () => {
+    setupSuccessfulCreate();
+    mockBlueprintVersionFindFirst.mockResolvedValue(blueprintVersion());
+    mockRealmGateCreate.mockResolvedValue({
+      id: "gate_1",
+      tenantId: "tenant_b",
+      name: "Tenant B gate",
+      forgeEnabled: true,
+      forgeBlueprintId: null,
+      blueprintVersionId: "bv_1",
+    });
+
+    const { POST } = await import("@/app/api/gates/route");
+    const response = await POST(gateCreateRequest("conn_tenant_b", {
+      forgeEnabled: true,
+      blueprintVersionId: "bv_1",
+      forgeBlueprintId: "forge_tenant_b",
+    }));
+
+    expect(response.status).toBe(201);
+    expect(mockRealmGateCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        forgeEnabled: true,
+        blueprintVersionId: "bv_1",
+        forgeBlueprintId: null,
+      }),
+    }));
+    expect(mockForgeBlueprintFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid blueprintVersionId on gate create", async () => {
+    mockConnectionFindFirst.mockResolvedValue({
+      id: "conn_tenant_b",
+      type: "POSTGRES",
+      config: {},
+      credentials: null,
+    });
+    mockBlueprintVersionFindFirst.mockResolvedValue(null);
+
+    const { POST } = await import("@/app/api/gates/route");
+    const response = await POST(gateCreateRequest("conn_tenant_b", {
+      forgeEnabled: true,
+      blueprintVersionId: "bv_missing",
+    }));
+
+    expect(response.status).toBe(404);
+    expect(mockRealmGateCreate).not.toHaveBeenCalled();
+  });
+
   it("rejects missing forgeBlueprintId on gate create", async () => {
     mockConnectionFindFirst.mockResolvedValue({
       id: "conn_tenant_b",
@@ -403,6 +474,92 @@ describe("gates API", () => {
     expect(JSON.stringify(payload)).not.toContain("do-not-return");
     expect(mockRealmGateCreate).not.toHaveBeenCalled();
     expect(mockRealmGateUpdate).not.toHaveBeenCalled();
+  });
+
+  it("stores blueprintVersionId on gate update and clears forgeBlueprintId", async () => {
+    mockRealmGateFindFirst.mockResolvedValue({
+      id: "gate_1",
+      tenantId: "tenant_b",
+      forgeEnabled: true,
+      forgeBlueprintId: "forge_tenant_b",
+      blueprintVersionId: null,
+    });
+    mockBlueprintVersionFindFirst.mockResolvedValue(blueprintVersion());
+    mockRealmGateUpdate.mockResolvedValue({
+      id: "gate_1",
+      forgeEnabled: true,
+      blueprintVersionId: "bv_1",
+      forgeBlueprintId: null,
+    });
+
+    const { PATCH } = await import("@/app/api/gates/[gateId]/route");
+    const response = await PATCH(gatePatchRequest({
+      forgeEnabled: true,
+      blueprintVersionId: "bv_1",
+      forgeBlueprintId: "forge_tenant_b",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mockRealmGateUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        forgeEnabled: true,
+        blueprintVersionId: "bv_1",
+        forgeBlueprintId: null,
+      }),
+    }));
+    expect(mockForgeBlueprintFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid blueprintVersionId on gate update", async () => {
+    mockRealmGateFindFirst.mockResolvedValue({
+      id: "gate_1",
+      tenantId: "tenant_b",
+      forgeEnabled: false,
+      forgeBlueprintId: null,
+      blueprintVersionId: null,
+    });
+    mockBlueprintVersionFindFirst.mockResolvedValue(null);
+
+    const { PATCH } = await import("@/app/api/gates/[gateId]/route");
+    const response = await PATCH(gatePatchRequest({
+      forgeEnabled: true,
+      blueprintVersionId: "bv_missing",
+    }));
+
+    expect(response.status).toBe(404);
+    expect(mockRealmGateUpdate).not.toHaveBeenCalled();
+  });
+
+  it("still supports legacy forgeBlueprintId on gate update", async () => {
+    mockRealmGateFindFirst.mockResolvedValue({
+      id: "gate_1",
+      tenantId: "tenant_b",
+      forgeEnabled: false,
+      forgeBlueprintId: null,
+      blueprintVersionId: null,
+    });
+    mockForgeBlueprintFindFirst.mockResolvedValue(forgeBlueprint());
+    mockRealmGateUpdate.mockResolvedValue({
+      id: "gate_1",
+      forgeEnabled: true,
+      forgeBlueprintId: "forge_tenant_b",
+      blueprintVersionId: null,
+    });
+
+    const { PATCH } = await import("@/app/api/gates/[gateId]/route");
+    const response = await PATCH(gatePatchRequest({
+      forgeEnabled: true,
+      forgeBlueprintId: "forge_tenant_b",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mockRealmGateUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        forgeEnabled: true,
+        blueprintVersionId: null,
+        forgeBlueprintId: "forge_tenant_b",
+      }),
+    }));
   });
 
   it("clears staged gate pushes and deletes their temp file", async () => {

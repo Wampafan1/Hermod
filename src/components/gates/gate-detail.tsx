@@ -73,6 +73,17 @@ interface GateData {
   primaryKeyColumns: unknown;
   mergeStrategy: string;
   forgeEnabled: boolean;
+  forgeBlueprintId?: string | null;
+  forgeBlueprint?: { id: string; name: string; status: string } | null;
+  blueprintVersionId?: string | null;
+  blueprintVersion?: {
+    id: string;
+    blueprintId: string;
+    version: number;
+    stepsHash: string;
+    isLocked: boolean;
+    blueprint?: { id: string; name: string; status: string; scope: string } | null;
+  } | null;
   lastPushAt: string | null;
   pushCount: number;
   pushes: GatePush[];
@@ -461,6 +472,17 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
             {gate.connection.name} → {gate.targetSchema ? `${gate.targetSchema}.` : ""}
             {gate.targetTable} · {gate.mergeStrategy === "UPSERT" ? `Upsert on ${(Array.isArray(gate.primaryKeyColumns) ? (gate.primaryKeyColumns as string[]) : []).join(" + ")}` : gate.mergeStrategy.replace(/_/g, " ")}
           </p>
+          {gate.forgeEnabled && gate.blueprintVersion && (
+            <p className="font-inconsolata text-frost text-[10px] mt-2">
+              Pinned Forge: {gate.blueprintVersion.blueprint?.name ?? "Published blueprint"} v{gate.blueprintVersion.version}
+              {gate.blueprintVersion.stepsHash ? ` - ${gate.blueprintVersion.stepsHash.slice(0, 12)}` : ""}
+            </p>
+          )}
+          {gate.forgeEnabled && !gate.blueprintVersion && gate.forgeBlueprint && (
+            <p className="font-inconsolata text-amber-400 text-[10px] mt-2">
+              Legacy Forge blueprint: {gate.forgeBlueprint.name}. Select a published version on update to pin execution.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={gate.status} />

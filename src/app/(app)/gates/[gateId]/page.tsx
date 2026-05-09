@@ -17,6 +17,16 @@ export default async function GateDetailPage({ params }: Props) {
     include: {
       connection: { select: { id: true, name: true, type: true } },
       forgeBlueprint: { select: { id: true, name: true, status: true } },
+      blueprintVersion: {
+        select: {
+          id: true,
+          blueprintId: true,
+          version: true,
+          stepsHash: true,
+          isLocked: true,
+          blueprint: { select: { id: true, name: true, status: true, scope: true } },
+        },
+      },
       pushes: {
         orderBy: { createdAt: "desc" },
         take: 20,

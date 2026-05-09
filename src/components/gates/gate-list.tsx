@@ -19,6 +19,9 @@ interface GateItem {
   targetSchema: string | null;
   mergeStrategy: string;
   primaryKeyColumns: unknown;
+  forgeEnabled: boolean;
+  blueprintVersionId: string | null;
+  forgeBlueprintId: string | null;
   lastPushAt: string | null;
   pushCount: number;
   latestPushStatus: string | null;
@@ -49,6 +52,13 @@ function GateCard({ gate, now }: { gate: GateItem; now: number }) {
   const isVanaheim = gate.realmType === "VANAHEIM";
   const realmColor = isVanaheim ? "#7eb8d4" : "#a1887f";
   const needsKeyReview = gate.latestPushStatus === "KEY_DRIFT";
+  const forgeMode = gate.forgeEnabled
+    ? gate.blueprintVersionId
+      ? "Pinned Forge"
+      : gate.forgeBlueprintId
+        ? "Legacy Forge"
+        : "Forge ready"
+    : null;
 
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
@@ -135,6 +145,11 @@ function GateCard({ gate, now }: { gate: GateItem; now: number }) {
           title={gate.status}
         />
         <span className="badge-neutral">{gate.mergeStrategy.replace(/_/g, " ")}</span>
+        {forgeMode && (
+          <span className={gate.blueprintVersionId ? "text-frost" : "text-amber-400"}>
+            {forgeMode}
+          </span>
+        )}
         {gate.pushCount > 0 && (
           <span>{gate.pushCount} push{gate.pushCount !== 1 ? "es" : ""}</span>
         )}

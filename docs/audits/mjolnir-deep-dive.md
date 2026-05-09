@@ -1161,3 +1161,13 @@ Do not start the migration until those product decisions are made.
 - Bifrost execution and Raven resume now prefer pinned `BlueprintVersion.steps` when present.
 - Legacy routes with only `BifrostRoute.blueprintId` still execute through the mutable fallback and retain the legacy execution warning.
 - Report behavior remains as implemented in Phase 3, and RealmGate execution remains unchanged until its dedicated pinning phase.
+
+## RealmGate Version Pinning Note
+
+- RealmGates can now attach to tenant-published immutable `BlueprintVersion` records through `blueprintVersionId`.
+- Gate create/update prefers `blueprintVersionId` over legacy `forgeBlueprintId` and validates tenant, lock state, parent scope, and parent status.
+- Pinned RealmGate attachments clear legacy `forgeBlueprintId`; legacy Forge blueprint attachments remain supported for migration compatibility.
+- Gate creation UI can select published BlueprintVersion records, and Gate list/detail views show pinned vs legacy Forge cues.
+- The current Gate push executor does not apply a separate ForgeBlueprint transform pipeline, so push/key-hardening execution behavior remains unchanged in this pass.
+- Tests added/updated: `src/__tests__/gates/realm-gate-blueprint-attach.test.ts` and `src/__tests__/gates-api.test.ts`.
+- Validation passed: `npx prisma validate`, `npx prisma generate`, `npm run test`, `npm run build`, and `npm run lint`.

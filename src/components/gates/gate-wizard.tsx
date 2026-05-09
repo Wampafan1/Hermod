@@ -109,6 +109,18 @@ interface TableInfo {
   columns: Array<{ name: string; type: string }>;
 }
 
+interface PublishedBlueprintOption {
+  id: string;
+  name: string;
+  status: string;
+  latestVersion?: {
+    id: string;
+    version: number;
+    stepsHash: string;
+    isLocked: boolean;
+  } | null;
+}
+
 // ─── Helpers ────────────────────────────────────────
 
 /** Convert the unified primaryKey response into a UCCResult for PKDetectionPanel */
@@ -294,6 +306,9 @@ export function GateWizard() {
   const [columnMapping, setColumnMapping] = useState<MappingRow[]>([]);
   const [showAllColumns, setShowAllColumns] = useState(false);
   const [forgeEnabled, setForgeEnabled] = useState(false);
+  const [blueprintVersionId, setBlueprintVersionId] = useState<string | null>(null);
+  const [publishedBlueprints, setPublishedBlueprints] = useState<PublishedBlueprintOption[]>([]);
+  const [loadingPublishedBlueprints, setLoadingPublishedBlueprints] = useState(false);
   const [sealing, setSealing] = useState(false);
 
   // On-demand table loading
@@ -467,6 +482,48 @@ export function GateWizard() {
       cancelled = true;
     };
   }, [selectedConnectionId, toast]);
+
+  useEffect(() => {
+    if (!forgeEnabled) {
+      setBlueprintVersionId(null);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingPublishedBlueprints(true);
+
+    fetch("/api/mjolnir/published-blueprints?includeVersions=true")
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load published blueprints");
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const options = (data.blueprints ?? []).filter(
+          (blueprint: PublishedBlueprintOption) => blueprint.latestVersion?.id
+        );
+        setPublishedBlueprints(options);
+        setBlueprintVersionId((current) =>
+          current && options.some((option: PublishedBlueprintOption) => option.latestVersion?.id === current)
+            ? current
+            : options[0]?.latestVersion?.id ?? null
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPublishedBlueprints([]);
+          setBlueprintVersionId(null);
+          toast.error("Failed to load published Forge blueprints");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPublishedBlueprints(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [forgeEnabled, toast]);
 
   // Re-compute column mapping when table selection changes
   useEffect(() => {
@@ -679,8 +736,9 @@ export function GateWizard() {
                 destinationColumn: m.destinationColumn,
                 sourceType: m.sourceType,
                 destType: m.destType,
-              })),
+          })),
           forgeEnabled,
+          blueprintVersionId: forgeEnabled ? blueprintVersionId : null,
           forgeBlueprintId: null,
         }),
       });
@@ -723,6 +781,7 @@ export function GateWizard() {
     writeMode,
     mappedColumns,
     forgeEnabled,
+    blueprintVersionId,
     toast,
   ]);
 
@@ -1000,10 +1059,37 @@ export function GateWizard() {
                   <span className="text-text-dim text-xs tracking-wide">Route through the Forge</span>
                 </label>
                 {forgeEnabled && (
-                  <p className="text-text-dim text-[10px] mt-1.5 pl-5">
-                    Forge blueprints can be created in{" "}
-                    <a href="/mjolnir" className="text-gold hover:underline">Mjolnir</a>.
-                  </p>
+                  <div className="mt-2 pl-5 space-y-2">
+                    {loadingPublishedBlueprints ? (
+                      <p className="text-text-dim text-[10px]">Loading published Forge blueprints...</p>
+                    ) : publishedBlueprints.length > 0 ? (
+                      <>
+                        <select
+                          value={blueprintVersionId ?? ""}
+                          onChange={(e) => setBlueprintVersionId(e.target.value || null)}
+                          className="select-norse text-xs"
+                        >
+                          <option value="">No pinned blueprint</option>
+                          {publishedBlueprints.map((blueprint) => (
+                            <option key={blueprint.latestVersion?.id ?? blueprint.id} value={blueprint.latestVersion?.id ?? ""}>
+                              {blueprint.name} ({blueprint.status}) v{blueprint.latestVersion?.version}
+                            </option>
+                          ))}
+                        </select>
+                        {blueprintVersionId && (
+                          <p className="text-frost text-[10px] font-inconsolata">
+                            Gate pushes will reference this published BlueprintVersion. Legacy Forge blueprints stay supported for existing gates.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-text-dim text-[10px]">
+                        Publish a validated blueprint from{" "}
+                        <a href="/mjolnir" className="text-gold hover:underline">Mjolnir</a>{" "}
+                        to pin Forge execution.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
