@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { decrypt } from "@/lib/crypto";
@@ -6,6 +7,12 @@ import { getProvider } from "@/lib/providers";
 import { readTempFile, deleteTempFile } from "@/lib/gates/temp-files";
 import { executePush } from "@/lib/gates/push-executor";
 import { analyzeCSV, analyzeExcel } from "@/lib/duckdb/file-analyzer";
+import {
+  generateAlterStatements,
+  mapSchemaDiffToDestination,
+  type GateColumnMapping,
+} from "@/lib/gates/alter-generator";
+import type { SchemaDiff } from "@/lib/gates/schema-diff";
 
 // ─── POST /api/gates/[gateId]/push/[pushId]/resolve ──
 
@@ -65,6 +72,51 @@ export const POST = withAuth(async (req, ctx) => {
       return NextResponse.json({ error: "Gate not found" }, { status: 404 });
     }
 
+    const existingMapping = gate.columnMapping as unknown as GateColumnMapping[];
+    const sourceDiff = (push.schemaDiff ?? {
+      added: [],
+      removed: [],
+      typeChanged: [],
+    }) as unknown as SchemaDiff;
+    const destinationDiff = mapSchemaDiffToDestination(sourceDiff, existingMapping);
+    const generatedStatements = generateAlterStatements(
+      gate.connection.type,
+      gate.targetSchema || "public",
+      gate.targetTable,
+      destinationDiff,
+      sourceDiff
+    );
+    const generatedExecutableSql = new Set(
+      generatedStatements.filter((stmt) => !stmt.isComment).map((stmt) => stmt.sql)
+    );
+    const confirmedSql = new Set(confirmedStatements ?? []);
+    const unknownStatements = [...confirmedSql].filter((sql) => !generatedExecutableSql.has(sql));
+
+    if (unknownStatements.length > 0) {
+      return NextResponse.json(
+        { error: "One or more confirmed schema changes no longer match the expected drift plan" },
+        { status: 400 }
+      );
+    }
+
+    const confirmedAddedColumns = new Map(
+      generatedStatements
+        .filter(
+          (stmt) =>
+            !stmt.isComment &&
+            stmt.sourceColumn &&
+            stmt.destinationColumn &&
+            confirmedSql.has(stmt.sql)
+        )
+        .map((stmt) => [
+          stmt.sourceColumn!.toLowerCase(),
+          {
+            sourceColumn: stmt.sourceColumn!,
+            destinationColumn: stmt.destinationColumn!,
+          },
+        ])
+    );
+
     // Execute ALTER statements if requested
     if (executeStatements && confirmedStatements && confirmedStatements.length > 0) {
       const conn = gate.connection;
@@ -84,10 +136,9 @@ export const POST = withAuth(async (req, ctx) => {
       });
 
       try {
-        for (const stmt of confirmedStatements) {
-          // Skip comments
-          if (stmt.trim().startsWith("--")) continue;
-          await provider.query(providerConn, stmt);
+        for (const stmt of generatedStatements) {
+          if (stmt.isComment || !confirmedSql.has(stmt.sql)) continue;
+          await provider.query(providerConn, stmt.sql);
         }
       } finally {
         await providerConn.close();
@@ -105,33 +156,31 @@ export const POST = withAuth(async (req, ctx) => {
                 delimiter: tempFile.extension === ".tsv" ? "\t" : undefined,
               });
 
-        // Update saved schema to match the new file
-        const newSavedSchema = analysis.columns.map((c) => ({
+        const existingSourceCols = new Set(
+          existingMapping.map((m) => m.sourceColumn.toLowerCase())
+        );
+        const acceptedColumns = analysis.columns.filter((c) =>
+          existingSourceCols.has(c.name.toLowerCase()) ||
+          confirmedAddedColumns.has(c.name.toLowerCase())
+        );
+
+        // Update saved schema to match the accepted destination shape.
+        const newSavedSchema = acceptedColumns.map((c) => ({
           name: c.name,
           duckdbType: c.duckdbType,
           inferredType: c.inferredType,
           nullable: c.nullable,
         }));
 
-        // Update column mapping for any newly added columns
-        const existingMapping = gate.columnMapping as Array<{
-          sourceColumn: string;
-          destinationColumn: string;
-          sourceType: string;
-          destType: string;
-        }>;
-
-        const existingSourceCols = new Set(
-          existingMapping.map((m) => m.sourceColumn.toLowerCase())
-        );
-
+        // Update column mapping for any newly accepted columns.
         const newMappings = [...existingMapping];
         for (const col of analysis.columns) {
-          if (!existingSourceCols.has(col.name.toLowerCase())) {
-            // New column — map to same name
+          const confirmedAdded = confirmedAddedColumns.get(col.name.toLowerCase());
+          if (!existingSourceCols.has(col.name.toLowerCase()) && confirmedAdded) {
+            // New column: map to the same destination name used by the ALTER SQL.
             newMappings.push({
               sourceColumn: col.name,
-              destinationColumn: col.name,
+              destinationColumn: confirmedAdded.destinationColumn,
               sourceType: col.duckdbType,
               destType: col.duckdbType,
             });
@@ -142,7 +191,7 @@ export const POST = withAuth(async (req, ctx) => {
           where: { id: gateId },
           data: {
             savedSchema: newSavedSchema,
-            columnMapping: newMappings,
+            columnMapping: newMappings as unknown as Prisma.InputJsonValue,
           },
         });
 

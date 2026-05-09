@@ -10,6 +10,9 @@ import { decrypt } from "@/lib/crypto";
 import { getProvider } from "@/lib/providers";
 import { createAnalyticsSession } from "@/lib/duckdb/engine";
 import type { DestConfig, LoadResult } from "@/lib/bifrost/types";
+import type { ConnectionProvider } from "@/lib/providers/provider";
+import type { ProviderConnection } from "@/lib/providers/types";
+import { normalizeDestinationColumnName } from "./alter-generator";
 import { fullSqlTableRef, quoteSqlIdentifier } from "./sql-identifiers";
 
 // ─── Types ──────────────────────────────────────────
@@ -76,15 +79,7 @@ export async function executePush(
   }
 
   // 2. Map columns: rename source → destination
-  const mappedRows = rows.map((row) => {
-    const mapped: Record<string, unknown> = {};
-    for (const col of columnMapping) {
-      mapped[col.destinationColumn] = row[col.sourceColumn] ?? null;
-    }
-    return mapped;
-  });
-
-  // 3. Connect to destination
+  // 2. Connect to destination
   const conn = gate.connection;
   const provider = getProvider(conn.type);
   const credentials = conn.credentials ? JSON.parse(decrypt(conn.credentials)) : {};
@@ -95,13 +90,29 @@ export async function executePush(
   });
 
   try {
+    const effectiveColumnMapping = await resolveDestinationColumnMapping(
+      provider,
+      providerConn,
+      gate,
+      columnMapping
+    );
+
+    // 3. Map columns: rename source to destination
+    const mappedRows = rows.map((row) => {
+      const mapped: Record<string, unknown> = {};
+      for (const col of effectiveColumnMapping) {
+        mapped[col.destinationColumn] = row[col.sourceColumn] ?? null;
+      }
+      return mapped;
+    });
+
     // 4. Execute based on merge strategy
     let result: PushResult;
 
     if (mergeStrategy === "TRUNCATE_RELOAD") {
       result = await truncateAndLoad(provider, providerConn, gate, mappedRows);
     } else if (mergeStrategy === "UPSERT") {
-      result = await upsertRows(provider, providerConn, gate, primaryKeyColumns, mappedRows, columnMapping);
+      result = await upsertRows(provider, providerConn, gate, primaryKeyColumns, mappedRows, effectiveColumnMapping);
     } else {
       // APPEND
       result = await appendRows(provider, providerConn, gate, mappedRows);
@@ -153,6 +164,42 @@ export async function executePush(
 }
 
 // ─── Strategy Implementations ───────────────────────
+
+async function resolveDestinationColumnMapping(
+  provider: ConnectionProvider,
+  conn: ProviderConnection,
+  gate: { targetSchema: string | null; targetTable: string },
+  columnMapping: ColumnMap[]
+): Promise<ColumnMap[]> {
+  if (!provider.getSchema) return columnMapping;
+
+  try {
+    const schema = await provider.getSchema(
+      conn,
+      gate.targetSchema || "public",
+      gate.targetTable
+    );
+    const destinationColumns = new Set(
+      schema?.fields.map((field) => field.name.toLowerCase()) ?? []
+    );
+    if (destinationColumns.size === 0) return columnMapping;
+
+    return columnMapping.map((mapping) => {
+      if (destinationColumns.has(mapping.destinationColumn.toLowerCase())) {
+        return mapping;
+      }
+
+      const normalized = normalizeDestinationColumnName(mapping.sourceColumn);
+      if (destinationColumns.has(normalized.toLowerCase())) {
+        return { ...mapping, destinationColumn: normalized };
+      }
+
+      return mapping;
+    });
+  } catch {
+    return columnMapping;
+  }
+}
 
 async function truncateAndLoad(
   provider: ReturnType<typeof getProvider>,

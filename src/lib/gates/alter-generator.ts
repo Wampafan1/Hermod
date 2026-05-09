@@ -17,6 +17,15 @@ export interface AlterStatement {
   description: string;
   isComment: boolean; // true for informational-only lines (not executable)
   warning?: string;
+  sourceColumn?: string;
+  destinationColumn?: string;
+}
+
+export interface GateColumnMapping {
+  sourceColumn: string;
+  destinationColumn: string;
+  sourceType?: string;
+  destType?: string | null;
 }
 
 // ─── Dialect mapping (mirrors alfheim/ddl-generator TYPE_MAP) ───
@@ -63,20 +72,102 @@ function mapDuckdbTypeToDialect(duckdbType: string, dialect: SqlDialect): string
   return TYPE_MAP[hermod]?.[dialect] ?? TYPE_MAP["STRING"][dialect];
 }
 
+export function normalizeDestinationColumnName(sourceColumn: string): string {
+  return sourceColumn.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+}
+
+function findMappedDestinationColumn(
+  sourceColumn: string,
+  columnMapping: GateColumnMapping[]
+): string | null {
+  const mapped = columnMapping.find(
+    (m) => m.sourceColumn.toLowerCase() === sourceColumn.toLowerCase()
+  );
+  return mapped?.destinationColumn ?? null;
+}
+
+function prefersNormalizedDestinationNames(columnMapping: GateColumnMapping[]): boolean {
+  let normalizedMatches = 0;
+  let rawMatches = 0;
+
+  for (const mapping of columnMapping) {
+    if (mapping.destinationColumn === normalizeDestinationColumnName(mapping.sourceColumn)) {
+      normalizedMatches++;
+    }
+    if (mapping.destinationColumn === mapping.sourceColumn) {
+      rawMatches++;
+    }
+  }
+
+  return normalizedMatches >= rawMatches;
+}
+
+export function inferDestinationColumnName(
+  sourceColumn: string,
+  columnMapping: GateColumnMapping[],
+  usedDestinationColumns: Set<string> = new Set(
+    columnMapping.map((m) => m.destinationColumn.toLowerCase())
+  )
+): string {
+  const existing = findMappedDestinationColumn(sourceColumn, columnMapping);
+  if (existing) return existing;
+
+  const base = prefersNormalizedDestinationNames(columnMapping)
+    ? normalizeDestinationColumnName(sourceColumn)
+    : sourceColumn;
+  let candidate = base || "column";
+  let suffix = 2;
+
+  while (usedDestinationColumns.has(candidate.toLowerCase())) {
+    candidate = `${base || "column"}_${suffix}`;
+    suffix++;
+  }
+
+  usedDestinationColumns.add(candidate.toLowerCase());
+  return candidate;
+}
+
+export function mapSchemaDiffToDestination(
+  diff: SchemaDiff,
+  columnMapping: GateColumnMapping[]
+): SchemaDiff {
+  const usedDestinationColumns = new Set(
+    columnMapping.map((m) => m.destinationColumn.toLowerCase())
+  );
+
+  return {
+    added: diff.added.map((col) => ({
+      ...col,
+      name: inferDestinationColumnName(col.name, columnMapping, usedDestinationColumns),
+    })),
+    removed: diff.removed.map((col) => ({
+      ...col,
+      name: findMappedDestinationColumn(col.name, columnMapping) ?? col.name,
+    })),
+    typeChanged: diff.typeChanged.map((col) => ({
+      ...col,
+      name: findMappedDestinationColumn(col.name, columnMapping) ?? col.name,
+    })),
+  };
+}
+
 // ─── Generator ──────────────────────────────────────
 
 export function generateAlterStatements(
   connectionType: string,
   schema: string,
   table: string,
-  diff: SchemaDiff
+  diff: SchemaDiff,
+  sourceDiff?: SchemaDiff
 ): AlterStatement[] {
   const dialect = connectionTypeToDialect(connectionType);
   const tableRef = fullTableRef(schema, table, dialect);
   const statements: AlterStatement[] = [];
 
   // Added columns → ADD COLUMN
-  for (const col of diff.added) {
+  for (let idx = 0; idx < diff.added.length; idx++) {
+    const col = diff.added[idx];
+    const sourceCol = sourceDiff?.added[idx];
     const destType = mapDuckdbTypeToDialect(col.type, dialect);
     const colRef = quoteIdent(col.name, dialect);
 
@@ -95,8 +186,12 @@ export function generateAlterStatements(
 
     statements.push({
       sql,
-      description: `Add column: ${col.name} (${destType})`,
+      description: sourceCol && sourceCol.name !== col.name
+        ? `Add column: ${sourceCol.name} -> ${col.name} (${destType})`
+        : `Add column: ${col.name} (${destType})`,
       isComment: false,
+      sourceColumn: sourceCol?.name ?? col.name,
+      destinationColumn: col.name,
     });
   }
 

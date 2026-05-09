@@ -101,6 +101,16 @@ function relativeTime(iso: string, now: number): string {
   return `${days}d ago`;
 }
 
+const CLEARABLE_PUSH_STATUSES = new Set(["VALIDATING", "VALIDATED", "SCHEMA_DRIFT", "FAILED"]);
+
+function canClearPush(status: string): boolean {
+  return CLEARABLE_PUSH_STATUSES.has(status);
+}
+
+function clearPushLabel(status: string): string {
+  return status === "FAILED" ? "Clear failed attempt" : "Clear staged push";
+}
+
 // ─── Main Component ─────────────────────────────────
 
 export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; initialNow: number }) {
@@ -128,6 +138,7 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
   const [resolving, setResolving] = useState(false);
 
   const [expandedPush, setExpandedPush] = useState<string | null>(null);
+  const [clearingPushId, setClearingPushId] = useState<string | null>(null);
 
   // ── Drop handler ──────────────────────────────────
 
@@ -327,6 +338,45 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
     setError(null);
   }, []);
 
+  const clearPush = useCallback(
+    async (pushId: string) => {
+      setClearingPushId(pushId);
+      try {
+        const res = await fetch(`/api/gates/${gate.id}/push/${pushId}`, {
+          method: "DELETE",
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          toast.error((data as { error?: string }).error || "Unable to clear push attempt");
+          return false;
+        }
+
+        if (validation?.pushId === pushId) {
+          resetPush();
+        }
+        setExpandedPush((current) => (current === pushId ? null : current));
+        toast.success("Push attempt cleared");
+        await refreshGate();
+        return true;
+      } catch {
+        toast.error("Network error while clearing push attempt");
+        return false;
+      } finally {
+        setClearingPushId(null);
+      }
+    },
+    [gate.id, refreshGate, resetPush, toast, validation?.pushId]
+  );
+
+  const cancelCurrentPush = useCallback(() => {
+    if (validation?.pushId) {
+      void clearPush(validation.pushId);
+      return;
+    }
+    resetPush();
+  }, [clearPush, resetPush, validation?.pushId]);
+
   // ── Render ────────────────────────────────────────
 
   return (
@@ -471,7 +521,7 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
           }}
           onAdjustFile={resolveAdjustFile}
           onAdjustDestination={resolveAdjustDestination}
-          onCancel={resetPush}
+          onCancel={cancelCurrentPush}
           resolving={resolving}
         />
       )}
@@ -533,34 +583,51 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
                     {p.errorMessage && (
                       <div className="text-red-400 font-inconsolata">{p.errorMessage}</div>
                     )}
-                    {p.status === "VALIDATED" && (
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          setPushState("pushing");
-                          try {
-                            const res = await fetch(`/api/gates/${gate.id}/push/${p.id}/execute`, {
-                              method: "POST",
-                            });
-                            const data = await res.json();
-                            if (!res.ok) {
-                              setError(data.error || "Push failed");
-                              setPushState("failed");
-                              return;
-                            }
-                            setPushResult(data);
-                            setPushState("success");
-                            toast.success(`Pushed ${data.rowCount?.toLocaleString()} rows`);
-                            refreshGate();
-                          } catch {
-                            setError("Network error");
-                            setPushState("failed");
-                          }
-                        }}
-                        className="btn-primary text-[10px] px-3 py-1 mt-2"
-                      >
-                        Execute now
-                      </button>
+                    {(p.status === "VALIDATED" || canClearPush(p.status)) && (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {p.status === "VALIDATED" && (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              setPushState("pushing");
+                              try {
+                                const res = await fetch(`/api/gates/${gate.id}/push/${p.id}/execute`, {
+                                  method: "POST",
+                                });
+                                const data = await res.json();
+                                if (!res.ok) {
+                                  setError(data.error || "Push failed");
+                                  setPushState("failed");
+                                  return;
+                                }
+                                setPushResult(data);
+                                setPushState("success");
+                                toast.success(`Pushed ${data.rowCount?.toLocaleString()} rows`);
+                                refreshGate();
+                              } catch {
+                                setError("Network error");
+                                setPushState("failed");
+                              }
+                            }}
+                            disabled={clearingPushId === p.id}
+                            className="btn-primary text-[10px] px-3 py-1"
+                          >
+                            Execute now
+                          </button>
+                        )}
+                        {canClearPush(p.status) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void clearPush(p.id);
+                            }}
+                            disabled={clearingPushId === p.id}
+                            className="btn-ghost text-[10px] px-3 py-1"
+                          >
+                            {clearingPushId === p.id ? "Clearing..." : clearPushLabel(p.status)}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

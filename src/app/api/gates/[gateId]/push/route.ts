@@ -3,8 +3,12 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { analyzeFile, FileAnalysisError } from "@/lib/duckdb/file-analyzer";
-import { computeSchemaDiff, type SavedColumn } from "@/lib/gates/schema-diff";
-import { generateAlterStatements } from "@/lib/gates/alter-generator";
+import { computeSchemaDiff, type SavedColumn, type SchemaDiff } from "@/lib/gates/schema-diff";
+import {
+  generateAlterStatements,
+  mapSchemaDiffToDestination,
+  type GateColumnMapping,
+} from "@/lib/gates/alter-generator";
 import { saveTempFile } from "@/lib/gates/temp-files";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
@@ -12,6 +16,40 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 function getExtension(fileName: string): string | null {
   const ext = fileName.match(/\.(csv|tsv|xlsx)$/i)?.[1]?.toLowerCase();
   return ext ? `.${ext}` : null;
+}
+
+type AnalysisColumn = {
+  name: string;
+  duckdbType: string;
+  inferredType: string;
+  nullable: boolean;
+};
+
+function hasSchemaChanges(diff: SchemaDiff): boolean {
+  return diff.added.length > 0 || diff.removed.length > 0 || diff.typeChanged.length > 0;
+}
+
+function removeKnownMappedAddedColumns(
+  diff: SchemaDiff,
+  columnMapping: GateColumnMapping[]
+): SchemaDiff {
+  const mappedSourceColumns = new Set(
+    columnMapping.map((mapping) => mapping.sourceColumn.toLowerCase())
+  );
+
+  return {
+    ...diff,
+    added: diff.added.filter((column) => !mappedSourceColumns.has(column.name.toLowerCase())),
+  };
+}
+
+function toSavedSchema(columns: AnalysisColumn[]) {
+  return columns.map((column) => ({
+    name: column.name,
+    duckdbType: column.duckdbType,
+    inferredType: column.inferredType,
+    nullable: column.nullable,
+  }));
 }
 
 // ─── POST /api/gates/[gateId]/push — validate & stage a push ──
@@ -71,12 +109,15 @@ export const POST = withAuth(async (req, ctx) => {
 
   // Schema validation
   const savedColumns = gate.savedSchema as unknown as SavedColumn[];
-  const { hasDrift, diff } = computeSchemaDiff(savedColumns, analysis.columns);
+  const { hasDrift, diff: rawDiff } = computeSchemaDiff(savedColumns, analysis.columns);
+  const columnMapping = gate.columnMapping as unknown as GateColumnMapping[];
+  const diff = removeKnownMappedAddedColumns(rawDiff, columnMapping);
+  const hasActionableDrift = hasSchemaChanges(diff);
 
   // Save temp file (needed for both validation confirmation and drift resolution)
   const tempFileId = await saveTempFile(buffer, extension);
 
-  if (hasDrift) {
+  if (hasActionableDrift) {
     // Create push record with SCHEMA_DRIFT status
     const push = await prisma.gatePush.create({
       data: {
@@ -93,10 +134,15 @@ export const POST = withAuth(async (req, ctx) => {
     });
 
     // Generate resolution options
+    const destinationDiff = mapSchemaDiffToDestination(
+      diff,
+      columnMapping
+    );
     const alterStatements = generateAlterStatements(
       gate.connection.type,
       gate.targetSchema || "public",
       gate.targetTable,
+      destinationDiff,
       diff
     );
 
@@ -128,6 +174,15 @@ export const POST = withAuth(async (req, ctx) => {
           statements: alterStatements,
           warning: "These statements will modify your production table. Review carefully.",
         },
+      },
+    });
+  }
+
+  if (hasDrift) {
+    await prisma.realmGate.update({
+      where: { id: gate.id },
+      data: {
+        savedSchema: toSavedSchema(analysis.columns) as unknown as Prisma.InputJsonValue,
       },
     });
   }

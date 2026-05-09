@@ -61,6 +61,8 @@ export const POST = withAuth(async (req, ctx) => {
     name,
     tempFileId,
     realmType,
+    headerRow,
+    dataStartRow,
     connectionId,
     targetTable,
     targetSchema,
@@ -75,6 +77,8 @@ export const POST = withAuth(async (req, ctx) => {
     name: string;
     tempFileId: string;
     realmType: string;
+    headerRow?: number;
+    dataStartRow?: number;
     connectionId: string;
     targetTable: string;
     targetSchema: string | null;
@@ -95,6 +99,14 @@ export const POST = withAuth(async (req, ctx) => {
   // Resolve PK columns — prefer array, fall back to singular for backward compat
   const pkColumns: string[] = primaryKeyColumns ??
     (primaryKeyColumn ? [primaryKeyColumn] : []);
+  const excelHeaderRow =
+    typeof headerRow === "number" && Number.isInteger(headerRow) && headerRow > 0
+      ? headerRow
+      : undefined;
+  const excelDataStartRow =
+    typeof dataStartRow === "number" && Number.isInteger(dataStartRow) && dataStartRow > 0
+      ? dataStartRow
+      : undefined;
 
   // Validate required fields
   if (!name?.trim()) {
@@ -164,7 +176,10 @@ export const POST = withAuth(async (req, ctx) => {
 
   const analysis =
     tempFile.extension === ".xlsx"
-      ? await analyzeExcel(tempFile.buffer)
+      ? await analyzeExcel(tempFile.buffer, {
+          headerRow: excelHeaderRow,
+          dataStartRow: excelDataStartRow,
+        })
       : await analyzeCSV(tempFile.buffer, {
           delimiter: tempFile.extension === ".tsv" ? "\t" : undefined,
         });

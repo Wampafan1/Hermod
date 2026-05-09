@@ -8,6 +8,7 @@
 import { createAnalyticsSession } from "./engine";
 import type { AnalyticsSession, TableProfile, ColumnProfile } from "./engine";
 import { toHermodType } from "./type-mapper";
+import { detectExcelLayout } from "./excel-layout";
 import type { ColumnMapping, SchemaMapping } from "@/lib/alfheim/types";
 import { discoverUCCs } from "@/lib/ucc";
 import type { DiscoveredUCC, UCCStats } from "@/lib/ucc";
@@ -86,6 +87,56 @@ function profileToColumnMappings(profile: TableProfile): ColumnMapping[] {
     dataType: toHermodType(col.duckdbType),
     nullable: col.nullCount > 0,
   }));
+}
+
+async function inspectExcelWorkbook(
+  buffer: Buffer,
+  options?: {
+    sheetName?: string;
+    sheetIndex?: number;
+    headerRow?: number;
+    dataStartRow?: number;
+    skipRows?: number;
+    hasHeaders?: boolean;
+  }
+): Promise<{
+  availableSheets: string[];
+  selectedSheet: string;
+  headerRow: number;
+  dataStartRow: number;
+}> {
+  const ExcelJS = await import("exceljs");
+  const workbook = new ExcelJS.default.Workbook();
+  await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
+
+  const availableSheets = workbook.worksheets.map((ws) => ws.name);
+  const selectedSheet =
+    options?.sheetName ??
+    (options?.sheetIndex !== undefined ? workbook.worksheets[options.sheetIndex]?.name : undefined) ??
+    availableSheets[0] ??
+    "Sheet1";
+  const worksheet =
+    workbook.getWorksheet(selectedSheet) ??
+    (options?.sheetIndex !== undefined ? workbook.worksheets[options.sheetIndex] : undefined) ??
+    workbook.worksheets[0];
+
+  const detectedLayout =
+    worksheet && options?.hasHeaders !== false && options?.headerRow === undefined && options?.skipRows === undefined
+      ? detectExcelLayout(worksheet)
+      : null;
+  const headerRow =
+    options?.headerRow ??
+    (options?.skipRows !== undefined ? options.skipRows + 1 : detectedLayout?.headerRow ?? 1);
+  const dataStartRow =
+    options?.dataStartRow ??
+    (options?.hasHeaders === false ? headerRow : detectedLayout?.dataStartRow ?? headerRow + 1);
+
+  return {
+    availableSheets,
+    selectedSheet,
+    headerRow,
+    dataStartRow,
+  };
 }
 
 // ─── CSV Analysis ───────────────────────────────────
@@ -187,6 +238,8 @@ export async function analyzeExcel(
     sheetIndex?: number;
     hasHeaders?: boolean;
     skipRows?: number;
+    headerRow?: number;
+    dataStartRow?: number;
   }
 ): Promise<FileAnalysisResult> {
   const session = await createAnalyticsSession();
@@ -223,20 +276,14 @@ export async function analyzeExcelCompat(
   }
 ): Promise<ExcelAnalysisResult> {
   // Get sheet metadata via ExcelJS (lightweight — just metadata, not full parse)
-  const ExcelJS = await import("exceljs");
-  const workbook = new ExcelJS.default.Workbook();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await workbook.xlsx.load(buffer as any);
-  const availableSheets = workbook.worksheets.map((ws) => ws.name);
-  const sheetName = options?.sheetName ?? availableSheets[0] ?? "Sheet1";
-  const headerRow = options?.headerRow ?? 1;
-  const dataStartRow = options?.dataStartRow ?? headerRow + 1;
+  const excelInfo = await inspectExcelWorkbook(buffer, options);
+  const { availableSheets, selectedSheet: sheetName, headerRow, dataStartRow } = excelInfo;
 
   // Run DuckDB analysis
-  const skipRows = headerRow > 1 ? headerRow - 1 : 0;
   const analysis = await analyzeExcel(buffer, {
     sheetName,
-    skipRows,
+    headerRow,
+    dataStartRow,
     hasHeaders: true,
   });
 
@@ -383,17 +430,27 @@ export async function analyzeFile(
 
   // 2. Create DuckDB session
   const session = await createAnalyticsSession();
+  let availableSheets: string[] | undefined;
+  let selectedSheet: string | undefined;
+  let resolvedHeaderRow = options?.headerRow;
+  let resolvedDataStartRow = options?.dataStartRow;
 
   try {
     // 3. Load file
     try {
       if (fileType === "excel") {
-        const skipRows = options?.headerRow && options.headerRow > 1 ? options.headerRow - 1 : options?.skipRows;
+        const excelInfo = await inspectExcelWorkbook(buffer, options);
+        availableSheets = excelInfo.availableSheets;
+        selectedSheet = excelInfo.selectedSheet;
+        resolvedHeaderRow = excelInfo.headerRow;
+        resolvedDataStartRow = excelInfo.dataStartRow;
+
         await session.loadExcel(buffer, "staging", {
-          sheetName: options?.sheetName,
+          sheetName: selectedSheet,
           sheetIndex: options?.sheetIndex,
           hasHeaders: options?.hasHeaders,
-          skipRows,
+          headerRow: resolvedHeaderRow,
+          dataStartRow: resolvedDataStartRow,
         });
       } else {
         await session.loadCSV(buffer, "staging", {
@@ -418,20 +475,11 @@ export async function analyzeFile(
       throw new FileAnalysisError("PROFILING_FAILED", `DuckDB profiling failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // 5. Excel sheet metadata
-    let availableSheets: string[] | undefined;
-    let selectedSheet: string | undefined;
-    if (fileType === "excel") {
-      try {
-        const ExcelJS = await import("exceljs");
-        const workbook = new ExcelJS.default.Workbook();
-        await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
-        availableSheets = workbook.worksheets.map((ws) => ws.name);
-        selectedSheet = options?.sheetName ?? availableSheets[0] ?? "Sheet1";
-      } catch {
-        // Sheet metadata is non-critical
-      }
-    }
+    const resolvedOptions = {
+      ...options,
+      headerRow: resolvedHeaderRow,
+      dataStartRow: resolvedDataStartRow,
+    };
 
     // 6. Preview rows
     const previewRows = profile.rowCount > 0
@@ -443,7 +491,7 @@ export async function analyzeFile(
     // 7. Early exit for empty files
     if (profile.rowCount === 0) {
       return buildFullResult({
-        fileName, fileType, availableSheets, selectedSheet, options,
+        fileName, fileType, availableSheets, selectedSheet, options: resolvedOptions,
         profile, columns, previewRows,
         primaryKey: noPrimaryKey(0),
       });
@@ -615,7 +663,7 @@ export async function analyzeFile(
     const primaryKey = extractBestPK(allFoundKeys, nearMisses, profile.rowCount, uccStats);
 
     return buildFullResult({
-      fileName, fileType, availableSheets, selectedSheet, options,
+      fileName, fileType, availableSheets, selectedSheet, options: resolvedOptions,
       profile, columns, previewRows, primaryKey,
     });
   } finally {

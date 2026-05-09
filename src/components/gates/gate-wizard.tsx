@@ -84,6 +84,8 @@ interface ProfileResult {
   fileSize: number;
   realmType: string;
   rowCount: number;
+  headerRow?: number;
+  dataStartRow?: number;
   columns: ProfileColumn[];
   primaryKey: PrimaryKeyResult;
   destinationMatches: DestMatch[];
@@ -647,6 +649,8 @@ export function GateWizard() {
           name: gateName.trim(),
           tempFileId: profile.tempFileId,
           realmType: profile.realmType,
+          headerRow: profile.headerRow,
+          dataStartRow: profile.dataStartRow,
           connectionId: selectedConnectionId,
           targetTable: isCreatingTable ? newTableName.trim() : selectedTableName,
           targetSchema: selectedSchema || null,

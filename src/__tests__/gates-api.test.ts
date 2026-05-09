@@ -6,6 +6,8 @@ const {
   mockRealmGateFindFirst,
   mockRealmGateUpdate,
   mockGatePushCreate,
+  mockGatePushFindFirst,
+  mockGatePushUpdate,
   mockForgeBlueprintFindFirst,
   mockReadTempFile,
   mockDeleteTempFile,
@@ -17,6 +19,8 @@ const {
   mockRealmGateFindFirst: vi.fn(),
   mockRealmGateUpdate: vi.fn(),
   mockGatePushCreate: vi.fn(),
+  mockGatePushFindFirst: vi.fn(),
+  mockGatePushUpdate: vi.fn(),
   mockForgeBlueprintFindFirst: vi.fn(),
   mockReadTempFile: vi.fn(),
   mockDeleteTempFile: vi.fn(),
@@ -47,6 +51,8 @@ vi.mock("@/lib/db", () => ({
     },
     gatePush: {
       create: mockGatePushCreate,
+      findFirst: mockGatePushFindFirst,
+      update: mockGatePushUpdate,
     },
     forgeBlueprint: {
       findFirst: mockForgeBlueprintFindFirst,
@@ -105,6 +111,12 @@ function gatePatchRequest(overrides: Record<string, unknown> = {}) {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(overrides),
+  });
+}
+
+function gatePushDeleteRequest(gateId = "gate_1", pushId = "push_1") {
+  return new Request(`http://localhost/api/gates/${gateId}/push/${pushId}`, {
+    method: "DELETE",
   });
 }
 
@@ -342,5 +354,58 @@ describe("gates API", () => {
     expect(JSON.stringify(payload)).not.toContain("do-not-return");
     expect(mockRealmGateCreate).not.toHaveBeenCalled();
     expect(mockRealmGateUpdate).not.toHaveBeenCalled();
+  });
+
+  it("clears staged gate pushes and deletes their temp file", async () => {
+    mockGatePushFindFirst.mockResolvedValue({
+      id: "push_1",
+      gateId: "gate_1",
+      tenantId: "tenant_b",
+      status: "SCHEMA_DRIFT",
+      tempFileId: "tmp_1",
+    });
+    mockGatePushUpdate.mockResolvedValue({
+      id: "push_1",
+      status: "CANCELLED",
+      tempFileId: null,
+    });
+
+    const { DELETE } = await import("@/app/api/gates/[gateId]/push/[pushId]/route");
+    const response = await DELETE(gatePushDeleteRequest());
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ pushId: "push_1", status: "CANCELLED" });
+    expect(mockGatePushFindFirst).toHaveBeenCalledWith({
+      where: { id: "push_1", gateId: "gate_1", tenantId: "tenant_b" },
+    });
+    expect(mockGatePushUpdate).toHaveBeenCalledWith({
+      where: { id: "push_1" },
+      data: {
+        status: "CANCELLED",
+        tempFileId: null,
+        completedAt: expect.any(Date),
+      },
+    });
+    expect(mockDeleteTempFile).toHaveBeenCalledWith("tmp_1");
+  });
+
+  it("does not clear gate pushes that are already running", async () => {
+    mockGatePushFindFirst.mockResolvedValue({
+      id: "push_1",
+      gateId: "gate_1",
+      tenantId: "tenant_b",
+      status: "PUSHING",
+      tempFileId: "tmp_1",
+    });
+
+    const { DELETE } = await import("@/app/api/gates/[gateId]/push/[pushId]/route");
+    const response = await DELETE(gatePushDeleteRequest());
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload).toEqual({ error: "Push is already running and cannot be cleared" });
+    expect(mockGatePushUpdate).not.toHaveBeenCalled();
+    expect(mockDeleteTempFile).not.toHaveBeenCalled();
   });
 });

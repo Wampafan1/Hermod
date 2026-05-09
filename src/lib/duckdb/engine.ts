@@ -16,6 +16,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import ExcelJS from "exceljs";
 import { toInferredType } from "./type-mapper";
+import { detectExcelLayout, excelCellToValue } from "./excel-layout";
 
 // ─── Public Types ───────────────────────────────────
 
@@ -57,6 +58,8 @@ export interface ExcelLoadOptions {
   sheetIndex?: number;
   hasHeaders?: boolean;
   skipRows?: number;
+  headerRow?: number;
+  dataStartRow?: number;
 }
 
 export interface TableInfo {
@@ -105,6 +108,16 @@ export interface ColumnProfile {
 /** Quote a SQL identifier (table/column name) to prevent injection */
 function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+function makeUniqueHeaders(headers: string[]): string[] {
+  const seen = new Map<string, number>();
+  return headers.map((header, idx) => {
+    const base = header.trim() || `column_${idx + 1}`;
+    const count = seen.get(base.toLowerCase()) ?? 0;
+    seen.set(base.toLowerCase(), count + 1);
+    return count === 0 ? base : `${base}_${count + 1}`;
+  });
 }
 
 /** Write buffer to a temp file, return path. Caller MUST delete in finally block. */
@@ -213,17 +226,27 @@ class DuckDBAnalyticsSession implements AnalyticsSession {
       return { tableName, rowCount: 0, columns: [] };
     }
 
-    const skipRows = options?.skipRows ?? 0;
     const hasHeaders = options?.hasHeaders ?? true;
-    const headerRowIdx = skipRows + 1; // 1-based
-    const dataStartIdx = hasHeaders ? headerRowIdx + 1 : headerRowIdx;
+    const detectedLayout =
+      hasHeaders && options?.headerRow === undefined && options?.skipRows === undefined
+        ? detectExcelLayout(worksheet)
+        : null;
+    const headerRowIdx =
+      options?.headerRow ??
+      (options?.skipRows !== undefined ? options.skipRows + 1 : detectedLayout?.headerRow ?? 1);
+    const dataStartIdx =
+      options?.dataStartRow ??
+      (hasHeaders ? detectedLayout?.dataStartRow ?? headerRowIdx + 1 : headerRowIdx);
 
     // Read headers
     const headerRow = worksheet.getRow(headerRowIdx);
     const headers: string[] = [];
+    const generatedHeaders: boolean[] = [];
     headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      const val = cell.value;
-      headers[colNumber - 1] = hasHeaders && val ? String(val).trim() : `column_${colNumber}`;
+      const val = excelCellToValue(cell);
+      const hasValue = val !== null && val !== undefined && String(val).trim() !== "";
+      headers[colNumber - 1] = hasHeaders && hasValue ? String(val).trim() : `column_${colNumber}`;
+      generatedHeaders[colNumber - 1] = !hasValue;
     });
 
     // Trim trailing empty headers
@@ -237,27 +260,45 @@ class DuckDBAnalyticsSession implements AnalyticsSession {
     }
 
     // Read data rows
-    const rows: Record<string, unknown>[] = [];
+    const rowValues: unknown[][] = [];
     for (let r = dataStartIdx; r <= worksheet.rowCount; r++) {
       const row = worksheet.getRow(r);
-      const isEmptyRow = !row.values || (Array.isArray(row.values) && row.values.every((v) => v === null || v === undefined));
-      if (isEmptyRow) continue;
-
-      const obj: Record<string, unknown> = {};
+      const values: unknown[] = [];
+      let hasValue = false;
       for (let c = 0; c < headers.length; c++) {
         const cell = row.getCell(c + 1);
-        const val = cell.value;
+        const val = excelCellToValue(cell);
+        if (val !== null && val !== undefined && String(val).trim() !== "") hasValue = true;
         if (val instanceof Date) {
-          obj[headers[c]] = val.toISOString();
+          values[c] = val.toISOString();
         } else if (typeof val === "object" && val !== null && "result" in val) {
           // Formula cell — use result value
-          obj[headers[c]] = (val as { result?: unknown }).result ?? null;
+          values[c] = (val as { result?: unknown }).result ?? null;
         } else {
-          obj[headers[c]] = val ?? null;
+          values[c] = val ?? null;
         }
       }
-      rows.push(obj);
+      if (hasValue) rowValues.push(values);
     }
+
+    const keepColumns = headers.map((_, idx) => {
+      if (!generatedHeaders[idx]) return true;
+      return rowValues.some((row) => {
+        const val = row[idx];
+        return val !== null && val !== undefined && String(val).trim() !== "";
+      });
+    });
+    const uniqueHeaders = makeUniqueHeaders(headers.filter((_, idx) => keepColumns[idx]));
+    const rows = rowValues.map((values) => {
+      const obj: Record<string, unknown> = {};
+      let outIdx = 0;
+      for (let idx = 0; idx < headers.length; idx++) {
+        if (!keepColumns[idx]) continue;
+        obj[uniqueHeaders[outIdx]] = values[idx] ?? null;
+        outIdx++;
+      }
+      return obj;
+    });
 
     return this.loadRows(rows, tableName);
   }

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { generateCreateTableSql } from "@/lib/gates/alter-generator";
+import {
+  generateAlterStatements,
+  generateCreateTableSql,
+  mapSchemaDiffToDestination,
+} from "@/lib/gates/alter-generator";
 import { fullSqlTableRef, quoteSqlIdentifier } from "@/lib/gates/sql-identifiers";
 
 describe("Gate SQL identifiers", () => {
@@ -28,5 +32,32 @@ describe("Gate SQL identifiers", () => {
     expect(sql).toContain('"sch""ema"."tab""le"');
     expect(sql).toContain('"id""col" BIGINT NOT NULL');
     expect(sql).toContain('PRIMARY KEY ("id""col")');
+  });
+
+  it("uses the gate destination naming style for drift ALTER statements", () => {
+    const sourceDiff = {
+      added: [{ name: "Total Payable", type: "DOUBLE" }],
+      removed: [],
+      typeChanged: [],
+    };
+    const destinationDiff = mapSchemaDiffToDestination(sourceDiff, [
+      { sourceColumn: "Entry Type", destinationColumn: "entry_type" },
+      { sourceColumn: "Invoice Number", destinationColumn: "invoice_number" },
+    ]);
+
+    const statements = generateAlterStatements(
+      "POSTGRES",
+      "public",
+      "loves_line_report",
+      destinationDiff,
+      sourceDiff
+    );
+
+    expect(destinationDiff.added[0].name).toBe("total_payable");
+    expect(statements[0]).toMatchObject({
+      sql: 'ALTER TABLE "public"."loves_line_report" ADD COLUMN "total_payable" DOUBLE PRECISION;',
+      sourceColumn: "Total Payable",
+      destinationColumn: "total_payable",
+    });
   });
 });
