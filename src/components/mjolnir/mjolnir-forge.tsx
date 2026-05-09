@@ -144,6 +144,8 @@ interface MjolnirForgeProps {
     version: number;
     beforeSample: string | null;
     afterSample: string | null;
+    scope?: string | null;
+    tenantId?: string | null;
     createdAt: string;
     updatedAt: string;
     usage?: {

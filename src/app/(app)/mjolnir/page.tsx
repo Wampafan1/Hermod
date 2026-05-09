@@ -17,6 +17,8 @@ export default async function MjolnirPage() {
       version: true,
       beforeSample: true,
       afterSample: true,
+      scope: true,
+      tenantId: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -55,7 +57,7 @@ export default async function MjolnirPage() {
       .map((count) => [count.blueprintId as string, count._count._all])
   );
 
-  const serialized = blueprints.map((b: { id: string; name: string; description: string | null; status: string; version: number; beforeSample: string | null; afterSample: string | null; createdAt: Date; updatedAt: Date }) => ({
+  const serialized = blueprints.map((b: { id: string; name: string; description: string | null; status: string; version: number; beforeSample: string | null; afterSample: string | null; scope: string; tenantId: string | null; createdAt: Date; updatedAt: Date }) => ({
     usage: {
       reports: reportCountByBlueprint.get(b.id) ?? 0,
       bifrostRoutes: routeCountByBlueprint.get(b.id) ?? 0,

@@ -27,6 +27,8 @@ interface Blueprint {
   version: number;
   beforeSample: string | null;
   afterSample: string | null;
+  scope?: string | null;
+  tenantId?: string | null;
   createdAt: string;
   updatedAt: string;
   usage?: BlueprintUsageCounts;
@@ -53,6 +55,11 @@ interface BlueprintUsageSummary {
 interface DeleteTarget {
   blueprint: Blueprint;
   usage: BlueprintUsageSummary;
+}
+
+interface PublishTarget {
+  blueprint: Blueprint;
+  changeReason: string;
 }
 
 function formatDate(iso: string): string {
@@ -84,6 +91,16 @@ function rowStatusHint(status: string): string {
   return getBlueprintStatusHelperText(status);
 }
 
+function isTenantPublishedBlueprint(blueprint: Blueprint): boolean {
+  return blueprint.scope === "TENANT_PUBLISHED";
+}
+
+function canPublishBlueprint(blueprint: Blueprint): boolean {
+  return !isTenantPublishedBlueprint(blueprint) && (
+    blueprint.status === "VALIDATED" || blueprint.status === "ACTIVE"
+  );
+}
+
 interface BlueprintListProps {
   blueprints: Blueprint[];
   onRefresh: () => void;
@@ -93,9 +110,12 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
   const router = useRouter();
   const toast = useToast();
   const usageDialogRef = useRef<HTMLDivElement>(null);
+  const publishDialogRef = useRef<HTMLDivElement>(null);
   const usageDialogTitleId = useId();
+  const publishDialogTitleId = useId();
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [usageTarget, setUsageTarget] = useState<DeleteTarget | null>(null);
+  const [publishTarget, setPublishTarget] = useState<PublishTarget | null>(null);
   const [expandedUsage, setExpandedUsage] = useState<Record<string, boolean>>({});
   const [usageDetails, setUsageDetails] = useState<Record<string, BlueprintUsageSummary>>({});
   const [loadingBlueprintId, setLoadingBlueprintId] = useState<string | null>(null);
@@ -103,6 +123,9 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
 
   useFocusTrap(usageDialogRef, !!usageTarget, () => {
     if (!dialogLoading) setUsageTarget(null);
+  });
+  useFocusTrap(publishDialogRef, !!publishTarget, () => {
+    if (!dialogLoading) setPublishTarget(null);
   });
 
   async function fetchUsage(blueprintId: string): Promise<BlueprintUsageSummary> {
@@ -224,6 +247,37 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
     }
   }
 
+  async function publishBlueprint() {
+    if (!publishTarget) return;
+    const { blueprint, changeReason } = publishTarget;
+    setDialogLoading(true);
+    setLoadingBlueprintId(blueprint.id);
+    try {
+      const res = await fetch(`/api/mjolnir/blueprints/${blueprint.id}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          changeReason: changeReason.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Publish failed");
+        return;
+      }
+
+      toast.success(`Published v${data.version.version} to tenant.`);
+      setPublishTarget(null);
+      onRefresh();
+      router.refresh();
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setDialogLoading(false);
+      setLoadingBlueprintId(null);
+    }
+  }
+
   if (blueprints.length === 0) {
     return (
       <div className="text-center py-12 bg-deep border border-border">
@@ -243,6 +297,7 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
       {blueprints.map((bp) => {
         const rowLoading = loadingBlueprintId === bp.id;
         const isArchived = bp.status === "ARCHIVED";
+        const isTenantPublished = isTenantPublishedBlueprint(bp);
         const hint = rowStatusHint(bp.status);
         const expanded = expandedUsage[bp.id];
         const detailedUsage = usageDetails[bp.id];
@@ -259,7 +314,7 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
                 <div className="flex flex-wrap items-center gap-3">
                   <h3 className="text-text text-sm truncate">{bp.name}</h3>
                   <BlueprintStatusBadge status={bp.status} />
-                  <BlueprintScopeBadge />
+                  <BlueprintScopeBadge label={isTenantPublished ? "Tenant" : "Personal"} />
                   <span className="text-text-dim/80 text-[0.625rem] tracking-wider">
                     v{bp.version}
                   </span>
@@ -280,6 +335,16 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
                   }`}>
                     {hint}
                 </p>
+                {!isTenantPublished && bp.status === "DRAFT" && (
+                  <p className="text-gold/80 text-[0.625rem] tracking-wider">
+                    Validate before publishing to the active workspace.
+                  </p>
+                )}
+                {isTenantPublished && (
+                  <p className="text-frost/80 text-[0.625rem] tracking-wider">
+                    Tenant-published parent. Future report and route selectors will pin immutable versions.
+                  </p>
+                )}
 
                 <div className="flex flex-wrap items-center gap-4 text-text-dim/80 text-[0.625rem] tracking-wider">
                   {bp.beforeSample && (
@@ -311,6 +376,15 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
                     className="btn-primary text-xs"
                   >
                     Activate
+                  </button>
+                )}
+                {canPublishBlueprint(bp) && (
+                  <button
+                    onClick={() => setPublishTarget({ blueprint: bp, changeReason: "" })}
+                    disabled={rowLoading || dialogLoading}
+                    className="btn-primary text-xs"
+                  >
+                    Publish to Tenant
                   </button>
                 )}
                 <button
@@ -388,6 +462,72 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
         onConfirm={executeDelete}
         onCancel={() => !dialogLoading && setDeleteTarget(null)}
       />
+
+      {publishTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => !dialogLoading && setPublishTarget(null)}
+        >
+          <div
+            ref={publishDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={publishDialogTitleId}
+            className="bg-deep border border-border max-w-xl w-full mx-4 animate-fade-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-border">
+              <h2 id={publishDialogTitleId} className="heading-norse text-sm">
+                Publish to Tenant
+              </h2>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <p className="text-text-dim text-xs tracking-wide leading-relaxed">
+                Publishing creates a tenant-scoped parent and a locked immutable version for the active workspace.
+                Reports, Bifrost routes, and RealmGates will keep using legacy attachments until version pinning is enabled in a later phase.
+              </p>
+              <div className="border border-border bg-void/40 px-3 py-2">
+                <p className="label-norse mb-1">Blueprint</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-text text-xs tracking-wide">{publishTarget.blueprint.name}</span>
+                  <BlueprintStatusBadge status={publishTarget.blueprint.status} />
+                </div>
+              </div>
+              <label className="block space-y-2">
+                <span className="label-norse">Change Reason</span>
+                <textarea
+                  value={publishTarget.changeReason}
+                  onChange={(event) => setPublishTarget((current) => current
+                    ? { ...current, changeReason: event.target.value }
+                    : current
+                  )}
+                  maxLength={2000}
+                  rows={4}
+                  className="w-full border border-border bg-void px-3 py-2 text-xs tracking-wide text-text outline-none focus:border-gold"
+                  placeholder="Optional note for this published version"
+                  disabled={dialogLoading}
+                />
+              </label>
+            </div>
+            <div className="flex justify-end gap-3 px-5 py-4 border-t border-border bg-surface">
+              <button
+                onClick={() => setPublishTarget(null)}
+                disabled={dialogLoading}
+                className="btn-ghost text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={publishBlueprint}
+                disabled={dialogLoading}
+                className="btn-primary text-xs"
+              >
+                {dialogLoading ? "Publishing..." : "Publish Version"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {usageTarget && (
         <div

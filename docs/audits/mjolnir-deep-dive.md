@@ -1139,3 +1139,10 @@ Make the product decision for Mjolnir ownership and retention before the next sc
 4. Then implement the schema/API migration for tenant-published immutable blueprint versions and report/Bifrost/RealmGate version pins.
 
 Do not start the migration until those product decisions are made.
+
+## Tenant-Published Publish Flow Note
+
+- Phase 2 of immutable version pinning adds a tenant-published publish flow without switching production consumers yet.
+- `POST /api/mjolnir/blueprints/[id]/publish` creates or reuses a tenant-published parent for the active tenant and creates a locked immutable `BlueprintVersion`.
+- `GET /api/mjolnir/published-blueprints` lists active-tenant published parents and optional latest version summaries without raw steps or analysis metadata.
+- Personal drafts remain editable, and report/Bifrost/RealmGate execution still uses legacy mutable `blueprintId` / `forgeBlueprintId` paths until the dedicated pinning phases.

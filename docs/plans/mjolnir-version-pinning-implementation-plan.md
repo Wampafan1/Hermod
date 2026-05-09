@@ -1224,6 +1224,63 @@ Next phase recommendation:
 
 - Implement the publish API next. It should create tenant-published copies, create locked `BlueprintVersion` records from sanitized personal drafts, return safe version metadata, and still avoid changing report/Bifrost/RealmGate runtime execution until the dedicated pinning phases.
 
+## Phase 2 Publish API Results
+
+Publish endpoint added:
+
+- Added `POST /api/mjolnir/blueprints/[id]/publish`.
+- The endpoint requires auth and uses the active tenant from the auth context.
+- It accepts optional name, description, change reason, desired `VALIDATED`/`ACTIVE` status, and validation evidence.
+- It returns only safe parent/version metadata: IDs, scope, tenant, status, version number, `stepsHash`, source, created timestamp, and locked state.
+- It does not return raw steps, analysis logs, formatting metadata, workbook sample names beyond sanitized parent metadata, or sample-derived data.
+
+Published listing endpoint added:
+
+- Added `GET /api/mjolnir/published-blueprints`.
+- It returns only `TENANT_PUBLISHED` blueprints for the active tenant.
+- It defaults to `ACTIVE` and `VALIDATED` statuses and rejects invalid status filters.
+- `includeVersions=true` returns the latest immutable version summary without returning raw steps or analysis metadata.
+
+Helper modules added:
+
+- Added `src/lib/validations/mjolnir-publish.ts` for the publish payload schema and change-reason limit.
+- Added `src/lib/mjolnir/publish-blueprint.ts` for publish eligibility, parent reuse, sanitized snapshot copying, and locked `BlueprintVersion` creation.
+- Publishing reuses a single tenant-published parent only when the lineage is exact: same draft, same user, same active tenant. Ambiguous multiple parent matches are not reused.
+
+UI publish action behavior:
+
+- `src/components/mjolnir/blueprint-list.tsx` now shows a `Publish to Tenant` action for personal `VALIDATED` and `ACTIVE` blueprints.
+- Personal `DRAFT` rows show a validate-before-publishing cue.
+- Tenant-published parent rows are labeled as tenant scoped and read-only for this phase.
+- The publish confirmation accepts an optional change reason and refreshes the list after success.
+- The original personal draft remains visible and editable.
+
+What is intentionally not changed:
+
+- Report execution still uses legacy `Report.blueprintId`.
+- Bifrost execution still uses legacy `BifrostRoute.blueprintId`.
+- RealmGate execution is unchanged.
+- Report, Bifrost route, and RealmGate selectors are not switched to `blueprintVersionId` yet.
+- No backfill was added.
+- Legacy mutable `blueprintId` fields remain in place.
+
+Tests added:
+
+- `src/__tests__/mjolnir/publish-blueprint.test.ts`: missing/archived/DRAFT publish rejection, DRAFT with validation evidence, VALIDATED/ACTIVE publish, tenant-published parent creation, locked version creation, source draft tracking, same-lineage republish, sanitization before persistence, publish auth, safe publish response shape, active-tenant published listing, and invalid listing filters.
+
+Validation results:
+
+- Focused publish tests passed: 1 test file and 12 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed after applying the existing Windows Prisma DLL-lock workaround.
+- `npm run test`: passed, 96 test files and 1269 tests.
+- `npm run build`: passed with existing lint warnings.
+- `npm run lint`: passed with existing warnings.
+
+Next phase recommendation:
+
+- Implement report attach to `blueprintVersionId` next, while retaining legacy `blueprintId` fallback for existing reports until migration/backfill is complete.
+
 ## Open Product Decisions
 
 1. Should published blueprint parent reuse `Blueprint` with `scope = TENANT_PUBLISHED`, or use a separate `PublishedBlueprint` model?
