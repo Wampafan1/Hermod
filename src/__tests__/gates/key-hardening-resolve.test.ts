@@ -144,6 +144,13 @@ function request(body: unknown) {
   });
 }
 
+function previewRequest(selectedKey: string[]) {
+  return new Request(
+    `http://localhost/api/gates/gate_1/push/push_1/resolve?selectedKey=${encodeURIComponent(selectedKey.join(","))}`,
+    { method: "GET" }
+  );
+}
+
 describe("Gate key hardening resolve API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -174,18 +181,65 @@ describe("Gate key hardening resolve API", () => {
     });
   });
 
-  it("rejects a selected key that is not a verified candidate", async () => {
+  it("previews a verified candidate", async () => {
+    const plan = buildReplaceKeyConstraintPlan({
+      providerType: "POSTGRES",
+      schema: "public",
+      table: "orders",
+      oldKey: ["job_number", "line_number"],
+      newKey: ["job_number", "line_number", "line_value"],
+    });
+
+    const { GET } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");
+    const response = await GET(previewRequest(["job_number", "line_number", "line_value"]));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      selectedKey: ["job_number", "line_number", "line_value"],
+      manualCandidate: false,
+      manualValidation: { ok: true },
+      ddl: plan.ddl,
+    });
+  });
+
+  it("previews a manually selected key after staged upload validation", async () => {
+    const plan = buildReplaceKeyConstraintPlan({
+      providerType: "POSTGRES",
+      schema: "public",
+      table: "orders",
+      oldKey: ["job_number", "line_number"],
+      newKey: ["line_value"],
+    });
+
+    const { GET } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");
+    const response = await GET(previewRequest(["line_value"]));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      selectedKey: ["line_value"],
+      manualCandidate: true,
+      manualValidation: { ok: true, nullCount: 0, duplicateCount: 0 },
+      ddl: plan.ddl,
+    });
+  });
+
+  it("rejects a manually selected key with staged upload nulls", async () => {
     const { POST } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");
     const response = await POST(request({
       action: "APPROVE_KEY_HARDENING",
       selectedKey: ["not_a_candidate"],
     }));
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: "Selected key is not a verified candidate",
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      status: "KEY_DRIFT",
+      manualCandidate: true,
+      manualValidation: { ok: false, nullCount: 2 },
+      blocked: true,
     });
     expect(mockProviderQuery).not.toHaveBeenCalled();
+    expect(mockDeleteTempFile).not.toHaveBeenCalled();
   });
 
   it("revalidates the staged upload before DDL", async () => {
@@ -206,8 +260,10 @@ describe("Gate key hardening resolve API", () => {
     await expect(response.json()).resolves.toMatchObject({
       status: "KEY_DRIFT",
       error: "Selected key no longer validates against the staged upload.",
+      manualValidation: { ok: false, duplicateCount: 1 },
     });
     expect(mockProviderQuery).not.toHaveBeenCalled();
+    expect(mockDeleteTempFile).not.toHaveBeenCalled();
   });
 
   it("rejects mismatched confirmed DDL", async () => {
@@ -265,6 +321,48 @@ describe("Gate key hardening resolve API", () => {
     });
     expect(mockExecutePush).toHaveBeenCalledWith("gate_1", "push_1", expect.any(Buffer), ".csv");
     expect(mockDeleteTempFile).toHaveBeenCalledWith("tmp_1");
+  });
+
+  it("approves a manually selected key after validation and matching DDL", async () => {
+    const plan = buildReplaceKeyConstraintPlan({
+      providerType: "POSTGRES",
+      schema: "public",
+      table: "orders",
+      oldKey: ["job_number", "line_number"],
+      newKey: ["line_value"],
+    });
+
+    const { POST } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");
+    const response = await POST(request({
+      action: "APPROVE_KEY_HARDENING",
+      selectedKey: ["line_value"],
+      confirm: true,
+      confirmedDdl: plan.ddl,
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      pushId: "push_1",
+      status: "SUCCESS",
+    });
+    expect(mockRealmGateUpdate).toHaveBeenCalledWith({
+      where: { id: "gate_1" },
+      data: expect.objectContaining({
+        primaryKeyColumns: ["Line Value"],
+        keyConstraintName: plan.constraintName,
+      }),
+    });
+    expect(mockGatePushUpdate).toHaveBeenCalledWith({
+      where: { id: "push_1" },
+      data: expect.objectContaining({
+        status: "VALIDATED",
+        keyDrift: expect.objectContaining({
+          selectedKey: ["line_value"],
+          manualSelection: true,
+          manualValidation: expect.objectContaining({ ok: true }),
+        }),
+      }),
+    });
   });
 
   it("cancels KEY_DRIFT review and deletes the staged file", async () => {

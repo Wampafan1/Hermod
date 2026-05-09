@@ -250,3 +250,52 @@ Hermod now surfaces `KEY_DRIFT` as a review-first workflow in the Gates UI inste
 - `npm run test`
 - `npm run build`
 - `npm run lint`
+
+## Manual Key Selection Patch Results
+
+Hermod no longer dead-ends a `KEY_DRIFT` review when automatic discovery misses, caps, or ranks the business-correct key below another verified candidate.
+
+### Manual Key Metadata
+
+- `keyDrift.mappedColumns` now stores safe mapped-column metadata for the review UI.
+- Stored metadata includes destination column, source column, nonblank count, blank count, distinct count, current-key flag, and discriminator flag.
+- Full row payloads and non-key cell values are not stored in manual-selection metadata.
+- Source column names are included because the Gate mapping UI already exposes them.
+
+### Manual Validation And Preview
+
+- `GET /api/gates/[gateId]/push/[pushId]/resolve?selectedKey=a,b,c` now accepts either a verified candidate or a manual selected key.
+- Manual keys re-read the staged upload, remap rows, skip fully blank mapped rows, and validate selected-key nulls and duplicates before DDL preview.
+- Invalid manual keys return `409 KEY_DRIFT` with safe duplicate/null examples and keep the staged upload available.
+- Valid manual keys continue through existing destination validation and DDL preview without executing DDL or loading rows.
+
+### Manual Approval
+
+- `POST /api/gates/[gateId]/push/[pushId]/resolve` now allows manually selected keys after staged-upload and destination validation.
+- DDL execution still requires `confirm: true` and an exact `confirmedDdl` match.
+- Manual approval records `keyDrift.manualSelection`, `keyDrift.manualValidation`, and `keyDrift.selectedKey`.
+- Rows are pushed only after validation passes, DDL is approved, and the generated DDL matches the confirmed DDL.
+
+### UI Changes
+
+- The `KEY_DRIFT` review panel now shows a manual mapped-column picker.
+- The picker defaults to the recommendation when present, otherwise the current key.
+- No-candidate states now direct users to manually select and validate columns.
+- The panel shows whether the selected key is unique in the staged upload and hides approval controls for invalid manual keys.
+
+### Real-World Regression Case
+
+- Added a fixture for the `job_number + 7501_line_number` failure where adding `line_entered_value` makes the upload unique.
+- Tests verify the blank mapped row is counted separately, current-key drift is detected, discovery finds the hardened key, and manual validation accepts the same key.
+
+### Tests Added
+
+- `src/__tests__/gates/fixtures/key-drift-job-line-value.ts`
+- `src/__tests__/gates/key-hardening-manual-selection.test.ts`
+- Expanded `src/__tests__/gates/key-hardening-resolve.test.ts`
+- Expanded `src/__tests__/gates/key-drift-ui.test.ts`
+
+### What Remains
+
+- Existing destination-table validation still runs in the approval/preview path, not automatic upload discovery.
+- Provider-specific DDL limitations remain governed by the existing key DDL safety checks.

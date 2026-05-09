@@ -12,6 +12,32 @@ export interface CandidateKey {
   score: number;
 }
 
+export interface MappedKeyColumn {
+  name: string;
+  sourceColumn?: string;
+  destinationColumn: string;
+  nonBlankCount: number;
+  nullCount: number;
+  distinctCount: number;
+  isCurrentKey?: boolean;
+  isDiscriminator?: boolean;
+}
+
+export interface ManualKeyValidation {
+  ok: boolean;
+  nullCount: number;
+  duplicateCount: number;
+  duplicateExamples: Array<{
+    keyValues: Record<string, string | number | boolean | null>;
+    rowIndexes: number[];
+  }>;
+  nullKeyExamples: Array<{
+    rowIndex: number;
+    keyValues: Record<string, string | number | boolean | null>;
+    missingColumns: string[];
+  }>;
+}
+
 export interface KeyDriftDetails {
   oldKey: string[];
   reason: string;
@@ -72,6 +98,9 @@ export interface KeyDriftDetails {
     maxCombinations: number;
     combinationsTested: number;
   };
+  mappedColumns?: MappedKeyColumn[];
+  manualSelection?: boolean;
+  manualValidation?: ManualKeyValidation;
   duplicateExamples?: Array<{
     keyValues: Record<string, string | number | boolean | null>;
     rowIndexes: number[];
@@ -90,6 +119,8 @@ export interface DdlPreview {
   blocked: boolean;
   blockReason?: string | null;
   requiresConfirmation: boolean;
+  manualCandidate?: boolean;
+  manualValidation?: ManualKeyValidation;
 }
 
 export interface KeyHardeningResolvePayload {
@@ -127,6 +158,63 @@ export function selectDefaultCandidate(keyDrift: KeyDriftDetails): CandidateKey 
   return candidates[0] ?? null;
 }
 
+export function getDefaultManualSelection(keyDrift: KeyDriftDetails): string[] {
+  const recommended = keyDrift.recommendation?.columns?.filter(Boolean) ?? [];
+  if (recommended.length > 0) return recommended;
+  const oldKey = keyDrift.oldKey?.filter(Boolean) ?? [];
+  if (oldKey.length > 0) return oldKey;
+  return selectDefaultCandidate(keyDrift)?.columns ?? [];
+}
+
+export function getMappedColumnsForManualSelection(keyDrift: KeyDriftDetails): MappedKeyColumn[] {
+  const mapped = keyDrift.mappedColumns ?? [];
+  if (mapped.length > 0) {
+    return mapped.map((column) => ({
+      name: column.name,
+      sourceColumn: column.sourceColumn,
+      destinationColumn: column.destinationColumn,
+      nonBlankCount: column.nonBlankCount,
+      nullCount: column.nullCount,
+      distinctCount: column.distinctCount,
+      isCurrentKey: column.isCurrentKey,
+      isDiscriminator: column.isDiscriminator,
+    }));
+  }
+
+  const seen = new Set<string>();
+  const fallback = [
+    ...(keyDrift.oldKey ?? []),
+    ...((keyDrift.candidateKeys ?? []).flatMap((candidate) => candidate.columns)),
+  ];
+
+  return fallback
+    .filter((column) => {
+      const key = column.toLowerCase();
+      if (!column || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((column) => ({
+      name: column,
+      destinationColumn: column,
+      nonBlankCount: 0,
+      nullCount: 0,
+      distinctCount: 0,
+      isCurrentKey: (keyDrift.oldKey ?? []).some((oldKeyColumn) => sameColumns([oldKeyColumn], [column])),
+      isDiscriminator: (keyDrift.discriminatorColumns ?? []).some((disc) =>
+        sameColumns([disc.column], [column])
+      ),
+    }));
+}
+
+export function toggleManualKeyColumn(selected: string[], column: string): string[] {
+  const exists = selected.some((candidate) => sameColumns([candidate], [column]));
+  if (exists) {
+    return selected.filter((candidate) => !sameColumns([candidate], [column]));
+  }
+  return [...selected, column];
+}
+
 export function buildResolvePayload(
   selectedKey: string[],
   confirmedDdl: string[]
@@ -146,6 +234,7 @@ export function canApproveKeyHardening(state: ApprovalState): boolean {
       state.ddlPreview &&
       state.ddlPreview.ddl.length > 0 &&
       !state.ddlPreview.blocked &&
+      state.ddlPreview.manualValidation?.ok !== false &&
       state.approvalChecked &&
       !state.loading
   );
@@ -189,7 +278,11 @@ export function formatBlankRowsSkipped(count: number): string | null {
 
 export function getNoReliableKeyMessage(keyDrift: KeyDriftDetails): string | null {
   if ((keyDrift.candidateKeys?.length ?? 0) > 0) return null;
-  return keyDrift.noReliableKeyReason ?? "No reliable key was found in this upload.";
+  const suffix = " Select columns manually to validate a key.";
+  const message =
+    keyDrift.noReliableKeyReason ??
+    "Hermod could not automatically find a key within the current search limits.";
+  return message.includes("Select columns manually") ? message : `${message}${suffix}`;
 }
 
 export function getDiscoveryDiagnostics(keyDrift: KeyDriftDetails) {
@@ -241,9 +334,10 @@ export function KeyDriftReviewPanel({
   onCancelled,
   onError,
 }: KeyDriftReviewPanelProps) {
-  const defaultCandidate = useMemo(() => selectDefaultCandidate(keyDrift), [keyDrift]);
+  const defaultManualSelection = useMemo(() => getDefaultManualSelection(keyDrift), [keyDrift]);
+  const manualColumns = useMemo(() => getMappedColumnsForManualSelection(keyDrift), [keyDrift]);
   const [selectedColumns, setSelectedColumns] = useState<string[] | null>(
-    defaultCandidate?.columns ?? null
+    defaultManualSelection.length > 0 ? defaultManualSelection : null
   );
   const [ddlPreview, setDdlPreview] = useState<DdlPreview | null>(null);
   const [approvalChecked, setApprovalChecked] = useState(false);
@@ -256,8 +350,8 @@ export function KeyDriftReviewPanel({
   const discoveryDiagnostics = getDiscoveryDiagnostics(keyDrift);
 
   useEffect(() => {
-    setSelectedColumns(defaultCandidate?.columns ?? null);
-  }, [defaultCandidate]);
+    setSelectedColumns(defaultManualSelection.length > 0 ? defaultManualSelection : null);
+  }, [defaultManualSelection]);
 
   useEffect(() => {
     let ignore = false;
@@ -283,6 +377,8 @@ export function KeyDriftReviewPanel({
               blocked: true,
               blockReason: data.blockReason ?? data.error ?? "This key change is blocked.",
               requiresConfirmation: true,
+              manualCandidate: data.manualCandidate === true,
+              manualValidation: data.manualValidation,
             });
             return;
           }
@@ -297,9 +393,12 @@ export function KeyDriftReviewPanel({
       }
     }
 
-    void loadPreview();
+    const timer = window.setTimeout(() => {
+      void loadPreview();
+    }, 350);
     return () => {
       ignore = true;
+      window.clearTimeout(timer);
     };
   }, [gateId, onError, pushId, selectedColumns]);
 
@@ -508,6 +607,82 @@ export function KeyDriftReviewPanel({
         )}
       </div>
 
+      <div className="space-y-3 border border-[rgba(201,147,58,0.08)] bg-void/30 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h4 className="label-norse text-[10px]">Manual Key Selection</h4>
+          <span className="text-[9px] uppercase tracking-[0.18em] text-text-dim">
+            {manualColumns.length} mapped columns
+          </span>
+        </div>
+        <p className="text-[11px] text-text-dim font-inconsolata leading-5">
+          Select mapped destination columns to validate a key against the staged upload. Hermod previews DDL
+          only after the selected key is unique and nonblank in the nonblank mapped rows.
+        </p>
+        <div className="border border-gold/10 bg-gold/[0.03] px-3 py-2 text-[11px] text-gold font-inconsolata break-words">
+          {selectedColumns && selectedColumns.length > 0
+            ? selectedColumns.join(" + ")
+            : "Select at least one mapped destination column"}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {manualColumns.map((column) => {
+            const checked =
+              selectedColumns?.some((selected) => sameColumns([selected], [column.destinationColumn])) ??
+              false;
+            return (
+              <label
+                key={column.destinationColumn}
+                className={`border p-3 cursor-pointer transition-colors ${
+                  checked
+                    ? "border-gold/40 bg-gold/[0.04]"
+                    : "border-[rgba(201,147,58,0.08)] hover:border-gold/20"
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() =>
+                      setSelectedColumns((current) => {
+                        const next = toggleManualKeyColumn(current ?? [], column.destinationColumn);
+                        return next.length > 0 ? next : null;
+                      })
+                    }
+                    className="mt-1"
+                  />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-text font-inconsolata break-words">
+                        {column.destinationColumn}
+                      </span>
+                      {column.isCurrentKey && (
+                        <span className="text-[8px] uppercase tracking-[0.16em] border border-amber-700/30 text-amber-400 px-1.5 py-0.5">
+                          Current
+                        </span>
+                      )}
+                      {column.isDiscriminator && (
+                        <span className="text-[8px] uppercase tracking-[0.16em] border border-frost/20 text-frost px-1.5 py-0.5">
+                          Discriminator
+                        </span>
+                      )}
+                    </div>
+                    {column.sourceColumn && column.sourceColumn !== column.destinationColumn && (
+                      <div className="text-[10px] text-text-dim font-inconsolata break-words">
+                        Source: {column.sourceColumn}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-3 gap-2 text-[10px] text-text-dim font-inconsolata">
+                      <Metric label="Nonblank" value={column.nonBlankCount} />
+                      <Metric label="Blanks" value={column.nullCount} />
+                      <Metric label="Distinct" value={column.distinctCount} />
+                    </div>
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
       {keyDrift.validationStats && (
         <div className="border border-[rgba(201,147,58,0.08)] bg-void/30 p-3">
           <div className="label-norse text-[9px] mb-2">Validation Stats</div>
@@ -529,6 +704,35 @@ export function KeyDriftReviewPanel({
             <h4 className="label-norse text-[10px]">DDL Preview</h4>
             {loadingPreview && <span className="text-[10px] text-text-dim">Loading...</span>}
           </div>
+
+          {ddlPreview?.manualValidation && (
+            <div
+              className={`border px-3 py-2 text-[11px] font-inconsolata ${
+                ddlPreview.manualValidation.ok
+                  ? "border-frost/20 bg-frost/[0.04] text-frost"
+                  : "border-ember/30 bg-ember/10 text-ember"
+              }`}
+            >
+              {ddlPreview.manualValidation.ok
+                ? "Selected key is unique in the staged upload."
+                : "Selected key is not valid for the staged upload."}
+            </div>
+          )}
+
+          {ddlPreview?.manualValidation && !ddlPreview.manualValidation.ok && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <ExampleList
+                title="Selected-Key Duplicates"
+                empty="No selected-key duplicate examples were captured."
+                items={ddlPreview.manualValidation.duplicateExamples.map(formatDuplicateExample)}
+              />
+              <ExampleList
+                title="Selected-Key Blanks"
+                empty="No selected-key blank examples were captured."
+                items={ddlPreview.manualValidation.nullKeyExamples.map(formatNullKeyExample)}
+              />
+            </div>
+          )}
 
           {ddlPreview?.blocked && (
             <div className="border border-ember/30 bg-ember/10 px-3 py-2 text-[11px] text-ember font-inconsolata">
@@ -567,7 +771,7 @@ export function KeyDriftReviewPanel({
               type="checkbox"
               checked={approvalChecked}
               onChange={(event) => setApprovalChecked(event.target.checked)}
-              disabled={!ddlPreview || ddlPreview.blocked}
+              disabled={!ddlPreview || ddlPreview.blocked || ddlPreview.manualValidation?.ok === false}
               className="mt-0.5"
             />
             <span>I approve changing the destination key constraint.</span>

@@ -44,6 +44,17 @@ export interface IndexedMappedRow {
   rowIndex: number;
 }
 
+export interface KeyDriftMappedColumn {
+  name: string;
+  sourceColumn: string;
+  destinationColumn: string;
+  nonBlankCount: number;
+  nullCount: number;
+  distinctCount: number;
+  isCurrentKey: boolean;
+  isDiscriminator: boolean;
+}
+
 export interface KeyDriftDetails {
   oldKey: string[];
   duplicateExamples: Array<{
@@ -69,6 +80,9 @@ export interface KeyDriftDetails {
   discriminatorColumns?: DiscriminatorColumnStats[];
   currentKeyDuplicateGroupCount?: number;
   candidateSearchLimits?: CandidateSearchLimits;
+  mappedColumns?: KeyDriftMappedColumn[];
+  manualSelection?: boolean;
+  manualValidation?: unknown;
   selectedKey: string[] | null;
 }
 
@@ -390,6 +404,7 @@ async function prepareMappedRowsForPushWithRecommendation(input: {
   prepared.keyDrift = await enrichKeyDriftRecommendation({
     keyDrift: prepared.keyDrift,
     mappedRows: prepared.mappedRows,
+    columnMapping: input.columnMapping,
     columns: input.columnMapping.map((mapping) => mapping.destinationColumn),
   });
   return prepared;
@@ -491,6 +506,7 @@ export function preflightUpsertKey(input: {
 async function enrichKeyDriftRecommendation(input: {
   keyDrift: KeyDriftDetails;
   mappedRows: Record<string, unknown>[];
+  columnMapping: ColumnMap[];
   columns: string[];
 }): Promise<KeyDriftDetails> {
   const discovery = discoverUniqueColumnCombinations(input.mappedRows, input.columns, {
@@ -528,8 +544,66 @@ async function enrichKeyDriftRecommendation(input: {
     discriminatorColumns: discovery.stats.discriminatorColumns,
     currentKeyDuplicateGroupCount: discovery.stats.currentKeyDuplicateGroupCount,
     candidateSearchLimits: discovery.stats.candidateSearchLimits,
+    mappedColumns: buildMappedColumnMetadata({
+      mappedRows: input.mappedRows,
+      columnMapping: input.columnMapping,
+      currentKeyColumns: input.keyDrift.oldKey,
+      discriminatorColumns: discovery.stats.discriminatorColumns.map((column) => column.column),
+    }),
     selectedKey: null,
   };
+}
+
+function buildMappedColumnMetadata(input: {
+  mappedRows: Record<string, unknown>[];
+  columnMapping: ColumnMap[];
+  currentKeyColumns: string[];
+  discriminatorColumns: string[];
+}): KeyDriftMappedColumn[] {
+  const currentKeySet = new Set(input.currentKeyColumns.map((column) => column.toLowerCase()));
+  const discriminatorSet = new Set(input.discriminatorColumns.map((column) => column.toLowerCase()));
+  const byDestination = new Map<string, ColumnMap>();
+
+  for (const mapping of input.columnMapping) {
+    const key = mapping.destinationColumn.toLowerCase();
+    if (!byDestination.has(key)) byDestination.set(key, mapping);
+  }
+
+  return [...byDestination.values()].map((mapping) => {
+    let nonBlankCount = 0;
+    let nullCount = 0;
+    const distinct = new Set<string>();
+
+    for (const row of input.mappedRows) {
+      const value = row[mapping.destinationColumn];
+      if (isBlankMappedValue(value)) {
+        nullCount++;
+        continue;
+      }
+
+      nonBlankCount++;
+      distinct.add(JSON.stringify(normalizeColumnValueForStats(value)));
+    }
+
+    return {
+      name: mapping.destinationColumn,
+      sourceColumn: mapping.sourceColumn,
+      destinationColumn: mapping.destinationColumn,
+      nonBlankCount,
+      nullCount,
+      distinctCount: distinct.size,
+      isCurrentKey: currentKeySet.has(mapping.destinationColumn.toLowerCase()),
+      isDiscriminator: discriminatorSet.has(mapping.destinationColumn.toLowerCase()),
+    };
+  });
+}
+
+function normalizeColumnValueForStats(value: unknown): string | number | boolean | null {
+  if (value == null) return null;
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
 }
 
 function shouldUseAiKeyRecommendation(): boolean {

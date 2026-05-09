@@ -28,6 +28,10 @@ import {
   type KeyDdlProviderType,
   type ReplaceKeyConstraintPlan,
 } from "@/lib/gates/key-ddl";
+import {
+  validateSelectedGateKey,
+  type SelectedGateKeyValidationResult,
+} from "@/lib/gates/key-discovery";
 
 type KeyHardeningAction = "APPROVE_KEY_HARDENING" | "CANCEL";
 
@@ -48,6 +52,8 @@ interface KeyHardeningReview {
   plan: ReplaceKeyConstraintPlan;
   tempFile: { buffer: Buffer; extension: string };
   blankRowsSkipped: number;
+  manualCandidate: boolean;
+  manualValidation: SelectedGateKeyValidationResult;
 }
 
 // GET /api/gates/[gateId]/push/[pushId]/resolve?selectedKey=a,b - DDL preview
@@ -82,20 +88,20 @@ export const GET = withAuth(async (req, ctx) => {
 
   const keyDrift = parseKeyDrift(push.keyDrift);
   const candidate = findVerifiedCandidate(keyDrift, selectedKey);
-  if (!candidate) {
-    return NextResponse.json({ error: "Selected key is not a verified candidate" }, { status: 400 });
-  }
 
   const review = await buildKeyHardeningReview({
     gate,
     push,
     keyDrift,
     selectedKey,
+    manualCandidate: !candidate,
   });
   if ("response" in review) return review.response;
 
   return NextResponse.json({
     selectedKey,
+    manualCandidate: review.manualCandidate,
+    manualValidation: review.manualValidation,
     ddl: review.plan.ddl,
     warnings: review.plan.warnings,
     blocked: review.plan.blocked,
@@ -167,15 +173,13 @@ async function resolveKeyDriftPush(input: {
 
   const keyDrift = parseKeyDrift(input.push.keyDrift);
   const candidate = findVerifiedCandidate(keyDrift, selectedKey);
-  if (!candidate) {
-    return NextResponse.json({ error: "Selected key is not a verified candidate" }, { status: 400 });
-  }
 
   const review = await buildKeyHardeningReview({
     gate,
     push: input.push,
     keyDrift,
     selectedKey,
+    manualCandidate: !candidate,
     executeDdl: input.body.confirm === true,
     confirmedDdl: input.body.confirmedDdl,
   });
@@ -186,6 +190,8 @@ async function resolveKeyDriftPush(input: {
       pushId: input.pushId,
       status: "KEY_DRIFT",
       selectedKey,
+      manualCandidate: review.manualCandidate,
+      manualValidation: review.manualValidation,
       ddl: review.plan.ddl,
       warnings: review.plan.warnings,
       blocked: review.plan.blocked,
@@ -223,6 +229,8 @@ async function resolveKeyDriftPush(input: {
       keyDrift: {
         ...keyDrift,
         selectedKey,
+        manualSelection: review.manualCandidate,
+        manualValidation: review.manualValidation,
         appliedDdl: review.plan.ddl,
       } as unknown as Prisma.InputJsonValue,
     },
@@ -464,6 +472,7 @@ async function buildKeyHardeningReview(input: {
   push: { tempFileId: string | null };
   keyDrift: KeyDriftDetails;
   selectedKey: string[];
+  manualCandidate?: boolean;
   executeDdl?: boolean;
   confirmedDdl?: string[];
 }): Promise<KeyHardeningReview | { response: NextResponse }> {
@@ -484,15 +493,37 @@ async function buildKeyHardeningReview(input: {
     primaryKeyColumns: input.selectedKey,
     mergeStrategy: "UPSERT",
   });
+  const manualValidation = validateSelectedGateKey({
+    rows: prepared.mappedRows,
+    selectedKey: input.selectedKey,
+    blankRowsAlreadyRemoved: true,
+  });
   if (prepared.keyDrift) {
+    const responseValidation: SelectedGateKeyValidationResult = {
+      ...manualValidation,
+      ok: false,
+      duplicateExamples: prepared.keyDrift.duplicateExamples.length > 0
+        ? prepared.keyDrift.duplicateExamples
+        : manualValidation.duplicateExamples,
+      nullKeyExamples: prepared.keyDrift.nullKeyExamples.length > 0
+        ? prepared.keyDrift.nullKeyExamples
+        : manualValidation.nullKeyExamples,
+    };
     return {
       response: NextResponse.json(
         {
           status: "KEY_DRIFT",
           error: "Selected key no longer validates against the staged upload.",
+          selectedKey: input.selectedKey,
+          manualCandidate: input.manualCandidate === true,
+          manualValidation: responseValidation,
+          blocked: true,
+          blockReason: buildManualValidationBlockReason(responseValidation),
           keyDrift: {
             ...input.keyDrift,
             selectedKey: input.selectedKey,
+            manualSelection: input.manualCandidate === true,
+            manualValidation: responseValidation,
             duplicateExamples: prepared.keyDrift.duplicateExamples,
             nullKeyExamples: prepared.keyDrift.nullKeyExamples,
             reason: prepared.keyDrift.reason,
@@ -583,6 +614,8 @@ async function buildKeyHardeningReview(input: {
             status: "KEY_DRIFT",
             error: destinationValidation.reason,
             selectedKey: input.selectedKey,
+            manualCandidate: input.manualCandidate === true,
+            manualValidation,
             destinationValidation,
             ddl: plan.ddl,
             warnings: plan.warnings,
@@ -600,6 +633,8 @@ async function buildKeyHardeningReview(input: {
           {
             status: "KEY_DRIFT",
             selectedKey: input.selectedKey,
+            manualCandidate: input.manualCandidate === true,
+            manualValidation,
             ddl: plan.ddl,
             warnings: plan.warnings,
             blocked: true,
@@ -628,6 +663,8 @@ async function buildKeyHardeningReview(input: {
       plan,
       tempFile,
       blankRowsSkipped: prepared.blankRowsSkipped,
+      manualCandidate: input.manualCandidate === true,
+      manualValidation,
     };
   } finally {
     await providerConn.close();
@@ -681,6 +718,9 @@ function parseKeyDrift(value: unknown): KeyDriftDetails {
       ? keyDrift.currentKeyDuplicateGroupCount
       : undefined,
     candidateSearchLimits: keyDrift?.candidateSearchLimits,
+    mappedColumns: Array.isArray(keyDrift?.mappedColumns) ? keyDrift.mappedColumns : undefined,
+    manualSelection: keyDrift?.manualSelection === true,
+    manualValidation: keyDrift?.manualValidation,
     selectedKey: Array.isArray(keyDrift?.selectedKey) ? keyDrift.selectedKey : null,
   };
 }
@@ -707,6 +747,16 @@ function destinationKeyToStoredPrimaryKey(selectedKey: string[], columnMapping: 
 function appendKeyHistory(existing: unknown, entry: Record<string, unknown>): Record<string, unknown>[] {
   const history = Array.isArray(existing) ? existing.filter(isPlainObject) : [];
   return [...history, entry];
+}
+
+function buildManualValidationBlockReason(validation: SelectedGateKeyValidationResult): string {
+  if (validation.nullCount > 0 && validation.duplicateCount > 0) {
+    return "Selected key has blank and duplicate values in the staged upload.";
+  }
+  if (validation.nullCount > 0) {
+    return "Selected key has blank values in the staged upload.";
+  }
+  return "Selected key is not unique in the staged upload.";
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
