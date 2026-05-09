@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { createReportSchema } from "@/lib/validations/reports";
+import { validateOptionalAttachableBlueprint } from "@/lib/mjolnir/blueprint-attach";
 
 // GET /api/reports — list user's reports
 export const GET = withAuth(async (_req, session) => {
@@ -61,6 +62,23 @@ export const POST = withAuth(async (req, session) => {
     );
   }
 
+  const blueprintValidation = await validateOptionalAttachableBlueprint({
+    blueprintId: parsed.data.blueprintId,
+    userId: session.user.id,
+    tenantId: session.tenantId,
+    context: "report",
+  });
+  if (!blueprintValidation.ok) {
+    return NextResponse.json(
+      {
+        error: blueprintValidation.error,
+        statefulSteps: blueprintValidation.statefulSteps,
+        suggestion: blueprintValidation.suggestion,
+      },
+      { status: blueprintValidation.status }
+    );
+  }
+
   const report = await prisma.report.create({
     data: {
       name: parsed.data.name,
@@ -69,6 +87,7 @@ export const POST = withAuth(async (req, session) => {
       connectionId: parsed.data.connectionId,
       formatting: parsed.data.formatting as Prisma.InputJsonValue ?? undefined,
       columnConfig: parsed.data.columnConfig as Prisma.InputJsonValue ?? undefined,
+      blueprintId: blueprintValidation.blueprint?.id ?? null,
       userId: session.user.id,
       tenantId: session.tenantId,
     },

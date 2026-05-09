@@ -4,7 +4,7 @@ import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { createRouteSchema } from "@/lib/validations/bifrost";
 import { calculateNextRun } from "@/lib/schedule-utils";
-import { validateBlueprintForStreaming } from "@/lib/bifrost/forge/forge-validator";
+import { validateOptionalAttachableBlueprint } from "@/lib/mjolnir/blueprint-attach";
 
 // GET /api/bifrost/routes — List all routes for current user
 export const GET = withAuth(async (req, session) => {
@@ -64,27 +64,22 @@ export const POST = withAuth(async (req, session) => {
     return NextResponse.json({ error: "Destination connection not found" }, { status: 404 });
   }
 
-  // Validate blueprint streaming compatibility if transform enabled
-  if (data.transformEnabled && data.blueprintId) {
-    const blueprint = await prisma.blueprint.findFirst({
-      where: { id: data.blueprintId, userId: session.user.id },
-      select: { steps: true },
-    });
-    if (!blueprint) {
-      return NextResponse.json({ error: "Blueprint not found" }, { status: 404 });
-    }
-    const steps = blueprint.steps as Array<{ type: string }>;
-    const validation = validateBlueprintForStreaming(steps);
-    if (!validation.valid) {
-      return NextResponse.json(
-        {
-          error: "Blueprint contains stateful steps not supported in streaming mode",
-          statefulSteps: validation.statefulSteps,
-          suggestion: validation.suggestion,
-        },
-        { status: 400 }
-      );
-    }
+  const blueprintValidation = await validateOptionalAttachableBlueprint({
+    blueprintId: data.blueprintId,
+    userId: session.user.id,
+    tenantId: session.tenantId,
+    context: "bifrost-route",
+    requireStreamingCompatible: data.transformEnabled && !!data.blueprintId,
+  });
+  if (!blueprintValidation.ok) {
+    return NextResponse.json(
+      {
+        error: blueprintValidation.error,
+        statefulSteps: blueprintValidation.statefulSteps,
+        suggestion: blueprintValidation.suggestion,
+      },
+      { status: blueprintValidation.status }
+    );
   }
 
   // Calculate initial nextRunAt
@@ -112,7 +107,7 @@ export const POST = withAuth(async (req, session) => {
       destId: data.destId,
       destConfig: data.destConfig as Prisma.InputJsonValue,
       transformEnabled: data.transformEnabled,
-      blueprintId: data.blueprintId ?? null,
+      blueprintId: blueprintValidation.blueprint?.id ?? null,
       frequency: data.frequency ?? null,
       daysOfWeek: data.daysOfWeek,
       dayOfMonth: data.dayOfMonth ?? null,

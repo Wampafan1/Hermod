@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
 import { updateReportSchema } from "@/lib/validations/reports";
+import { validateOptionalAttachableBlueprint } from "@/lib/mjolnir/blueprint-attach";
 
 // GET /api/reports/[id] — get single report
 export const GET = withAuth(async (req, session) => {
@@ -66,17 +67,25 @@ export const PUT = withAuth(async (req, session) => {
     }
   }
 
-  // If setting a blueprint, verify ownership (null = detach)
-  if (parsed.data.blueprintId !== undefined && parsed.data.blueprintId !== null) {
-    const bp = await prisma.blueprint.findFirst({
-      where: { id: parsed.data.blueprintId, userId: session.user.id },
+  let blueprintId: string | null | undefined;
+  if (parsed.data.blueprintId !== undefined) {
+    const blueprintValidation = await validateOptionalAttachableBlueprint({
+      blueprintId: parsed.data.blueprintId,
+      userId: session.user.id,
+      tenantId: session.tenantId,
+      context: "report",
     });
-    if (!bp) {
+    if (!blueprintValidation.ok) {
       return NextResponse.json(
-        { error: "Blueprint not found" },
-        { status: 404 }
+        {
+          error: blueprintValidation.error,
+          statefulSteps: blueprintValidation.statefulSteps,
+          suggestion: blueprintValidation.suggestion,
+        },
+        { status: blueprintValidation.status }
       );
     }
+    blueprintId = blueprintValidation.blueprint?.id ?? null;
   }
 
   const updated = await prisma.report.update({
@@ -88,7 +97,7 @@ export const PUT = withAuth(async (req, session) => {
       connectionId: parsed.data.connectionId,
       formatting: parsed.data.formatting as Prisma.InputJsonValue ?? undefined,
       columnConfig: parsed.data.columnConfig as Prisma.InputJsonValue ?? undefined,
-      blueprintId: parsed.data.blueprintId !== undefined ? parsed.data.blueprintId : undefined,
+      blueprintId,
     },
   });
 

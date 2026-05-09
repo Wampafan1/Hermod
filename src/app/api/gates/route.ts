@@ -142,6 +142,19 @@ export const POST = withAuth(async (req, ctx) => {
     );
   }
 
+  if (forgeEnabled && forgeBlueprintId) {
+    const forgeBlueprint = await prisma.forgeBlueprint.findFirst({
+      where: {
+        id: forgeBlueprintId,
+        tenantId: ctx.tenantId,
+      },
+      select: { id: true },
+    });
+    if (!forgeBlueprint) {
+      return NextResponse.json({ error: "Forge blueprint not found" }, { status: 404 });
+    }
+  }
+
   // Read temp file and profile it to save the schema snapshot
   const tempFile = await readTempFile(tempFileId);
   if (!tempFile) {

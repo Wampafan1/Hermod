@@ -33,6 +33,7 @@ export function createMockPrisma() {
     schedule: modelMock(),
     ravenSatellite: modelMock(),
     blueprint: modelMock(),
+    forgeBlueprint: modelMock(),
     $transaction: vi.fn(),
     $disconnect: vi.fn(),
   };

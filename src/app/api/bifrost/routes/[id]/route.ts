@@ -4,6 +4,7 @@ import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { updateRouteSchema } from "@/lib/validations/bifrost";
 import { calculateNextRun } from "@/lib/schedule-utils";
+import { validateOptionalAttachableBlueprint } from "@/lib/mjolnir/blueprint-attach";
 
 // GET /api/bifrost/routes/[id]
 export const GET = withAuth(async (req, session) => {
@@ -73,13 +74,32 @@ export const PUT = withAuth(async (req, session) => {
     }
   }
 
-  if (data.blueprintId !== undefined && data.blueprintId !== null) {
-    const blueprint = await prisma.blueprint.findFirst({
-      where: { id: data.blueprintId, userId: session.user.id },
-      select: { steps: true },
+  let blueprintId: string | null | undefined;
+  const blueprintChanged = data.blueprintId !== undefined;
+  const transformChanged = data.transformEnabled !== undefined;
+  if (blueprintChanged || transformChanged) {
+    const effectiveTransformEnabled = data.transformEnabled ?? existing.transformEnabled;
+    const effectiveBlueprintId = blueprintChanged ? data.blueprintId : existing.blueprintId;
+    const blueprintValidation = await validateOptionalAttachableBlueprint({
+      blueprintId: effectiveBlueprintId,
+      userId: session.user.id,
+      tenantId: session.tenantId,
+      context: "bifrost-route",
+      requireStreamingCompatible: effectiveTransformEnabled && !!effectiveBlueprintId,
     });
-    if (!blueprint) {
-      return NextResponse.json({ error: "Blueprint not found" }, { status: 404 });
+    if (!blueprintValidation.ok) {
+      return NextResponse.json(
+        {
+          error: blueprintValidation.error,
+          statefulSteps: blueprintValidation.statefulSteps,
+          suggestion: blueprintValidation.suggestion,
+        },
+        { status: blueprintValidation.status }
+      );
+    }
+
+    if (blueprintChanged) {
+      blueprintId = blueprintValidation.blueprint?.id ?? null;
     }
   }
 
@@ -114,7 +134,7 @@ export const PUT = withAuth(async (req, session) => {
       ...(data.destId !== undefined && { destId: data.destId }),
       ...(data.destConfig !== undefined && { destConfig: data.destConfig as Prisma.InputJsonValue }),
       ...(data.transformEnabled !== undefined && { transformEnabled: data.transformEnabled }),
-      ...(data.blueprintId !== undefined && { blueprintId: data.blueprintId }),
+      ...(data.blueprintId !== undefined && { blueprintId }),
       ...(data.frequency !== undefined && { frequency: data.frequency }),
       ...(data.daysOfWeek !== undefined && { daysOfWeek: data.daysOfWeek }),
       ...(data.dayOfMonth !== undefined && { dayOfMonth: data.dayOfMonth }),

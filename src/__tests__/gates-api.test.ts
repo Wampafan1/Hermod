@@ -4,10 +4,12 @@ const {
   mockConnectionFindFirst,
   mockRealmGateCreate,
   mockGatePushCreate,
+  mockForgeBlueprintFindFirst,
 } = vi.hoisted(() => ({
   mockConnectionFindFirst: vi.fn(),
   mockRealmGateCreate: vi.fn(),
   mockGatePushCreate: vi.fn(),
+  mockForgeBlueprintFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -32,6 +34,9 @@ vi.mock("@/lib/db", () => ({
     gatePush: {
       create: mockGatePushCreate,
     },
+    forgeBlueprint: {
+      findFirst: mockForgeBlueprintFindFirst,
+    },
   },
 }));
 
@@ -53,7 +58,7 @@ vi.mock("@/lib/duckdb/file-analyzer", () => ({
   analyzeExcel: vi.fn(),
 }));
 
-function gateCreateRequest(connectionId = "conn_tenant_a") {
+function gateCreateRequest(connectionId = "conn_tenant_a", overrides: Record<string, unknown> = {}) {
   return new Request("http://localhost/api/gates", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -76,6 +81,7 @@ function gateCreateRequest(connectionId = "conn_tenant_a") {
       ],
       forgeEnabled: false,
       forgeBlueprintId: null,
+      ...overrides,
     }),
   });
 }
@@ -98,5 +104,26 @@ describe("gates API", () => {
         tenantId: "tenant_b",
       },
     });
+  });
+
+  it("requires forge blueprint attachments to belong to the active tenant", async () => {
+    mockConnectionFindFirst.mockResolvedValue({ id: "conn_tenant_b", type: "POSTGRES", config: {}, credentials: null });
+    mockForgeBlueprintFindFirst.mockResolvedValue(null);
+
+    const { POST } = await import("@/app/api/gates/route");
+    const response = await POST(gateCreateRequest("conn_tenant_b", {
+      forgeEnabled: true,
+      forgeBlueprintId: "forge_tenant_a",
+    }));
+
+    expect(response.status).toBe(404);
+    expect(mockForgeBlueprintFindFirst).toHaveBeenCalledWith({
+      where: {
+        id: "forge_tenant_a",
+        tenantId: "tenant_b",
+      },
+      select: { id: true },
+    });
+    expect(mockRealmGateCreate).not.toHaveBeenCalled();
   });
 });
