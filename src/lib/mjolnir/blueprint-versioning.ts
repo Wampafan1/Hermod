@@ -16,6 +16,12 @@ import type {
   VersionSource,
 } from "@prisma/client";
 
+export const DEFAULT_BLUEPRINT_VERSION_RETENTION = 50;
+export const DEFAULT_BLUEPRINT_EXECUTION_RETENTION_DAYS = 180;
+export const DEFAULT_BLUEPRINT_EXECUTION_MAX_RECORDS = 5000;
+
+const EXECUTION_RETENTION_BATCH_SIZE = 500;
+
 // ─── Types ──────────────────────────────────────────
 
 export interface ChangeSummary {
@@ -36,6 +42,20 @@ interface CreateVersionInput {
   aiConfidence?: number;
   changeReason?: string;
   userId?: string;
+}
+
+interface RetentionPolicyOptions {
+  retentionCount?: number;
+  allowPruneVersionOne?: boolean;
+}
+
+export interface PruneBlueprintExecutionsInput {
+  blueprintId?: string;
+  tenantId?: string;
+  olderThanDays?: number;
+  maxRecordsPerBlueprint?: number;
+  batchSize?: number;
+  now?: Date;
 }
 
 interface ConfigDiff {
@@ -328,6 +348,8 @@ export async function completeExecution(
   if (result.status === "SUCCESS" && execution.versionId) {
     await maybeAutoLockVersion(execution.versionId);
   }
+
+  await enqueueBlueprintExecutionPruning(execution.blueprintId);
 }
 
 // ─── Metadata Updates (no new version) ──────────────
@@ -344,8 +366,42 @@ export async function updateBlueprintMetadata(
 
 // ─── Retention Policy ───────────────────────────────
 
-export async function enforceRetentionPolicy(blueprintId: string): Promise<number> {
-  const KEEP_RECENT = 50;
+export function getBlueprintVersionRetentionCount(): number {
+  return readPositiveIntegerEnv(
+    "MJOLNIR_VERSION_RETENTION_COUNT",
+    DEFAULT_BLUEPRINT_VERSION_RETENTION
+  );
+}
+
+export function getBlueprintExecutionRetentionDays(): number {
+  return readPositiveIntegerEnv(
+    "MJOLNIR_EXECUTION_RETENTION_DAYS",
+    DEFAULT_BLUEPRINT_EXECUTION_RETENTION_DAYS
+  );
+}
+
+export function getBlueprintExecutionRetentionMaxRecords(): number {
+  return readPositiveIntegerEnv(
+    "MJOLNIR_EXECUTION_RETENTION_MAX",
+    DEFAULT_BLUEPRINT_EXECUTION_MAX_RECORDS
+  );
+}
+
+export async function enforceRetentionPolicy(
+  blueprintId: string,
+  options: RetentionPolicyOptions = {}
+): Promise<number> {
+  const retentionCount = normalizePositiveInteger(
+    options.retentionCount,
+    getBlueprintVersionRetentionCount()
+  );
+
+  const blueprint = await prisma.forgeBlueprint.findUnique({
+    where: { id: blueprintId },
+    select: { currentVersion: true },
+  });
+
+  if (!blueprint) return 0;
 
   const allVersions = await prisma.forgeBlueprintVersion.findMany({
     where: { blueprintId },
@@ -357,7 +413,9 @@ export async function enforceRetentionPolicy(blueprintId: string): Promise<numbe
 
   for (let i = 0; i < allVersions.length; i++) {
     const v = allVersions[i];
-    if (i < KEEP_RECENT) continue;
+    if (i < retentionCount) continue;
+    if (v.version === blueprint.currentVersion) continue;
+    if (v.version === 1 && !options.allowPruneVersionOne) continue;
     if (v.isLocked) continue;
     if (v._count.executions > 0) continue;
     toDelete.push(v.id);
@@ -370,6 +428,205 @@ export async function enforceRetentionPolicy(blueprintId: string): Promise<numbe
   }
 
   return toDelete.length;
+}
+
+export async function pruneBlueprintExecutions(
+  input: PruneBlueprintExecutionsInput = {}
+): Promise<number> {
+  const olderThanDays = normalizePositiveInteger(
+    input.olderThanDays,
+    getBlueprintExecutionRetentionDays()
+  );
+  const maxRecordsPerBlueprint = normalizePositiveInteger(
+    input.maxRecordsPerBlueprint,
+    getBlueprintExecutionRetentionMaxRecords()
+  );
+  const batchSize = normalizePositiveInteger(
+    input.batchSize,
+    EXECUTION_RETENTION_BATCH_SIZE
+  );
+  const cutoff = new Date((input.now ?? new Date()).getTime() - olderThanDays * 24 * 60 * 60 * 1000);
+
+  const blueprintWhere: Prisma.ForgeBlueprintWhereInput = {};
+  if (input.blueprintId) blueprintWhere.id = input.blueprintId;
+  if (input.tenantId) blueprintWhere.tenantId = input.tenantId;
+
+  const blueprints = await prisma.forgeBlueprint.findMany({
+    where: blueprintWhere,
+    select: { id: true, currentVersion: true },
+  });
+
+  let deleted = 0;
+
+  for (const blueprint of blueprints) {
+    const protectedVersions = await prisma.forgeBlueprintVersion.findMany({
+      where: {
+        blueprintId: blueprint.id,
+        OR: [
+          { isLocked: true },
+          { version: blueprint.currentVersion },
+        ],
+      },
+      select: { id: true, version: true },
+    });
+
+    const protectedVersionIds = protectedVersions.map((version) => version.id);
+    const protectedVersionNumbers = protectedVersions.map((version) => version.version);
+
+    deleted += await deleteExecutionBatches({
+      where: buildPrunableExecutionWhere({
+        blueprintId: blueprint.id,
+        protectedVersionIds,
+        protectedVersionNumbers,
+        completedBefore: cutoff,
+      }),
+      batchSize,
+    });
+
+    deleted += await deleteExecutionsBeyondMaxRecords({
+      blueprintId: blueprint.id,
+      protectedVersionIds,
+      protectedVersionNumbers,
+      maxRecordsPerBlueprint,
+      batchSize,
+    });
+  }
+
+  return deleted;
+}
+
+async function deleteExecutionsBeyondMaxRecords(input: {
+  blueprintId: string;
+  protectedVersionIds: string[];
+  protectedVersionNumbers: number[];
+  maxRecordsPerBlueprint: number;
+  batchSize: number;
+}): Promise<number> {
+  let deleted = 0;
+
+  while (true) {
+    const excess = await prisma.forgeBlueprintExecution.findMany({
+      where: buildPrunableExecutionWhere({
+        blueprintId: input.blueprintId,
+        protectedVersionIds: input.protectedVersionIds,
+        protectedVersionNumbers: input.protectedVersionNumbers,
+        requireCompleted: true,
+      }),
+      orderBy: [
+        { completedAt: "desc" },
+        { startedAt: "desc" },
+      ],
+      skip: input.maxRecordsPerBlueprint,
+      take: input.batchSize,
+      select: { id: true },
+    });
+
+    if (excess.length === 0) break;
+
+    await prisma.forgeBlueprintExecution.deleteMany({
+      where: { id: { in: excess.map((execution) => execution.id) } },
+    });
+    deleted += excess.length;
+
+    if (excess.length < input.batchSize) break;
+  }
+
+  return deleted;
+}
+
+async function deleteExecutionBatches(input: {
+  where: Prisma.ForgeBlueprintExecutionWhereInput;
+  batchSize: number;
+}): Promise<number> {
+  let deleted = 0;
+
+  while (true) {
+    const batch = await prisma.forgeBlueprintExecution.findMany({
+      where: input.where,
+      orderBy: [
+        { completedAt: "asc" },
+        { startedAt: "asc" },
+      ],
+      take: input.batchSize,
+      select: { id: true },
+    });
+
+    if (batch.length === 0) break;
+
+    await prisma.forgeBlueprintExecution.deleteMany({
+      where: { id: { in: batch.map((execution) => execution.id) } },
+    });
+    deleted += batch.length;
+
+    if (batch.length < input.batchSize) break;
+  }
+
+  return deleted;
+}
+
+function buildPrunableExecutionWhere(input: {
+  blueprintId: string;
+  protectedVersionIds: string[];
+  protectedVersionNumbers: number[];
+  completedBefore?: Date;
+  requireCompleted?: boolean;
+}): Prisma.ForgeBlueprintExecutionWhereInput {
+  const where: Prisma.ForgeBlueprintExecutionWhereInput = {
+    blueprintId: input.blueprintId,
+    status: { not: "RUNNING" },
+  };
+  const and: Prisma.ForgeBlueprintExecutionWhereInput[] = [];
+
+  if (input.completedBefore) {
+    where.completedAt = { lt: input.completedBefore };
+  } else if (input.requireCompleted) {
+    where.completedAt = { not: null };
+  }
+
+  if (input.protectedVersionIds.length > 0) {
+    and.push({
+      OR: [
+        { versionId: null },
+        { versionId: { notIn: input.protectedVersionIds } },
+      ],
+    });
+  }
+
+  if (input.protectedVersionNumbers.length > 0) {
+    and.push({ versionNumber: { notIn: input.protectedVersionNumbers } });
+  }
+
+  if (and.length > 0) {
+    where.AND = and;
+  }
+
+  return where;
+}
+
+async function enqueueBlueprintExecutionPruning(blueprintId: string): Promise<void> {
+  try {
+    const { getBoss } = await import("@/lib/pg-boss");
+    const boss = getBoss();
+    await boss.send("prune-blueprint-executions", {
+      blueprintId,
+    }, {
+      retryLimit: 1,
+      retryDelay: 60,
+      singletonKey: `prune-blueprint-executions:${blueprintId}`,
+    });
+  } catch {
+    // Retention will catch up on a later version or execution prune job.
+  }
+}
+
+function readPositiveIntegerEnv(name: string, fallback: number): number {
+  return normalizePositiveInteger(process.env[name], fallback);
+}
+
+function normalizePositiveInteger(value: unknown, fallback: number): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
+  return parsed;
 }
 
 // ─── Change Summary Generation ──────────────────────

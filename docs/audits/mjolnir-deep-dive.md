@@ -1034,6 +1034,53 @@ Remaining follow-up:
 - Full immutable version pinning migration for reports, Bifrost routes, and RealmGates.
 - Optional `RunLog`/`RouteLog` metadata fields so execution descriptors can be persisted and shown in history UI.
 
+## Version Pruning and Execution Retention Patch Results
+
+Current version protection:
+
+- `src/lib/mjolnir/blueprint-versioning.ts` now explicitly loads `ForgeBlueprint.currentVersion` before pruning versions.
+- The current version is always protected, even when it falls outside the retained latest-version window.
+- Version 1 remains protected by default and can only be pruned through an explicit helper option when it is not current, locked, or executed.
+
+Locked and executed version protection:
+
+- Locked `ForgeBlueprintVersion` records remain protected.
+- Versions referenced by any `ForgeBlueprintExecution` remain protected.
+- The newest `MJOLNIR_VERSION_RETENTION_COUNT` versions remain protected by retention order.
+- Default version retention remains 50 versions.
+
+Execution retention policy:
+
+- Added explicit defaults:
+  - `DEFAULT_BLUEPRINT_VERSION_RETENTION = 50`
+  - `DEFAULT_BLUEPRINT_EXECUTION_RETENTION_DAYS = 180`
+  - `DEFAULT_BLUEPRINT_EXECUTION_MAX_RECORDS = 5000`
+- Added env overrides:
+  - `MJOLNIR_VERSION_RETENTION_COUNT`
+  - `MJOLNIR_EXECUTION_RETENTION_DAYS`
+  - `MJOLNIR_EXECUTION_RETENTION_MAX`
+- Added `pruneBlueprintExecutions()` with optional `blueprintId`, `tenantId`, `olderThanDays`, and `maxRecordsPerBlueprint` filters.
+- Execution pruning deletes old completed executions in bounded batches, never deletes `RUNNING` executions, keeps recent executions, and protects executions tied to current or locked versions when practical.
+
+Worker/job behavior:
+
+- The existing `prune-blueprint-versions` worker job now also prunes old execution records for the same ForgeBlueprint.
+- Added a `prune-blueprint-executions` worker job for execution-retention cleanup after execution completion.
+- `completeExecution()` now enqueues execution pruning with a per-blueprint singleton key, keeping cleanup asynchronous and bounded.
+
+Tests added:
+
+- `src/__tests__/mjolnir/blueprint-retention.test.ts`: current version protection, locked version protection, executed version protection, old unlocked/unexecuted version pruning, env retention count override, non-deletion of `RUNNING` executions, old completed execution pruning, max-record pruning, and bounded batch behavior.
+
+Validation results:
+
+- Focused blueprint retention tests passed: 1 test file and 7 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 90 test files and 1229 tests.
+- `npm run build`: passed; pre-existing lint warnings were reported during the build.
+- `npm run lint`: passed with pre-existing warnings.
+
 ## Recommended Next Prompt
 
 Make the product decision for Mjolnir ownership and retention before the next schema change:

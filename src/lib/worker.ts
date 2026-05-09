@@ -152,10 +152,28 @@ async function main() {
 
   // Blueprint version pruning — runs asynchronously after new versions are created
   await boss.work("prune-blueprint-versions", async (job: { data: { blueprintId: string } }) => {
-    const { enforceRetentionPolicy } = await import("@/lib/mjolnir/blueprint-versioning");
-    const pruned = await enforceRetentionPolicy(job.data.blueprintId);
+    const { enforceRetentionPolicy, pruneBlueprintExecutions } = await import(
+      "@/lib/mjolnir/blueprint-versioning"
+    );
+    const prunedVersions = await enforceRetentionPolicy(job.data.blueprintId);
+    const prunedExecutions = await pruneBlueprintExecutions({ blueprintId: job.data.blueprintId });
+    if (prunedVersions > 0) {
+      console.log(`[Worker] Pruned ${prunedVersions} old blueprint version(s) for ${job.data.blueprintId}`);
+    }
+    if (prunedExecutions > 0) {
+      console.log(`[Worker] Pruned ${prunedExecutions} old blueprint execution(s) for ${job.data.blueprintId}`);
+    }
+  });
+
+  // Blueprint execution pruning - queued after execution completion with per-blueprint singletoning
+  await boss.work("prune-blueprint-executions", async (job: { data: { blueprintId?: string; tenantId?: string } }) => {
+    const { pruneBlueprintExecutions } = await import("@/lib/mjolnir/blueprint-versioning");
+    const pruned = await pruneBlueprintExecutions({
+      blueprintId: job.data.blueprintId,
+      tenantId: job.data.tenantId,
+    });
     if (pruned > 0) {
-      console.log(`[Worker] Pruned ${pruned} old blueprint version(s) for ${job.data.blueprintId}`);
+      console.log(`[Worker] Pruned ${pruned} old blueprint execution(s)`);
     }
   });
 
