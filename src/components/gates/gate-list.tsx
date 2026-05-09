@@ -159,11 +159,11 @@ function GateCard({ gate, now }: { gate: GateItem; now: number }) {
       {needsKeyReview && (
         <Link
           href={`/gates/${gate.id}`}
-          className="block border border-amber-700/30 bg-amber-900/10 px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-amber-400 hover:border-amber-500/50 transition-colors"
+          className="block border border-ember/40 bg-void/70 px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-gold-bright hover:border-ember/70 hover:bg-ember/[0.08] transition-colors"
         >
           Key review needed
           {gate.latestPushCreatedAt && (
-            <span className="ml-2 text-text-dim normal-case tracking-[0.06em]">
+            <span className="ml-2 text-text normal-case tracking-[0.06em]">
               {relativeTime(gate.latestPushCreatedAt, now)}
             </span>
           )}

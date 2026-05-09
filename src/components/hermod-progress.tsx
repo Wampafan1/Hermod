@@ -440,7 +440,7 @@ export default function HermodProgress({
         {/* Ambient glow */}
         <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg">
           <div className="absolute bottom-0 left-1/2 h-24 w-72 -translate-x-1/2 rounded-full bg-[#D4AF37]/[0.03] blur-3xl" />
-          <div className="absolute left-[20%] top-0 h-20 w-48 rounded-full bg-amber-900/[0.04] blur-2xl" />
+          <div className="absolute left-[20%] top-0 h-20 w-48 rounded-full bg-gold/[0.04] blur-2xl" />
         </div>
 
         {/* ══════ FORGE VARIANT ══════ */}

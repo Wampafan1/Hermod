@@ -191,4 +191,32 @@ describe("Gate push validation status endpoint", () => {
       vi.useRealTimers();
     }
   });
+
+  it("logs worker validation start and final status without sensitive payloads", async () => {
+    mockGatePushFindFirst
+      .mockResolvedValueOnce(push({ status: "VALIDATED" }))
+      .mockResolvedValueOnce(push({ status: "VALIDATED" }));
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    try {
+      const { handleGateValidatePush } = await import("@/lib/gates/push-validation");
+      await handleGateValidatePush({
+        data: {
+          pushId: "push_1",
+          gateId: "gate_1",
+          tenantId: "tenant_1",
+          tempFileId: "tmp_1",
+        },
+      });
+
+      const logs = info.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logs).toContain("Starting gate validation pushId=push_1 gateId=gate_1");
+      expect(logs).toContain("Finished gate validation pushId=push_1 gateId=gate_1 status=VALIDATED");
+      expect(logs).not.toContain("rawRows");
+      expect(logs).not.toContain("credentials");
+      expect(logs).not.toContain("secret");
+    } finally {
+      info.mockRestore();
+    }
+  });
 });

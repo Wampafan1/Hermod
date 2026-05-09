@@ -8,6 +8,7 @@ import {
   KeyDriftReviewPanel,
   type KeyDriftDetails,
 } from "@/components/gates/key-drift-review-panel";
+import { gateValidationFailureMessage } from "@/lib/gates/validation-copy";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -111,7 +112,7 @@ interface PushValidationResult {
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     ACTIVE: "text-emerald-400 bg-emerald-900/20 border-emerald-700/30",
-    PAUSED: "text-amber-400 bg-amber-900/20 border-amber-700/30",
+    PAUSED: "text-gold-bright bg-void/70 border-ember/40",
     ARCHIVED: "text-text-dim bg-void/50 border-[rgba(201,147,58,0.1)]",
     SUCCESS: "text-emerald-400",
     PARTIAL: "text-amber-400",
@@ -426,7 +427,7 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
         }
 
         if (data.status === "FAILED") {
-          setError(data.errorMessage || "Validation failed");
+          setError(gateValidationFailureMessage(data.errorMessage));
           setPushState("failed");
         }
       } catch {
@@ -689,6 +690,9 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
           <span className="spinner-norse mb-3" style={{ width: 20, height: 20 }} />
           <span className="text-text-dim text-xs tracking-widest uppercase">
             {validationStageText(validation?.validationStage)}
+          </span>
+          <span className="mt-2 max-w-md text-[10px] font-inconsolata text-text-dim">
+            Validation runs in the Hermod worker. Keep npm run worker running in development.
           </span>
           {validation?.pushId && !validationTakingLong && (
             <button
@@ -1024,8 +1028,8 @@ function SchemaDriftPanel({
   return (
     <div className="space-y-4">
       {/* Warning banner */}
-      <div className="bg-amber-900/10 border border-amber-700/30 px-4 py-3">
-        <h3 className="text-amber-400 text-sm font-cinzel uppercase tracking-wider">
+      <div className="bg-void/70 border border-ember/40 px-4 py-3">
+        <h3 className="text-gold-bright text-sm font-cinzel uppercase tracking-wider">
           Schema Change Detected
         </h3>
       </div>
@@ -1049,8 +1053,8 @@ function SchemaDriftPanel({
           </div>
         ))}
         {diff.typeChanged.map((c) => (
-          <div key={c.name} className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/[0.04] border border-amber-700/10 text-xs">
-            <span className="text-amber-400 text-[9px] uppercase tracking-wider">~ Changed</span>
+          <div key={c.name} className="flex items-center gap-2 px-3 py-1.5 bg-void/50 border border-ember/20 text-xs">
+            <span className="text-gold-bright text-[9px] uppercase tracking-wider">~ Changed</span>
             <span className="font-inconsolata text-text">{c.name}</span>
             <span className="text-text-dim text-[9px]">{c.oldType} → {c.newType}</span>
           </div>

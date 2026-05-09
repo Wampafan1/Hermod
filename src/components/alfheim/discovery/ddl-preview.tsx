@@ -92,9 +92,9 @@ export function DDLPreview({ tableName, schema }: DDLPreviewProps) {
 
       {/* Warnings */}
       {warnings.length > 0 && (
-        <div className="bg-amber-900/20 border border-amber-700/30 p-2">
+        <div className="bg-void/70 border border-ember/40 p-2">
           {warnings.map((w, i) => (
-            <p key={i} className="text-amber-400 text-[10px] tracking-wide">{w}</p>
+            <p key={i} className="text-gold-bright text-[10px] tracking-wide">{w}</p>
           ))}
         </div>
       )}

@@ -246,7 +246,7 @@ export default function RavenDetailPage() {
               <button
                 onClick={handleRevoke}
                 disabled={actionLoading}
-                className="btn-ghost text-xs text-amber-400 border-amber-400/30 hover:bg-amber-400/10"
+                className="btn-ghost text-xs text-gold-bright border-ember/40 hover:bg-ember/[0.08]"
               >
                 Revoke
               </button>

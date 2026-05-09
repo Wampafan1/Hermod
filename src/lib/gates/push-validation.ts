@@ -82,7 +82,20 @@ export function buildSchemaDriftResolutionOptions(input: {
 }
 
 export async function handleGateValidatePush(job: { data: GateValidatePushJob }) {
-  await validateStagedGatePush(job.data);
+  const { pushId, gateId, tenantId } = job.data;
+  console.info(`[GateValidation] Starting gate validation pushId=${pushId} gateId=${gateId}`);
+
+  try {
+    await validateStagedGatePush(job.data);
+  } finally {
+    const push = await prisma.gatePush.findFirst({
+      where: { id: pushId, gateId, tenantId },
+      select: { status: true },
+    });
+    console.info(
+      `[GateValidation] Finished gate validation pushId=${pushId} gateId=${gateId} status=${push?.status ?? "UNKNOWN"}`
+    );
+  }
 }
 
 export async function validateStagedGatePush(input: GateValidatePushJob): Promise<void> {

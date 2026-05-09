@@ -457,8 +457,8 @@ export function KeyDriftReviewPanel({
     <section className="card-norse p-5 space-y-5 border-amber-700/30">
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="heading-norse text-sm text-amber-400">Key Review Needed</h3>
-          <span className="text-[9px] uppercase tracking-[0.2em] px-2 py-0.5 border border-amber-700/30 text-amber-400 bg-amber-900/10">
+          <h3 className="heading-norse text-sm text-gold-bright">Key Review Needed</h3>
+          <span className="text-[9px] uppercase tracking-[0.2em] px-2 py-0.5 border border-ember/40 text-gold-bright bg-void/70">
             Key Drift
           </span>
         </div>
@@ -520,7 +520,7 @@ export function KeyDriftReviewPanel({
           </div>
         )}
         {discoveryDiagnostics.discoveryMode === "CAPPED" && (
-          <div className="border border-amber-700/30 bg-amber-900/10 px-3 py-2 text-[11px] text-amber-400 font-inconsolata">
+          <div className="border border-ember/30 bg-void/70 px-3 py-2 text-[11px] text-gold-bright font-inconsolata">
             Discovery hit search limits. You can still select and validate a key manually.
           </div>
         )}
@@ -550,7 +550,7 @@ export function KeyDriftReviewPanel({
         </div>
 
         {noReliableKeyMessage ? (
-          <div className="border border-amber-700/30 bg-amber-900/10 px-3 py-3 text-[11px] text-amber-400 font-inconsolata">
+          <div className="border border-ember/30 bg-void/70 px-3 py-3 text-[11px] text-gold-bright font-inconsolata">
             {noReliableKeyMessage}
           </div>
         ) : (
@@ -655,7 +655,7 @@ export function KeyDriftReviewPanel({
                         {column.destinationColumn}
                       </span>
                       {column.isCurrentKey && (
-                        <span className="text-[8px] uppercase tracking-[0.16em] border border-amber-700/30 text-amber-400 px-1.5 py-0.5">
+                        <span className="text-[8px] uppercase tracking-[0.16em] border border-gold/30 text-gold-bright px-1.5 py-0.5">
                           Current
                         </span>
                       )}
@@ -743,7 +743,7 @@ export function KeyDriftReviewPanel({
           {(ddlPreview?.warnings ?? []).map((warning) => (
             <div
               key={warning}
-              className="border border-amber-700/20 bg-amber-900/10 px-3 py-2 text-[10px] text-amber-400 font-inconsolata"
+              className="border border-ember/30 bg-void/70 px-3 py-2 text-[10px] text-gold-bright font-inconsolata"
             >
               {warning}
             </div>
@@ -780,7 +780,7 @@ export function KeyDriftReviewPanel({
       )}
 
       {actionResult && actionResult.status !== "SUCCESS" && (
-        <div className="border border-amber-700/30 bg-amber-900/10 px-3 py-2 text-[11px] text-amber-400 font-inconsolata">
+        <div className="border border-ember/30 bg-void/70 px-3 py-2 text-[11px] text-gold-bright font-inconsolata">
           Reviewed push finished with status {String(actionResult.status)}.
           {typeof actionResult.errorMessage === "string" ? ` ${actionResult.errorMessage}` : ""}
         </div>

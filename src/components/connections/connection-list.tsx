@@ -335,21 +335,21 @@ export function ConnectionList({
     <>
       {/* Data Agent awareness banner */}
       {ravenCount === 0 && !agentBannerDismissed && (
-        <div className="mb-4 p-4 bg-amber-50 border border-amber-200/50 flex items-start gap-3">
-          <span className="text-amber-700 text-lg leading-none mt-0.5 font-cinzel" aria-hidden="true">&#x16BA;</span>
+        <div className="mb-4 p-4 bg-void/70 border border-gold/30 flex items-start gap-3">
+          <span className="text-gold-bright text-lg leading-none mt-0.5 font-cinzel" aria-hidden="true">&#x16BA;</span>
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-amber-900 font-medium">
+            <p className="text-sm text-text font-medium">
               Have on-premises databases?
-              <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-mono font-bold tracking-wider uppercase align-middle">Thor</span>
+              <span className="ml-2 px-2 py-0.5 bg-gold/[0.12] text-gold-bright border border-gold/30 text-[10px] font-mono font-bold tracking-wider uppercase align-middle">Thor</span>
             </p>
-            <p className="text-xs text-amber-800/70 mt-0.5">
+            <p className="text-xs text-text-dim mt-0.5">
               The Hermod Data Agent bridges your local SQL Server, PostgreSQL, or MySQL to the cloud &mdash; no VPN needed.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Link
               href="/settings/ravens"
-              className="text-xs font-inconsolata font-bold text-amber-800 hover:text-amber-950 tracking-wide transition-colors"
+              className="text-xs font-inconsolata font-bold text-gold-bright hover:text-gold tracking-wide transition-colors"
             >
               Set Up Data Agent &rarr;
             </Link>
@@ -464,7 +464,7 @@ export function ConnectionList({
                 <div className="min-w-0">
                   <h3 className="font-cinzel text-sm text-text group-hover:text-gold-bright transition-colors">
                     On-Premises via Data Agent
-                    <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-mono font-bold tracking-wider uppercase align-middle">Thor</span>
+                    <span className="ml-2 px-2 py-0.5 bg-gold/[0.12] text-gold-bright border border-gold/30 text-[10px] font-mono font-bold tracking-wider uppercase align-middle">Thor</span>
                   </h3>
                   <p className="text-[10px] font-inconsolata text-text-muted tracking-wider mt-1">
                     SQL Server &middot; PostgreSQL &middot; MySQL &mdash; through a local agent

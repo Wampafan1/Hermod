@@ -24,7 +24,7 @@ const DATA_TYPES: ColumnMapping["dataType"][] = [
 
 const CONFIDENCE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   high:   { bg: "bg-emerald-900/30", text: "text-emerald-400", label: "High Confidence" },
-  medium: { bg: "bg-amber-900/30",   text: "text-amber-400",  label: "Medium Confidence" },
+  medium: { bg: "bg-void/70",        text: "text-gold-bright", label: "Medium Confidence" },
   low:    { bg: "bg-red-900/30",     text: "text-red-400",    label: "Low Confidence" },
 };
 
