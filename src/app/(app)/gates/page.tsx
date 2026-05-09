@@ -14,6 +14,11 @@ export default async function GatesPage() {
     },
     include: {
       connection: { select: { name: true, type: true } },
+      pushes: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { id: true, status: true, createdAt: true },
+      },
     },
     orderBy: [
       { lastPushAt: { sort: "desc", nulls: "last" } },
@@ -34,6 +39,8 @@ export default async function GatesPage() {
     primaryKeyColumns: Array.isArray(g.primaryKeyColumns) ? g.primaryKeyColumns : [],
     lastPushAt: g.lastPushAt?.toISOString() ?? null,
     pushCount: g.pushCount,
+    latestPushStatus: g.pushes[0]?.status ?? null,
+    latestPushCreatedAt: g.pushes[0]?.createdAt.toISOString() ?? null,
   }));
 
   return (

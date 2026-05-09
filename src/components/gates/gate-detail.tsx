@@ -4,6 +4,10 @@ import { useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { useNow } from "@/lib/use-now";
+import {
+  KeyDriftReviewPanel,
+  type KeyDriftDetails,
+} from "@/components/gates/key-drift-review-panel";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -23,28 +27,6 @@ interface GatePush {
   schemaDiff: unknown | null;
   createdAt: string;
   completedAt: string | null;
-}
-
-interface KeyDriftDetails {
-  oldKey: string[];
-  reason: string;
-  recommendation?: {
-    columns: string[];
-    source?: string;
-    reason?: string;
-  } | null;
-  noReliableKeyReason?: string | null;
-  aiUsed?: boolean;
-  aiExplanation?: string | null;
-  duplicateExamples?: Array<{
-    keyValues: Record<string, string | number | boolean | null>;
-    rowIndexes: number[];
-  }>;
-  nullKeyExamples?: Array<{
-    rowIndex: number;
-    keyValues: Record<string, string | number | boolean | null>;
-    missingColumns: string[];
-  }>;
 }
 
 interface PushExecutionResult {
@@ -434,6 +416,39 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
     resetPush();
   }, [clearPush, resetPush, validation?.pushId]);
 
+  const handleKeyDriftResolved = useCallback((data: Record<string, unknown>) => {
+    applyExecutionResult(data as unknown as PushExecutionResult);
+  }, [applyExecutionResult]);
+
+  const handleKeyDriftCancelled = useCallback(() => {
+    resetPush();
+    toast.success("Key review cancelled");
+    refreshGate();
+  }, [refreshGate, resetPush, toast]);
+
+  const latestPush = gate.pushes[0] ?? null;
+  const activeKeyDriftPush =
+    pushState === "keyDrift" && validation?.pushId && pushResult?.keyDrift
+      ? {
+          id: validation.pushId,
+          keyDrift: pushResult.keyDrift,
+          blankRowsSkipped: pushResult.blankRowsSkipped,
+        }
+      : latestPush?.status === "KEY_DRIFT" && latestPush.keyDrift
+        ? {
+            id: latestPush.id,
+            keyDrift: latestPush.keyDrift,
+            blankRowsSkipped: latestPush.blankRowsSkipped ?? 0,
+          }
+        : null;
+  const showKeyDriftPanel = Boolean(
+    activeKeyDriftPush &&
+      pushState !== "success" &&
+      pushState !== "partial" &&
+      pushState !== "failed" &&
+      pushState !== "pushing"
+  );
+
   // ── Render ────────────────────────────────────────
 
   return (
@@ -587,52 +602,16 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
         </div>
       )}
 
-      {pushState === "keyDrift" && pushResult?.keyDrift && (
-        <div className="card-norse p-6 space-y-3 border-amber-700/30">
-          <h3 className="text-amber-400 text-sm font-cinzel uppercase tracking-wider">Key Review Needed</h3>
-          <p className="text-text-dim text-xs font-inconsolata">
-            {pushResult.keyDrift.reason} The staged upload is preserved for review.
-          </p>
-          <div className="text-text-dim text-[10px] font-inconsolata">
-            Current key: <span className="text-gold">{pushResult.keyDrift.oldKey.join(" + ")}</span>
-            {pushResult.blankRowsSkipped > 0 && (
-              <span> · {pushResult.blankRowsSkipped.toLocaleString()} fully blank rows skipped</span>
-            )}
-          </div>
-          {pushResult.keyDrift.recommendation ? (
-            <div className="bg-frost/[0.04] border border-frost/10 px-3 py-2 text-[10px] font-inconsolata text-text-dim">
-              Recommended key: <span className="text-frost">{pushResult.keyDrift.recommendation.columns.join(" + ")}</span>
-              <div>{pushResult.keyDrift.recommendation.reason}</div>
-            </div>
-          ) : pushResult.keyDrift.noReliableKeyReason ? (
-            <div className="bg-amber-900/10 border border-amber-700/30 px-3 py-2 text-[10px] font-inconsolata text-amber-400">
-              {pushResult.keyDrift.noReliableKeyReason}
-            </div>
-          ) : null}
-          {(pushResult.keyDrift.duplicateExamples?.length ?? 0) > 0 && (
-            <div className="space-y-1">
-              <div className="label-norse text-[9px]">Duplicate Examples</div>
-              {pushResult.keyDrift.duplicateExamples?.slice(0, 3).map((example) => (
-                <div key={`${formatKeyValues(example.keyValues)}-${example.rowIndexes.join("-")}`} className="text-text-dim text-[10px] font-inconsolata">
-                  Rows {example.rowIndexes.join(", ")} · {formatKeyValues(example.keyValues)}
-                </div>
-              ))}
-            </div>
-          )}
-          {(pushResult.keyDrift.nullKeyExamples?.length ?? 0) > 0 && (
-            <div className="space-y-1">
-              <div className="label-norse text-[9px]">Blank Key Examples</div>
-              {pushResult.keyDrift.nullKeyExamples?.slice(0, 3).map((example) => (
-                <div key={`${example.rowIndex}-${example.missingColumns.join("-")}`} className="text-text-dim text-[10px] font-inconsolata">
-                  Row {example.rowIndex} · missing {example.missingColumns.join(", ")} · {formatKeyValues(example.keyValues)}
-                </div>
-              ))}
-            </div>
-          )}
-          <button onClick={resetPush} className="btn-ghost text-xs">
-            Leave staged for review
-          </button>
-        </div>
+      {showKeyDriftPanel && activeKeyDriftPush && (
+        <KeyDriftReviewPanel
+          gateId={gate.id}
+          pushId={activeKeyDriftPush.id}
+          keyDrift={activeKeyDriftPush.keyDrift}
+          blankRowsSkipped={activeKeyDriftPush.blankRowsSkipped}
+          onResolved={handleKeyDriftResolved}
+          onCancelled={handleKeyDriftCancelled}
+          onError={(message) => toast.error(message)}
+        />
       )}
 
       {pushState === "failed" && (

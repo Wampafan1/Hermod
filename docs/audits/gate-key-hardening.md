@@ -149,3 +149,45 @@ Each approved hardening records the push id, old key, new destination key, store
 ### Remaining Phase 4
 
 - Build the UI review panel for candidate evidence, DDL preview, confirmation, cancel, and reviewed push results.
+
+## Phase 4 Key Drift UI Results
+
+Hermod now surfaces `KEY_DRIFT` as a review-first workflow in the Gates UI instead of leaving it as a hidden staged state.
+
+### UI Panel Behavior
+
+- `src/components/gates/key-drift-review-panel.tsx` renders the current failed key, failure reason, duplicate examples, blank-key examples, skipped blank-row count, candidate keys, recommendation details, validation stats, and no-reliable-key states.
+- Candidate key selection defaults to the deterministic or AI recommendation when one is present.
+- Candidate cards show columns, width, coverage, null count, duplicate count, score, and recommendation reason.
+- Full row payloads are not rendered; examples are limited to key fields and row indexes.
+
+### Approval And Cancel Behavior
+
+- Approving requires a selected candidate, nonblocked DDL preview, and the explicit checkbox: `I approve changing the destination key constraint.`
+- Approval posts `APPROVE_KEY_HARDENING` with the selected key, confirmed DDL, and `confirm: true`.
+- Cancel posts `CANCEL`, clears the staged upload, refreshes the gate, and removes the review state.
+- Successful reviewed pushes hide the panel after refresh; partial or failed reviewed pushes surface their status/result details.
+
+### DDL Preview Behavior
+
+- The panel calls the existing resolve preview path when the selected key changes.
+- Generated DDL statements, warnings, and block reasons are shown before approval.
+- Approval is disabled while the preview is loading or if the DDL plan is blocked.
+
+### List And History Visibility
+
+- Gate detail renders the review panel when the latest push is `KEY_DRIFT`.
+- Push history continues to show `KEY_DRIFT` as an amber review state with summarized key evidence.
+- Gate list cards now show a visible `Key review needed` state when the latest push requires review.
+
+### Tests Added
+
+- `src/__tests__/gates/key-drift-ui.test.ts`
+
+### Validation Results
+
+- `npx prisma validate`
+- `npx prisma generate`
+- `npm run test`
+- `npm run build`
+- `npm run lint`

@@ -21,6 +21,8 @@ interface GateItem {
   primaryKeyColumns: unknown;
   lastPushAt: string | null;
   pushCount: number;
+  latestPushStatus: string | null;
+  latestPushCreatedAt: string | null;
 }
 
 // ─── Helpers ───────��────────────────────────────────
@@ -46,6 +48,7 @@ function GateCard({ gate, now }: { gate: GateItem; now: number }) {
 
   const isVanaheim = gate.realmType === "VANAHEIM";
   const realmColor = isVanaheim ? "#7eb8d4" : "#a1887f";
+  const needsKeyReview = gate.latestPushStatus === "KEY_DRIFT";
 
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
@@ -137,6 +140,20 @@ function GateCard({ gate, now }: { gate: GateItem; now: number }) {
         )}
         {gate.lastPushAt && <span>Last: {relativeTime(gate.lastPushAt, now)}</span>}
       </div>
+
+      {needsKeyReview && (
+        <Link
+          href={`/gates/${gate.id}`}
+          className="block border border-amber-700/30 bg-amber-900/10 px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-amber-400 hover:border-amber-500/50 transition-colors"
+        >
+          Key review needed
+          {gate.latestPushCreatedAt && (
+            <span className="ml-2 text-text-dim normal-case tracking-[0.06em]">
+              {relativeTime(gate.latestPushCreatedAt, now)}
+            </span>
+          )}
+        </Link>
+      )}
 
       {/* Drop zone hint */}
       <div
