@@ -13,6 +13,8 @@ import { handlePostgresRestoreJob } from "./backups/jobs/postgres-restore.handle
 import { handleMssqlFullBackupJob } from "./backups/jobs/mssql-full-backup.handler";
 import { handleMssqlDifferentialBackupJob } from "./backups/jobs/mssql-differential-backup.handler";
 import { handleMssqlLogBackupJob } from "./backups/jobs/mssql-log-backup.handler";
+import { GATE_VALIDATE_PUSH_JOB, handleGateValidatePush } from "./gates/push-validation";
+import { markStaleGatePushValidationsFailed } from "./gates/validation-timeouts";
 import {
   getDueRetries,
   decompressPayload,
@@ -53,6 +55,11 @@ async function main() {
   const mjolnirDeleted = mjolnirCleanup.filesDeleted + mjolnirCleanup.dirsDeleted;
   if (mjolnirDeleted > 0) {
     console.log(`[Worker] Cleaned up ${mjolnirDeleted} expired Mjolnir temp item(s)`);
+  }
+
+  const staleGateValidations = await markStaleGatePushValidationsFailed(startupCleanupNow);
+  if (staleGateValidations > 0) {
+    console.log(`[Worker] Marked ${staleGateValidations} stale Gate validation(s) as failed`);
   }
 
   // Clean up stale "running" route logs from previous crashed runs
@@ -141,6 +148,9 @@ async function main() {
 
   // Register Raven pipeline resumption handler
   await boss.work("resume-raven-route", { teamSize: 2, teamConcurrency: 1 }, handleRavenResume as any);
+
+  // Register RealmGate staged-upload validation handler
+  await boss.work(GATE_VALIDATE_PUSH_JOB, { teamSize: 2, teamConcurrency: 1 }, handleGateValidatePush as any);
 
   // Register Niflheim backup handlers
   await boss.work("postgres-backup-full", { teamSize: 1, teamConcurrency: 1 }, handleFullBackupJob as any);

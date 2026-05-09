@@ -362,3 +362,65 @@ The Gate key hardening flow is now covered as one product path from repeat uploa
 - Add real provider integration tests for Postgres, SQL Server, and MySQL key replacement when test containers are available.
 - Document operator guidance for approving key changes in production.
 - Continue to improve combined destination-plus-upload validation limits for very large destination tables.
+
+## Validation Responsiveness Patch Results
+
+Gate upload validation no longer relies on one long synchronous request to analyze the file, check schema drift, and run key-drift preflight before the UI receives a push id.
+
+### Previous Hang Risk
+
+- The Gate detail UI entered `VALIDATING` and waited for `POST /api/gates/[gateId]/push` to complete.
+- That request previously performed file analysis, schema diffing, temp-file staging, and key preflight before returning.
+- If any step stalled, the UI could remain on `VALIDATING SCHEMA...` without an inspectable `GatePush`.
+
+### Staged And Polled Validation
+
+- `POST /api/gates/[gateId]/push` now creates a `GatePush` in `VALIDATING` as soon as the upload metadata is accepted.
+- The uploaded file is staged under that push and validation is enqueued as `gate-validate-push`.
+- The API returns `{ pushId, status: "VALIDATING", validationStage: "RECEIVED" }` so the UI can poll.
+- `GET /api/gates/[gateId]/push/[pushId]` returns safe status fields, schema drift, key drift, row counts, blank-row counts, and validation progress.
+
+### Validation Stages
+
+- `RECEIVED`
+- `READING_FILE`
+- `ANALYZING_FILE`
+- `VALIDATING_SCHEMA`
+- `CHECKING_KEY`
+- `DISCOVERING_KEY`
+- `READY`
+- `FAILED`
+
+The stages are stored in `GatePush.errorDetails.gateValidation` to avoid a schema migration in this patch.
+
+### Timeout Behavior
+
+- Validation heartbeat metadata is updated before each major worker step.
+- `GATE_PUSH_VALIDATION_TIMEOUT_MS` controls stale validation timeout, defaulting to five minutes.
+- The status endpoint marks stale `VALIDATING` pushes as `FAILED` before returning them.
+- Worker startup also marks stale `VALIDATING` pushes as `FAILED`.
+
+### UI Behavior
+
+- Gate detail now polls the push status every two seconds while validation is running.
+- Stage-specific copy replaces the single static `VALIDATING SCHEMA...` message.
+- Long-running validation shows a visible message with options to keep waiting, refresh, or clear the staged upload.
+- Users can clear/cancel a staged validation through the existing push clear path.
+
+### Tests Added
+
+- `src/__tests__/gates/gate-push-validation-status.test.ts`
+- Expanded `src/__tests__/gates/gate-key-hardening-e2e.test.ts` to verify early `VALIDATING` creation and async validation completion.
+
+### Validation Results
+
+- `npx prisma validate` passed.
+- `npx prisma generate` passed.
+- `npm run test` passed: 111 files, 1397 tests.
+- `npm run build` passed with existing lint warnings.
+- `npm run lint` passed with existing warnings.
+
+### Remaining Follow-Ups
+
+- Add a dedicated worker timeout test around pg-boss runtime behavior if the worker harness is expanded.
+- Consider explicit Prisma fields for validation progress if the metadata needs to be queried directly at scale.

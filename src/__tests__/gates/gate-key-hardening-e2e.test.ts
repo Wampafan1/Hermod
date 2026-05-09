@@ -21,6 +21,8 @@ const {
   mockProviderConnect,
   mockProviderQuery,
   mockProviderConn,
+  mockEnsureBossStarted,
+  mockBossSend,
 } = vi.hoisted(() => {
   const state = {
     gate: null as any,
@@ -46,6 +48,8 @@ const {
     mockProviderConnect: vi.fn(),
     mockProviderQuery: vi.fn(),
     mockProviderConn: { close: vi.fn() },
+    mockEnsureBossStarted: vi.fn(),
+    mockBossSend: vi.fn(),
   };
 });
 
@@ -115,6 +119,10 @@ vi.mock("@/lib/providers", () => ({
   })),
 }));
 
+vi.mock("@/lib/pg-boss", () => ({
+  ensureBossStarted: mockEnsureBossStarted,
+}));
+
 function csvFromRows(rows: Record<string, unknown>[]): Buffer {
   const columns = ["job_number", "7501_line_number", "line_entered_value"];
   const body = rows
@@ -145,6 +153,28 @@ function resolveRequest(body: unknown) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+async function stageAndValidatePush() {
+  const { POST: stagePush } = await import("@/app/api/gates/[gateId]/push/route");
+  const stageResponse = await stagePush(pushRequest());
+  const staged = await stageResponse.json();
+  expect(stageResponse.status).toBe(200);
+  expect(staged).toMatchObject({
+    pushId: "push_1",
+    status: "VALIDATING",
+    validationStage: "RECEIVED",
+  });
+
+  const { validateStagedGatePush } = await import("@/lib/gates/push-validation");
+  await validateStagedGatePush({
+    pushId: "push_1",
+    gateId: "gate_1",
+    tenantId: "tenant_1",
+    tempFileId: "tmp_1",
+  });
+
+  return staged;
 }
 
 function setupGateKeyHardeningFlow() {
@@ -186,6 +216,7 @@ function setupGateKeyHardeningFlow() {
   });
   mockSaveTempFile.mockResolvedValue("tmp_1");
   mockReadTempFile.mockResolvedValue({ buffer: state.csvBuffer, extension: ".csv" });
+  mockEnsureBossStarted.mockResolvedValue({ send: mockBossSend });
   mockProviderConnect.mockResolvedValue(mockProviderConn);
   mockRealmGateFindFirst.mockImplementation(async () => state.gate);
   mockRealmGateFindUniqueOrThrow.mockImplementation(async () => state.gate);
@@ -199,7 +230,8 @@ function setupGateKeyHardeningFlow() {
       id: "push_1",
       gateId: "gate_1",
       tenantId: "tenant_1",
-      tempFileId: "tmp_1",
+      tempFileId: args.data.tempFileId ?? null,
+      createdAt: new Date("2026-05-09T12:00:00.000Z"),
       completedAt: null,
       ...args.data,
     };
@@ -254,22 +286,25 @@ describe("Gate key hardening end-to-end acceptance", () => {
   });
 
   it("runs KEY_DRIFT to approved key replacement to successful reviewed push", async () => {
-    const { POST: stagePush } = await import("@/app/api/gates/[gateId]/push/route");
-    const stageResponse = await stagePush(pushRequest());
-    const staged = await stageResponse.json();
-
-    expect(stageResponse.status).toBe(200);
-    expect(staged).toMatchObject({
-      pushId: "push_1",
-      status: "KEY_DRIFT",
-      blankRowsSkipped: 1,
-    });
+    await stageAndValidatePush();
     expect(mockGatePushCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        status: "KEY_DRIFT",
-        blankRowsSkipped: 1,
-        tempFileId: "tmp_1",
+        status: "VALIDATING",
       }),
+    });
+    expect(mockGatePushCreate.mock.calls[0][0].data.tempFileId).toBeUndefined();
+    expect(mockBossSend).toHaveBeenCalledWith("gate-validate-push", expect.objectContaining({
+      pushId: "push_1",
+      gateId: "gate_1",
+      tenantId: "tenant_1",
+      tempFileId: "tmp_1",
+    }), expect.objectContaining({
+      singletonKey: "gate-validate-push_1",
+    }));
+    const staged = state.push;
+    expect(staged).toMatchObject({
+      status: "KEY_DRIFT",
+      blankRowsSkipped: 1,
     });
     expect(staged.keyDrift.oldKey).toEqual(jobLineValueCurrentKey);
     expect(staged.keyDrift.duplicateExamples).toEqual([
@@ -347,8 +382,7 @@ describe("Gate key hardening end-to-end acceptance", () => {
   });
 
   it("blocks invalid manual keys and preserves KEY_DRIFT", async () => {
-    const { POST: stagePush } = await import("@/app/api/gates/[gateId]/push/route");
-    await stagePush(pushRequest());
+    await stageAndValidatePush();
 
     const { GET } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");
     const response = await GET(previewRequest(jobLineValueCurrentKey));
@@ -366,8 +400,7 @@ describe("Gate key hardening end-to-end acceptance", () => {
   });
 
   it("blocks manual keys with blank values and preserves KEY_DRIFT", async () => {
-    const { POST: stagePush } = await import("@/app/api/gates/[gateId]/push/route");
-    await stagePush(pushRequest());
+    await stageAndValidatePush();
 
     const { GET } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");
     const response = await GET(previewRequest(["not_a_column"]));
@@ -385,8 +418,7 @@ describe("Gate key hardening end-to-end acceptance", () => {
   });
 
   it("blocks DDL when destination validation fails", async () => {
-    const { POST: stagePush } = await import("@/app/api/gates/[gateId]/push/route");
-    await stagePush(pushRequest());
+    await stageAndValidatePush();
     state.providerMode = "destinationDuplicate";
 
     const { GET } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");
@@ -406,8 +438,7 @@ describe("Gate key hardening end-to-end acceptance", () => {
   });
 
   it("does not report success when DDL execution fails", async () => {
-    const { POST: stagePush } = await import("@/app/api/gates/[gateId]/push/route");
-    await stagePush(pushRequest());
+    await stageAndValidatePush();
 
     const { GET, POST: resolvePush } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");
     const preview = await (await GET(previewRequest(jobLineValueHardenedKey))).json();
@@ -428,8 +459,7 @@ describe("Gate key hardening end-to-end acceptance", () => {
   });
 
   it("marks post-DDL upsert failures as FAILED and preserves the staged file", async () => {
-    const { POST: stagePush } = await import("@/app/api/gates/[gateId]/push/route");
-    await stagePush(pushRequest());
+    await stageAndValidatePush();
 
     const { GET, POST: resolvePush } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");
     const preview = await (await GET(previewRequest(jobLineValueHardenedKey))).json();
@@ -454,8 +484,7 @@ describe("Gate key hardening end-to-end acceptance", () => {
   });
 
   it("cancels KEY_DRIFT and deletes the staged temp file", async () => {
-    const { POST: stagePush } = await import("@/app/api/gates/[gateId]/push/route");
-    await stagePush(pushRequest());
+    await stageAndValidatePush();
 
     const { POST: resolvePush } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");
     const response = await resolvePush(resolveRequest({ action: "CANCEL" }));
@@ -469,8 +498,7 @@ describe("Gate key hardening end-to-end acceptance", () => {
   });
 
   it("returns 410 for expired staged files without changing key constraints", async () => {
-    const { POST: stagePush } = await import("@/app/api/gates/[gateId]/push/route");
-    await stagePush(pushRequest());
+    await stageAndValidatePush();
     mockReadTempFile.mockResolvedValueOnce(null);
 
     const { GET } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");

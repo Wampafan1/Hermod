@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { useNow } from "@/lib/use-now";
@@ -92,12 +92,18 @@ interface GateData {
 interface PushValidationResult {
   pushId: string;
   status: string;
+  validationStage?: string | null;
+  validationStartedAt?: string | null;
+  validationHeartbeatAt?: string | null;
+  validationTimeoutAt?: string | null;
   rowCount: number;
   fileName?: string;
   schemaDiff?: unknown;
   blankRowsSkipped?: number;
   keyDrift?: KeyDriftDetails;
   resolutionOptions?: DriftResolution;
+  error?: string;
+  errorMessage?: string;
 }
 
 // ─── Sub-components ─────────────────────────────────
@@ -152,6 +158,27 @@ function formatKeyValues(values: Record<string, string | number | boolean | null
     .join(", ");
 }
 
+function validationStageText(stage?: string | null): string {
+  switch (stage) {
+    case "RECEIVED":
+      return "Staging upload...";
+    case "READING_FILE":
+      return "Reading staged file...";
+    case "ANALYZING_FILE":
+      return "Analyzing file...";
+    case "VALIDATING_SCHEMA":
+      return "Validating schema...";
+    case "CHECKING_KEY":
+      return "Checking UPSERT key...";
+    case "DISCOVERING_KEY":
+      return "Finding stronger key...";
+    case "FAILED":
+      return "Validation failed.";
+    default:
+      return "Validating schema...";
+  }
+}
+
 // ─── Main Component ─────────────────────────────────
 
 export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; initialNow: number }) {
@@ -167,6 +194,7 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
   const [validation, setValidation] = useState<PushValidationResult | null>(null);
   const [pushResult, setPushResult] = useState<PushExecutionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [validationSubmittedAt, setValidationSubmittedAt] = useState<number | null>(null);
 
   // Drift resolution state
   const [checkedStatements, setCheckedStatements] = useState<Set<number>>(new Set());
@@ -202,38 +230,72 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
       setError(data.error || data.errorMessage || "Push failed");
       setPushState("failed");
     }
+    setValidationSubmittedAt(null);
 
     refreshGate();
   }, [refreshGate, toast]);
 
   // ── Drop handler ──────────────────────────────────
 
+  const executeValidatedPush = useCallback(async (pushId: string) => {
+    setPushState("pushing");
+
+    try {
+      const execRes = await fetch(`/api/gates/${gate.id}/push/${pushId}/execute`, {
+        method: "POST",
+      });
+      const execData = await execRes.json();
+
+      if (!execRes.ok) {
+        setError(execData.error || "Push failed");
+        setPushState("failed");
+        return;
+      }
+
+      applyExecutionResult(execData);
+    } catch {
+      setError("Network error during push execution");
+      setPushState("failed");
+    }
+  }, [applyExecutionResult, gate.id]);
+
   const handleFile = useCallback(
     async (file: File) => {
       setPushState("validating");
       setValidation(null);
+      setPushResult(null);
       setError(null);
+      setValidationSubmittedAt(Date.now());
 
       const formData = new FormData();
       formData.append("file", file);
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 60_000);
 
       try {
         const res = await fetch(`/api/gates/${gate.id}/push`, {
           method: "POST",
           body: formData,
+          signal: controller.signal,
         });
 
         const data: PushValidationResult = await res.json();
 
         if (!res.ok) {
-          setError((data as unknown as { error: string }).error || "Validation failed");
+          setError(
+            (data as unknown as { error?: string; errorMessage?: string }).error ||
+              data.errorMessage ||
+              "Validation failed"
+          );
           setPushState("failed");
           return;
         }
 
         setValidation(data);
 
-        if (data.status === "SCHEMA_DRIFT") {
+        if (data.status === "VALIDATING") {
+          setPushState("validating");
+        } else if (data.status === "SCHEMA_DRIFT") {
           setPushState("drift");
           // Default all executable statements to checked
           const stmts = data.resolutionOptions?.adjustDestination?.statements ?? [];
@@ -274,9 +336,15 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
             setPushState("failed");
           }
         }
-      } catch {
-        setError("Network error");
+      } catch (err) {
+        setError(
+          err instanceof DOMException && err.name === "AbortError"
+            ? "Upload did not finish staging. Please retry."
+            : "Network error"
+        );
         setPushState("failed");
+      } finally {
+        window.clearTimeout(timeout);
       }
     },
     [gate.id, applyExecutionResult]
@@ -300,6 +368,88 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
   );
 
   // ── Execute push ──────────────────────────────────
+
+  useEffect(() => {
+    if (pushState !== "validating" || !validation?.pushId) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/gates/${gate.id}/push/${validation.pushId}`);
+        const data: PushValidationResult & { error?: string; errorMessage?: string } = await res.json();
+        if (cancelled) return;
+
+        if (!res.ok) {
+          setError(data.error || data.errorMessage || "Unable to refresh validation status");
+          setPushState("failed");
+          return;
+        }
+
+        setValidation(data);
+
+        if (data.status === "VALIDATING") return;
+
+        if (data.status === "VALIDATED") {
+          void executeValidatedPush(data.pushId);
+          return;
+        }
+
+        if (data.status === "SCHEMA_DRIFT") {
+          setPushState("drift");
+          const stmts = data.resolutionOptions?.adjustDestination?.statements ?? [];
+          setCheckedStatements(
+            new Set(stmts.map((_, i) => i).filter((i) => !stmts[i].isComment))
+          );
+          return;
+        }
+
+        if (data.status === "KEY_DRIFT") {
+          applyExecutionResult({
+            status: "KEY_DRIFT",
+            rowCount: data.rowCount,
+            rowsInserted: 0,
+            rowsUpdated: 0,
+            rowsErrored: 0,
+            blankRowsSkipped: data.blankRowsSkipped ?? 0,
+            duration: 0,
+            keyDrift: data.keyDrift,
+          });
+          return;
+        }
+
+        if (data.status === "CANCELLED") {
+          setPushState("idle");
+          setValidation(null);
+          setPushResult(null);
+          setError(null);
+          return;
+        }
+
+        if (data.status === "FAILED") {
+          setError(data.errorMessage || "Validation failed");
+          setPushState("failed");
+        }
+      } catch {
+        if (!cancelled) {
+          setError("Unable to refresh validation status");
+          setPushState("failed");
+        }
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    applyExecutionResult,
+    executeValidatedPush,
+    gate.id,
+    pushState,
+    validation?.pushId,
+  ]);
 
   const executePush = useCallback(async () => {
     if (!validation) return;
@@ -386,6 +536,7 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
     setValidation(null);
     setPushResult(null);
     setError(null);
+    setValidationSubmittedAt(null);
   }, []);
 
   const clearPush = useCallback(
@@ -459,6 +610,11 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
       pushState !== "failed" &&
       pushState !== "pushing"
   );
+  const validationTakingLong = Boolean(
+    pushState === "validating" &&
+      validationSubmittedAt != null &&
+      now - validationSubmittedAt > 45_000
+  );
 
   // ── Render ────────────────────────────────────────
 
@@ -529,9 +685,45 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
       )}
 
       {pushState === "validating" && (
-        <div className="border-2 border-dashed border-frost/20 bg-frost/[0.02] flex flex-col items-center justify-center py-12">
+        <div className="border-2 border-dashed border-frost/20 bg-frost/[0.02] flex flex-col items-center justify-center py-12 px-6 text-center">
           <span className="spinner-norse mb-3" style={{ width: 20, height: 20 }} />
-          <span className="text-text-dim text-xs tracking-widest uppercase">Validating schema...</span>
+          <span className="text-text-dim text-xs tracking-widest uppercase">
+            {validationStageText(validation?.validationStage)}
+          </span>
+          {validation?.pushId && !validationTakingLong && (
+            <button
+              type="button"
+              onClick={() => void clearPush(validation.pushId)}
+              className="btn-ghost text-[10px] px-3 py-1 mt-4"
+            >
+              Cancel validation
+            </button>
+          )}
+          {validationTakingLong && (
+            <div className="mt-4 max-w-md space-y-3">
+              <p className="text-amber-400 text-[10px] font-inconsolata">
+                Validation is taking longer than expected. You can keep waiting, refresh status, or clear the staged upload.
+              </p>
+              <div className="flex justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => validation?.pushId && refreshGate()}
+                  className="btn-ghost text-[10px] px-3 py-1"
+                >
+                  Refresh status
+                </button>
+                {validation?.pushId && (
+                  <button
+                    type="button"
+                    onClick={() => void clearPush(validation.pushId)}
+                    className="btn-ghost text-[10px] px-3 py-1"
+                  >
+                    Clear staged push
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
