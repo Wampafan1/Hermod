@@ -212,17 +212,14 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
       .then((data) => setFolders(data))
       .catch(() => {/* folders are optional */});
 
-    fetch("/api/mjolnir/blueprints")
+    const include = blueprintId ? `&include=${encodeURIComponent(blueprintId)}` : "";
+    fetch(`/api/mjolnir/blueprints?status=VALIDATED,ACTIVE${include}`)
       .then((r) => r.json())
       .then((data) =>
-        setBlueprints(
-          (data as BlueprintOption[]).filter(
-            (b) => b.status === "VALIDATED" || b.status === "ACTIVE"
-          )
-        )
+        setBlueprints(data as BlueprintOption[])
       )
       .catch(() => toast.error("Failed to load blueprints"));
-  }, []);
+  }, [blueprintId, toast]);
 
   // Load existing route in edit mode
   useEffect(() => {
@@ -771,7 +768,11 @@ export function RouteEditor({ routeId }: RouteEditorProps) {
             >
               <option value="">Select a blueprint...</option>
               {blueprints.map((bp) => (
-                <option key={bp.id} value={bp.id}>
+                <option
+                  key={bp.id}
+                  value={bp.id}
+                  disabled={bp.status === "DRAFT" || bp.status === "ARCHIVED"}
+                >
                   {bp.name} ({bp.status})
                 </option>
               ))}

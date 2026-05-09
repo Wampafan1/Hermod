@@ -781,6 +781,79 @@ Remaining follow-ups:
 - immutable version pinning.
 - used-by counts across RealmGates / ForgeBlueprint if those surfaces become connected to Mjolnir blueprints.
 
+## Status Lifecycle Patch Results
+
+New status semantics:
+
+- `DRAFT`: editable and visible in Mjolnir, but not attachable to reports or Bifrost routes.
+- `VALIDATED`: editable, attachable, and eligible for activation.
+- `ACTIVE`: attachable and intended for production use.
+- `ARCHIVED`: visible in Mjolnir history/list views, not attachable, and muted in the UI.
+
+Allowed transitions:
+
+- `DRAFT -> VALIDATED` with validation evidence.
+- `DRAFT -> ACTIVE` only with validation evidence.
+- `VALIDATED -> ACTIVE`.
+- `DRAFT`, `VALIDATED`, or `ACTIVE -> ARCHIVED`.
+- `ARCHIVED -> DRAFT` when explicitly restored through an update path.
+- `ACTIVE` or `VALIDATED -> DRAFT` when editable content changes without fresh validation evidence.
+
+Attach rules:
+
+- Reports and Bifrost routes can attach only `VALIDATED` and `ACTIVE` blueprints.
+- `DRAFT` returns: `Blueprint must be validated before it can be attached.`
+- `ARCHIVED` returns: `Archived blueprints cannot be attached.`
+- Bifrost streaming compatibility validation still runs for attachable blueprints.
+- Ownership remains user-scoped; no `tenantId` was added to `Blueprint`.
+
+Create/update behavior:
+
+- New blueprints default to `DRAFT`.
+- Save with passed validation evidence can create a `VALIDATED` blueprint.
+- Normal save cannot create `ACTIVE` or `ARCHIVED` blueprints.
+- Update uses lifecycle transition validation instead of trusting arbitrary status changes.
+- Editing `steps`, `sourceSchema`, `analysisLog`, `afterFormatting`, `beforeSample`, or `afterSample` demotes `VALIDATED`/`ACTIVE` to `DRAFT` unless fresh validation evidence accompanies a production-ready status.
+- Archived blueprints must be restored to `DRAFT` before normal edits.
+
+UI changes:
+
+- Mjolnir save copy now explains whether the blueprint will be saved as `DRAFT` or `VALIDATED`.
+- Passed validation save sends validation evidence and requests `VALIDATED`; skipped or failed validation saves as `DRAFT`.
+- Blueprint list shows status badges, DRAFT/ACTIVE/ARCHIVED hints, muted archived rows, Activate for `VALIDATED`, and Archive where allowed.
+- Report and Bifrost production selectors request `VALIDATED,ACTIVE` by default.
+- Existing legacy/current DRAFT or ARCHIVED attachments can be included as disabled current options so users can see what is attached without selecting those statuses for new attachments.
+
+Runtime compatibility behavior:
+
+- Report execution warns when running a legacy `DRAFT` blueprint but does not break existing scheduled reports.
+- Report execution continues to skip `ARCHIVED` blueprints and falls back to column config mapping.
+- Bifrost runtime warns for legacy `DRAFT` blueprints and fails clearly for `ARCHIVED` blueprints.
+
+Tests added or updated:
+
+- `src/__tests__/mjolnir/blueprint-status.test.ts`: enum detection, attach/edit status rules, transitions, validation evidence, and demotion detection.
+- `src/__tests__/mjolnir/blueprint-status-api.test.ts`: create defaults, validation-backed create, direct ACTIVE rejection, transition enforcement, and content-change demotion.
+- `src/__tests__/mjolnir/blueprint-attach.test.ts`: DRAFT rejection, VALIDATED/ACTIVE acceptance, ARCHIVED rejection, and streaming validation preservation.
+- `src/__tests__/mjolnir/blueprint-attach-api.test.ts`: report and Bifrost create/update rejection for DRAFT blueprints.
+- `src/__tests__/mjolnir/validations.test.ts`: create status default and arbitrary status rejection.
+
+Validation results:
+
+- Focused Mjolnir lifecycle/attach/API validation tests passed: 7 test files and 84 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 85 test files and 1177 tests.
+- `npm run build`: passed; pre-existing lint warnings were reported during the build.
+- `npm run lint`: passed with pre-existing warnings.
+
+Remaining follow-ups:
+
+- tenant-published ownership.
+- immutable version pinning.
+- publish-to-tenant flow.
+- legacy DRAFT attachment migration.
+
 ## Recommended Next Prompt
 
 Make the product decision for Mjolnir ownership and retention before the next schema change:

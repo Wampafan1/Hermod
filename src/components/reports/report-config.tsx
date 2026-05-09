@@ -59,6 +59,9 @@ export function ReportConfig({
   const [emailConnections, setEmailConnections] = useState<EmailConnection[]>([]);
   const [testEmailConnectionId, setTestEmailConnectionId] = useState("");
   const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
+  const currentBlueprint = blueprints.find((bp) => bp.id === blueprintId);
+  const currentBlueprintBlocked =
+    currentBlueprint?.status === "DRAFT" || currentBlueprint?.status === "ARCHIVED";
 
   useEffect(() => {
     fetch("/api/email-connections")
@@ -70,11 +73,15 @@ export function ReportConfig({
         }
       })
       .catch(() => {});
-    fetch("/api/mjolnir/blueprints?status=DRAFT,VALIDATED,ACTIVE")
+  }, []);
+
+  useEffect(() => {
+    const include = blueprintId ? `&include=${encodeURIComponent(blueprintId)}` : "";
+    fetch(`/api/mjolnir/blueprints?status=VALIDATED,ACTIVE${include}`)
       .then((r) => r.json())
       .then((bps: BlueprintOption[]) => setBlueprints(bps))
       .catch(() => {});
-  }, []);
+  }, [blueprintId]);
 
   async function handleTestSend() {
     const recipients = testEmail
@@ -144,7 +151,11 @@ export function ReportConfig({
           >
             <option value="">None (raw query output)</option>
             {blueprints.map((bp) => (
-              <option key={bp.id} value={bp.id}>
+              <option
+                key={bp.id}
+                value={bp.id}
+                disabled={bp.status === "DRAFT" || bp.status === "ARCHIVED"}
+              >
                 {bp.name} ({bp.status.toLowerCase()})
               </option>
             ))}
@@ -160,6 +171,11 @@ export function ReportConfig({
         <p className="text-[0.5rem] text-text-dim tracking-wide mt-1">
           Applies transformation steps to query results before export
         </p>
+        {currentBlueprintBlocked && (
+          <p className="text-[0.5rem] text-ember tracking-wide mt-1">
+            Current legacy blueprint is {currentBlueprint.status.toLowerCase()} and cannot be selected for new attachments.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-2 pt-2">

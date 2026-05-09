@@ -68,7 +68,10 @@ export const PUT = withAuth(async (req, session) => {
   }
 
   let blueprintId: string | null | undefined;
-  if (parsed.data.blueprintId !== undefined) {
+  if (
+    parsed.data.blueprintId !== undefined &&
+    parsed.data.blueprintId !== existing.blueprintId
+  ) {
     const blueprintValidation = await validateOptionalAttachableBlueprint({
       blueprintId: parsed.data.blueprintId,
       userId: session.user.id,

@@ -76,7 +76,7 @@ describe("Mjolnir retention API boundaries", () => {
     vi.clearAllMocks();
     authState.authorized = true;
     mockBlueprintCreate.mockImplementation(async ({ data }) => ({ id: "bp_1", ...data }));
-    mockBlueprintFindFirst.mockResolvedValue({ id: "bp_1", userId: "user_1" });
+    mockBlueprintFindFirst.mockResolvedValue({ id: "bp_1", userId: "user_1", status: "DRAFT" });
     mockBlueprintUpdate.mockImplementation(async ({ data }) => ({ id: "bp_1", ...data }));
     mockCleanupExpired.mockResolvedValue({ filesDeleted: 0, dirsDeleted: 0 });
     mockCleanupFile.mockResolvedValue({ filesDeleted: 2, dirsDeleted: 1 });

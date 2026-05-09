@@ -105,8 +105,16 @@ export async function handleRavenResume(job: {
     if (route.transformEnabled && route.blueprintId) {
       const blueprint = await prisma.blueprint.findUniqueOrThrow({
         where: { id: route.blueprintId },
-        select: { steps: true },
+        select: { id: true, status: true, steps: true },
       });
+      if (blueprint.status === "ARCHIVED") {
+        throw new Error("Archived blueprints cannot be executed by Bifrost routes.");
+      }
+      if (blueprint.status === "DRAFT") {
+        console.warn(
+          `[Bifrost/Raven] Route ${route.id} is using legacy DRAFT blueprint ${blueprint.id}; new DRAFT attachments are blocked.`
+        );
+      }
       const steps = blueprint.steps as Array<{
         type: string;
         order: number;

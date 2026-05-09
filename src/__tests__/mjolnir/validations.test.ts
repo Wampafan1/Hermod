@@ -102,6 +102,9 @@ describe("createBlueprintSchema", () => {
       steps: [validStep],
     });
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.status).toBe("DRAFT");
+    }
   });
 
   it("accepts blueprint with optional fields", () => {
@@ -115,6 +118,15 @@ describe("createBlueprintSchema", () => {
       afterSample: "after.xlsx",
     });
     expect(result.success).toBe(true);
+  });
+
+  it("rejects invalid create status value", () => {
+    const result = createBlueprintSchema.safeParse({
+      name: "Transform",
+      steps: [validStep],
+      status: "DELETED",
+    });
+    expect(result.success).toBe(false);
   });
 
   it("rejects missing name", () => {

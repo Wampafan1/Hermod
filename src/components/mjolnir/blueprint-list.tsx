@@ -92,6 +92,19 @@ function usageItemLabel(item: BlueprintUsageItem): string {
   return pieces.length > 0 ? pieces.join(" - ") : "No tenant context";
 }
 
+function statusHint(status: string): string | null {
+  switch (status) {
+    case "DRAFT":
+      return "Validate before attaching";
+    case "ACTIVE":
+      return "Production-ready";
+    case "ARCHIVED":
+      return "Archived blueprints cannot be newly attached";
+    default:
+      return null;
+  }
+}
+
 interface BlueprintListProps {
   blueprints: Blueprint[];
   onRefresh: () => void;
@@ -189,6 +202,29 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
     }
   }
 
+  async function activateBlueprint(blueprint: Blueprint) {
+    setLoadingBlueprintId(blueprint.id);
+    try {
+      const res = await fetch(`/api/mjolnir/blueprints/${blueprint.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "ACTIVE" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Activation failed");
+        return;
+      }
+      toast.success("Blueprint activated");
+      onRefresh();
+      router.refresh();
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setLoadingBlueprintId(null);
+    }
+  }
+
   if (blueprints.length === 0) {
     return (
       <div className="text-center py-12 bg-deep border border-border">
@@ -208,11 +244,14 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
       {blueprints.map((bp) => {
         const rowLoading = loadingBlueprintId === bp.id;
         const isArchived = bp.status === "ARCHIVED";
+        const hint = statusHint(bp.status);
 
         return (
           <div
             key={bp.id}
-            className="bg-deep border border-border p-5 hover:bg-gold/[0.02] transition-colors"
+            className={`bg-deep border border-border p-5 hover:bg-gold/[0.02] transition-colors ${
+              isArchived ? "opacity-70" : ""
+            }`}
           >
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-1.5 min-w-0 flex-1">
@@ -236,6 +275,18 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
                   </p>
                 )}
 
+                {hint && (
+                  <p className={`text-[0.625rem] tracking-wider ${
+                    bp.status === "ACTIVE"
+                      ? "text-frost"
+                      : bp.status === "DRAFT"
+                      ? "text-gold"
+                      : "text-text-dim"
+                  }`}>
+                    {hint}
+                  </p>
+                )}
+
                 <div className="flex flex-wrap items-center gap-4 text-text-dim/80 text-[0.625rem] tracking-wider">
                   {bp.beforeSample && (
                     <span>{bp.beforeSample}</span>
@@ -252,6 +303,15 @@ export function BlueprintList({ blueprints, onRefresh }: BlueprintListProps) {
               </div>
 
               <div className="flex items-center gap-2 flex-shrink-0">
+                {bp.status === "VALIDATED" && (
+                  <button
+                    onClick={() => activateBlueprint(bp)}
+                    disabled={rowLoading || dialogLoading}
+                    className="btn-primary text-xs"
+                  >
+                    Activate
+                  </button>
+                )}
                 <button
                   onClick={() => archiveBlueprint(bp)}
                   disabled={rowLoading || dialogLoading || isArchived}

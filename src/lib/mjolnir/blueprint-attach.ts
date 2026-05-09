@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/db";
 import { validateBlueprintForStreaming } from "@/lib/bifrost/forge/forge-validator";
+import {
+  canAttachBlueprintStatus,
+  normalizeBlueprintStatus,
+} from "@/lib/mjolnir/blueprint-status";
 
 export type BlueprintAttachContext = "report" | "bifrost-route" | "realm-gate";
 
@@ -30,18 +34,6 @@ export type OptionalBlueprintAttachValidationResult =
       blueprint: AttachableBlueprint | null;
     }
   | Exclude<BlueprintAttachValidationResult, { ok: true }>;
-
-function contextLabel(context: BlueprintAttachContext): string {
-  switch (context) {
-    case "bifrost-route":
-      return "Bifrost route";
-    case "realm-gate":
-      return "RealmGate";
-    case "report":
-    default:
-      return "report";
-  }
-}
 
 function normalizeBlueprintId(blueprintId: string | null | undefined): string | null {
   const trimmed = blueprintId?.trim();
@@ -107,17 +99,24 @@ export async function validateAttachableBlueprint(input: {
     };
   }
 
-  if (blueprint.status === "ARCHIVED") {
+  const blueprintStatus = normalizeBlueprintStatus(blueprint.status);
+
+  if (blueprintStatus === "ARCHIVED") {
     return {
       ok: false,
       status: 400,
-      error: `Archived blueprints cannot be attached to ${contextLabel(input.context)}s.`,
+      error: "Archived blueprints cannot be attached.",
     };
   }
 
-  // DRAFT, VALIDATED, and ACTIVE remain attachable for backward compatibility in
-  // this patch. The production rule should later narrow to tenant-published
-  // ACTIVE versions after the ownership/versioning model is implemented.
+  if (!canAttachBlueprintStatus(blueprintStatus)) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Blueprint must be validated before it can be attached.",
+    };
+  }
+
   if (input.requireStreamingCompatible) {
     const steps = normalizeStreamingSteps(blueprint.steps);
     if (!steps) {

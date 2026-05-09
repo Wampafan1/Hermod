@@ -37,8 +37,8 @@ describe("validateAttachableBlueprint", () => {
     vi.clearAllMocks();
   });
 
-  it("returns ok for a valid non-archived blueprint", async () => {
-    mockBlueprintFindFirst.mockResolvedValue(blueprint());
+  it("accepts ACTIVE blueprints", async () => {
+    mockBlueprintFindFirst.mockResolvedValue(blueprint({ status: "ACTIVE" }));
 
     const result = await validateAttachableBlueprint(baseInput);
 
@@ -59,12 +59,24 @@ describe("validateAttachableBlueprint", () => {
     });
   });
 
-  it("allows DRAFT blueprints for backward compatibility", async () => {
-    mockBlueprintFindFirst.mockResolvedValue(blueprint({ status: "DRAFT" }));
+  it("accepts VALIDATED blueprints", async () => {
+    mockBlueprintFindFirst.mockResolvedValue(blueprint({ status: "VALIDATED" }));
 
     const result = await validateAttachableBlueprint(baseInput);
 
     expect(result.ok).toBe(true);
+  });
+
+  it("rejects DRAFT blueprints", async () => {
+    mockBlueprintFindFirst.mockResolvedValue(blueprint({ status: "DRAFT" }));
+
+    const result = await validateAttachableBlueprint(baseInput);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(400);
+      expect(result.error).toBe("Blueprint must be validated before it can be attached.");
+    }
   });
 
   it("rejects missing blueprints", async () => {

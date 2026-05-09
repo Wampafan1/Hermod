@@ -35,6 +35,11 @@ export const createBlueprintSchema = z.object({
   afterFormatting: z.record(z.unknown()).optional(),
   beforeSample: z.string().nullable().optional(),
   afterSample: z.string().nullable().optional(),
+  status: z.enum(["DRAFT", "VALIDATED", "ACTIVE", "ARCHIVED"]).default("DRAFT"),
+  validation: z.object({
+    passed: z.boolean(),
+    overallMatchRate: z.number(),
+  }).optional(),
 });
 
 export const updateBlueprintSchema = z.object({
@@ -47,6 +52,10 @@ export const updateBlueprintSchema = z.object({
   beforeSample: z.string().optional().nullable(),
   afterSample: z.string().optional().nullable(),
   status: z.enum(["DRAFT", "VALIDATED", "ACTIVE", "ARCHIVED"]).optional(),
+  validation: z.object({
+    passed: z.boolean(),
+    overallMatchRate: z.number(),
+  }).optional(),
 });
 
 export const detachBlueprintSchema = z.object({

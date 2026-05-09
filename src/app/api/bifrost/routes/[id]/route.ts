@@ -75,11 +75,11 @@ export const PUT = withAuth(async (req, session) => {
   }
 
   let blueprintId: string | null | undefined;
-  const blueprintChanged = data.blueprintId !== undefined;
+  const blueprintChanged = data.blueprintId !== undefined && data.blueprintId !== existing.blueprintId;
   const transformChanged = data.transformEnabled !== undefined;
   if (blueprintChanged || transformChanged) {
     const effectiveTransformEnabled = data.transformEnabled ?? existing.transformEnabled;
-    const effectiveBlueprintId = blueprintChanged ? data.blueprintId : existing.blueprintId;
+    const effectiveBlueprintId = data.blueprintId !== undefined ? data.blueprintId : existing.blueprintId;
     const blueprintValidation = await validateOptionalAttachableBlueprint({
       blueprintId: effectiveBlueprintId,
       userId: session.user.id,
@@ -98,7 +98,7 @@ export const PUT = withAuth(async (req, session) => {
       );
     }
 
-    if (blueprintChanged) {
+    if (data.blueprintId !== undefined) {
       blueprintId = blueprintValidation.blueprint?.id ?? null;
     }
   }
@@ -134,7 +134,7 @@ export const PUT = withAuth(async (req, session) => {
       ...(data.destId !== undefined && { destId: data.destId }),
       ...(data.destConfig !== undefined && { destConfig: data.destConfig as Prisma.InputJsonValue }),
       ...(data.transformEnabled !== undefined && { transformEnabled: data.transformEnabled }),
-      ...(data.blueprintId !== undefined && { blueprintId }),
+      ...(blueprintChanged && { blueprintId }),
       ...(data.frequency !== undefined && { frequency: data.frequency }),
       ...(data.daysOfWeek !== undefined && { daysOfWeek: data.daysOfWeek }),
       ...(data.dayOfMonth !== undefined && { dayOfMonth: data.dayOfMonth }),

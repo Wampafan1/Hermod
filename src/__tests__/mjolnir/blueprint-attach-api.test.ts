@@ -182,6 +182,22 @@ describe("report blueprint attach API", () => {
     expect(mockReportCreate).not.toHaveBeenCalled();
   });
 
+  it("rejects DRAFT blueprints on report create", async () => {
+    mockBlueprintFindFirst.mockResolvedValue(blueprint({ status: "DRAFT" }));
+    const { POST } = await import("@/app/api/reports/route");
+
+    const response = await POST(jsonRequest(
+      "http://localhost/api/reports",
+      reportPayload({ blueprintId: "bp_valid" })
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "Blueprint must be validated before it can be attached.",
+    });
+    expect(mockReportCreate).not.toHaveBeenCalled();
+  });
+
   it("updates reports with a valid blueprint", async () => {
     mockBlueprintFindFirst.mockResolvedValue(blueprint());
     const { PUT } = await import("@/app/api/reports/[id]/route");
@@ -224,6 +240,23 @@ describe("report blueprint attach API", () => {
     ));
 
     expect(response.status).toBe(400);
+    expect(mockReportUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects DRAFT blueprints on report update when changing attachments", async () => {
+    mockBlueprintFindFirst.mockResolvedValue(blueprint({ status: "DRAFT" }));
+    const { PUT } = await import("@/app/api/reports/[id]/route");
+
+    const response = await PUT(jsonRequest(
+      "http://localhost/api/reports/report_1",
+      { blueprintId: "bp_valid" },
+      "PUT"
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "Blueprint must be validated before it can be attached.",
+    });
     expect(mockReportUpdate).not.toHaveBeenCalled();
   });
 });
@@ -278,6 +311,22 @@ describe("Bifrost blueprint attach API", () => {
     ));
 
     expect(response.status).toBe(400);
+    expect(mockBifrostRouteCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects DRAFT blueprints on Bifrost route create", async () => {
+    mockBlueprintFindFirst.mockResolvedValue(blueprint({ status: "DRAFT" }));
+    const { POST } = await import("@/app/api/bifrost/routes/route");
+
+    const response = await POST(jsonRequest(
+      "http://localhost/api/bifrost/routes",
+      routePayload()
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "Blueprint must be validated before it can be attached.",
+    });
     expect(mockBifrostRouteCreate).not.toHaveBeenCalled();
   });
 
@@ -336,6 +385,24 @@ describe("Bifrost blueprint attach API", () => {
 
     expect(response.status).toBe(400);
     expect(body.statefulSteps).toEqual(["lookup"]);
+    expect(mockBifrostRouteUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects changing blueprintId to a DRAFT blueprint on Bifrost route update", async () => {
+    mockBifrostRouteFindFirst.mockResolvedValue(existingRoute({ transformEnabled: true }));
+    mockBlueprintFindFirst.mockResolvedValue(blueprint({ status: "DRAFT" }));
+    const { PUT } = await import("@/app/api/bifrost/routes/[id]/route");
+
+    const response = await PUT(jsonRequest(
+      "http://localhost/api/bifrost/routes/route_1",
+      { blueprintId: "bp_valid" },
+      "PUT"
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "Blueprint must be validated before it can be attached.",
+    });
     expect(mockBifrostRouteUpdate).not.toHaveBeenCalled();
   });
 

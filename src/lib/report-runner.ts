@@ -165,6 +165,12 @@ export async function executeReportPipeline(input: PipelineInput): Promise<Pipel
       where: { id: input.blueprintId },
     });
 
+    if (blueprint?.status === BlueprintStatus.DRAFT) {
+      console.warn(
+        `[ReportRunner] Report is using legacy DRAFT blueprint ${blueprint.id}; new DRAFT attachments are blocked.`
+      );
+    }
+
     if (blueprint && blueprint.status !== BlueprintStatus.ARCHIVED) {
       const steps = blueprint.steps as unknown as ForgeStep[];
       const sourceSchema = blueprint.sourceSchema as BlueprintData["sourceSchema"];

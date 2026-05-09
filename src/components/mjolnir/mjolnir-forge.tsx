@@ -242,6 +242,13 @@ export function MjolnirForge({ blueprints: initialBlueprints }: MjolnirForgeProp
           afterFormatting: state.afterFormatting || undefined,
           beforeSample: state.beforeFile?.filename,
           afterSample: state.afterFile?.filename,
+          status: state.validation?.passed ? "VALIDATED" : "DRAFT",
+          validation: state.validation
+            ? {
+                passed: state.validation.passed,
+                overallMatchRate: state.validation.overallMatchRate,
+              }
+            : undefined,
         }),
       });
 
@@ -577,6 +584,11 @@ export function MjolnirForge({ blueprints: initialBlueprints }: MjolnirForgeProp
               <p className="label-norse">Step 6 — Save Blueprint</p>
               <p className="text-text-dim text-xs tracking-wide">
                 Name your blueprint and save it to the forge.
+              </p>
+              <p className="text-text-dim text-xs tracking-wide leading-relaxed">
+                {state.validation?.passed
+                  ? "This blueprint passed validation and will be saved as VALIDATED. Activate it later when you want to mark it production-ready."
+                  : "Validation was skipped or did not pass, so this blueprint will be saved as DRAFT and cannot be attached until validated."}
               </p>
 
               <div className="space-y-3 max-w-md">

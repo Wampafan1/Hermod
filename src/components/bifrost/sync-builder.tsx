@@ -298,7 +298,7 @@ export function SyncBuilder() {
   useEffect(() => {
     Promise.all([
       fetch("/api/connections").then((r) => r.json()),
-      fetch("/api/mjolnir/blueprints")
+      fetch("/api/mjolnir/blueprints?status=VALIDATED,ACTIVE")
         .then((r) => r.json())
         .catch(() => []),
       fetch("/api/connection-folders")

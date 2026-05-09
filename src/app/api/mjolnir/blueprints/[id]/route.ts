@@ -5,6 +5,14 @@ import { withAuth } from "@/lib/api";
 import { updateBlueprintSchema } from "@/lib/validations/mjolnir";
 import { sanitizeBlueprintCreatePayload } from "@/lib/mjolnir/retention";
 import { getBlueprintUsage } from "@/lib/mjolnir/blueprint-usage";
+import {
+  canEditBlueprintStatus,
+  hasBlueprintContentChanges,
+  hasValidationEvidence,
+  normalizeBlueprintStatus,
+  shouldDemoteToDraftOnContentChange,
+  validateStatusTransition,
+} from "@/lib/mjolnir/blueprint-status";
 
 /**
  * Extract the blueprint ID from the request URL.
@@ -60,6 +68,52 @@ export const PUT = withAuth(async (req, session) => {
 
   const sanitized = sanitizeBlueprintCreatePayload(parsed.data);
   const updateData: Record<string, unknown> = {};
+  const currentStatus = normalizeBlueprintStatus(existing.status);
+  const requestedStatus = sanitized.status !== undefined
+    ? normalizeBlueprintStatus(sanitized.status)
+    : undefined;
+  const contentChanged = hasBlueprintContentChanges(sanitized as Record<string, unknown>);
+  const hasNonStatusChanges = Object.keys(sanitized as Record<string, unknown>).some(
+    (key) => key !== "status" && key !== "validation"
+  );
+  const validationEvidence = hasValidationEvidence(parsed.data.validation);
+
+  if (!canEditBlueprintStatus(currentStatus) && hasNonStatusChanges && requestedStatus !== "DRAFT") {
+    return NextResponse.json(
+      { error: "Archived blueprints must be restored to DRAFT before editing." },
+      { status: 400 }
+    );
+  }
+
+  if (requestedStatus !== undefined) {
+    const transition = validateStatusTransition({
+      from: currentStatus,
+      to: requestedStatus,
+      hasValidationEvidence: validationEvidence,
+    });
+    if (!transition.ok) {
+      return NextResponse.json({ error: transition.error }, { status: 400 });
+    }
+
+    if (
+      contentChanged &&
+      (requestedStatus === "VALIDATED" || requestedStatus === "ACTIVE") &&
+      !validationEvidence
+    ) {
+      return NextResponse.json(
+        { error: "Validation evidence is required when changing blueprint content and marking it production-ready." },
+        { status: 400 }
+      );
+    }
+
+    updateData.status = requestedStatus;
+  } else if (contentChanged && shouldDemoteToDraftOnContentChange({
+    currentStatus,
+    changes: sanitized as Record<string, unknown>,
+  })) {
+    updateData.status = "DRAFT";
+  }
+
   if (sanitized.name !== undefined) updateData.name = sanitized.name;
   if (sanitized.description !== undefined) updateData.description = sanitized.description;
   if (sanitized.steps !== undefined) {
@@ -82,7 +136,6 @@ export const PUT = withAuth(async (req, session) => {
   }
   if (sanitized.beforeSample !== undefined) updateData.beforeSample = sanitized.beforeSample;
   if (sanitized.afterSample !== undefined) updateData.afterSample = sanitized.afterSample;
-  if (sanitized.status !== undefined) updateData.status = sanitized.status;
 
   const updated = await prisma.blueprint.update({
     where: { id },
