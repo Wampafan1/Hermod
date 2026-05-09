@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withAuth } from "@/lib/api";
+import { validateAttachableForgeBlueprint } from "@/lib/mjolnir/forge-blueprint-attach";
 
 // ─── GET /api/gates/[gateId] — gate detail with recent pushes ──
 
@@ -69,6 +70,32 @@ export const PATCH = withAuth(async (req, ctx) => {
       return NextResponse.json({ error: "Invalid status" }, { status: 400 });
     }
     updates.status = body.status;
+  }
+  if (body.forgeEnabled !== undefined || body.forgeBlueprintId !== undefined) {
+    const effectiveForgeEnabled =
+      body.forgeEnabled !== undefined ? Boolean(body.forgeEnabled) : gate.forgeEnabled;
+    const effectiveForgeBlueprintId =
+      body.forgeBlueprintId !== undefined ? body.forgeBlueprintId : gate.forgeBlueprintId;
+    const shouldValidateForgeBlueprint =
+      body.forgeBlueprintId !== undefined || effectiveForgeEnabled;
+
+    const forgeBlueprintValidation = await validateAttachableForgeBlueprint({
+      forgeBlueprintId: shouldValidateForgeBlueprint ? effectiveForgeBlueprintId : null,
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      context: "realm-gate",
+    });
+    if (!forgeBlueprintValidation.ok) {
+      return NextResponse.json(
+        { error: forgeBlueprintValidation.error },
+        { status: forgeBlueprintValidation.status }
+      );
+    }
+
+    updates.forgeEnabled = effectiveForgeEnabled;
+    updates.forgeBlueprintId = effectiveForgeEnabled
+      ? forgeBlueprintValidation.forgeBlueprint?.id ?? null
+      : null;
   }
 
   const updated = await prisma.realmGate.update({

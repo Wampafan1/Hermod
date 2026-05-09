@@ -898,6 +898,46 @@ Validation results:
 - `npm run build`: passed; pre-existing lint warnings were reported during the build.
 - `npm run lint`: passed with pre-existing warnings.
 
+## RealmGate Forge Blueprint Validation Patch Results
+
+API paths checked:
+
+- `POST /api/gates`: accepts `forgeEnabled` and `forgeBlueprintId` during RealmGate creation.
+- `PATCH /api/gates/[gateId]`: now explicitly handles `forgeEnabled` and `forgeBlueprintId` updates.
+- `GET /api/gates` and `GET /api/gates/[gateId]`: read-only paths; no attachment writes.
+- Report and Bifrost route APIs accept Mjolnir `blueprintId`, not RealmGate `forgeBlueprintId`; existing Mjolnir attach validation remains unchanged.
+
+Validation behavior:
+
+- Added `src/lib/mjolnir/forge-blueprint-attach.ts`.
+- Missing or empty `forgeBlueprintId` remains valid and stores no attachment.
+- Provided ForgeBlueprint IDs must exist.
+- ForgeBlueprints with a tenant must match the active tenant.
+- ForgeBlueprints with a null tenant must still have an owning route in the active tenant.
+- The owning Bifrost route must belong to the current user and active tenant.
+- `ARCHIVED` ForgeBlueprints are rejected.
+- Validation selects only IDs, status, tenant, and owning route boundary fields; it does not return credentials, SQL, source configs, or destination configs.
+
+Tests added or updated:
+
+- `src/__tests__/mjolnir/forge-blueprint-attach.test.ts`: absent IDs, same-tenant attach, null-tenant/route-bound attach, missing ID rejection, cross-tenant rejection, cross-user route rejection, archived rejection, and sensitive detail omission.
+- `src/__tests__/gates-api.test.ts`: create without forge blueprint, create with same-tenant forge blueprint, missing create rejection, cross-tenant create rejection, cross-tenant update rejection, and sensitive detail omission.
+
+Validation results:
+
+- Focused RealmGate forge blueprint tests passed: 2 test files and 13 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 87 test files and 1207 tests.
+- `npm run build`: passed; pre-existing lint warnings were reported during the build.
+- `npm run lint`: passed with pre-existing warnings.
+
+Remaining follow-ups:
+
+- Tenant-published ownership for production blueprints.
+- Immutable version pinning for report, Bifrost, and RealmGate attachments.
+- A fuller RealmGate UI flow for selecting available ForgeBlueprints when product rules are finalized.
+
 ## Recommended Next Prompt
 
 Make the product decision for Mjolnir ownership and retention before the next schema change:

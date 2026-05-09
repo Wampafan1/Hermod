@@ -9,6 +9,7 @@ import type { ConnectionType } from "@/lib/providers/types";
 import { readTempFile, deleteTempFile } from "@/lib/gates/temp-files";
 import { executePush } from "@/lib/gates/push-executor";
 import { analyzeCSV, analyzeExcel } from "@/lib/duckdb/file-analyzer";
+import { validateAttachableForgeBlueprint } from "@/lib/mjolnir/forge-blueprint-attach";
 
 // ─── GET /api/gates — list tenant gates ─────────────
 
@@ -142,17 +143,17 @@ export const POST = withAuth(async (req, ctx) => {
     );
   }
 
-  if (forgeEnabled && forgeBlueprintId) {
-    const forgeBlueprint = await prisma.forgeBlueprint.findFirst({
-      where: {
-        id: forgeBlueprintId,
-        tenantId: ctx.tenantId,
-      },
-      select: { id: true },
-    });
-    if (!forgeBlueprint) {
-      return NextResponse.json({ error: "Forge blueprint not found" }, { status: 404 });
-    }
+  const forgeBlueprintValidation = await validateAttachableForgeBlueprint({
+    forgeBlueprintId: forgeEnabled ? forgeBlueprintId : null,
+    tenantId: ctx.tenantId,
+    userId: ctx.userId,
+    context: "realm-gate",
+  });
+  if (!forgeBlueprintValidation.ok) {
+    return NextResponse.json(
+      { error: forgeBlueprintValidation.error },
+      { status: forgeBlueprintValidation.status }
+    );
   }
 
   // Read temp file and profile it to save the schema snapshot
@@ -229,7 +230,9 @@ export const POST = withAuth(async (req, ctx) => {
       columnMapping,
       savedSchema,
       forgeEnabled: forgeEnabled ?? false,
-      forgeBlueprintId: forgeEnabled ? forgeBlueprintId : null,
+      forgeBlueprintId: forgeEnabled
+        ? forgeBlueprintValidation.forgeBlueprint?.id ?? null
+        : null,
     },
     include: {
       connection: { select: { id: true, name: true, type: true } },

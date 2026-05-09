@@ -3,13 +3,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   mockConnectionFindFirst,
   mockRealmGateCreate,
+  mockRealmGateFindFirst,
+  mockRealmGateUpdate,
   mockGatePushCreate,
   mockForgeBlueprintFindFirst,
+  mockReadTempFile,
+  mockDeleteTempFile,
+  mockExecutePush,
+  mockAnalyzeExcel,
 } = vi.hoisted(() => ({
   mockConnectionFindFirst: vi.fn(),
   mockRealmGateCreate: vi.fn(),
+  mockRealmGateFindFirst: vi.fn(),
+  mockRealmGateUpdate: vi.fn(),
   mockGatePushCreate: vi.fn(),
   mockForgeBlueprintFindFirst: vi.fn(),
+  mockReadTempFile: vi.fn(),
+  mockDeleteTempFile: vi.fn(),
+  mockExecutePush: vi.fn(),
+  mockAnalyzeExcel: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -29,7 +41,9 @@ vi.mock("@/lib/db", () => ({
     },
     realmGate: {
       create: mockRealmGateCreate,
+      findFirst: mockRealmGateFindFirst,
       findMany: vi.fn(),
+      update: mockRealmGateUpdate,
     },
     gatePush: {
       create: mockGatePushCreate,
@@ -41,12 +55,12 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/gates/temp-files", () => ({
-  readTempFile: vi.fn(),
-  deleteTempFile: vi.fn(),
+  readTempFile: mockReadTempFile,
+  deleteTempFile: mockDeleteTempFile,
 }));
 
 vi.mock("@/lib/gates/push-executor", () => ({
-  executePush: vi.fn(),
+  executePush: mockExecutePush,
 }));
 
 vi.mock("@/lib/providers", () => ({
@@ -55,7 +69,7 @@ vi.mock("@/lib/providers", () => ({
 
 vi.mock("@/lib/duckdb/file-analyzer", () => ({
   analyzeCSV: vi.fn(),
-  analyzeExcel: vi.fn(),
+  analyzeExcel: mockAnalyzeExcel,
 }));
 
 function gateCreateRequest(connectionId = "conn_tenant_a", overrides: Record<string, unknown> = {}) {
@@ -86,6 +100,68 @@ function gateCreateRequest(connectionId = "conn_tenant_a", overrides: Record<str
   });
 }
 
+function gatePatchRequest(overrides: Record<string, unknown> = {}) {
+  return new Request("http://localhost/api/gates/gate_1", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(overrides),
+  });
+}
+
+function forgeBlueprint(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "forge_tenant_b",
+    routeId: "route_1",
+    tenantId: "tenant_b",
+    status: "ACTIVE",
+    name: "Tenant B Forge Blueprint",
+    route: {
+      id: "route_1",
+      userId: "user_1",
+      tenantId: "tenant_b",
+    },
+    ...overrides,
+  };
+}
+
+function setupSuccessfulCreate() {
+  mockConnectionFindFirst.mockResolvedValue({
+    id: "conn_tenant_b",
+    type: "POSTGRES",
+    config: {},
+    credentials: null,
+  });
+  mockReadTempFile.mockResolvedValue({
+    buffer: Buffer.from("fixture"),
+    extension: ".xlsx",
+  });
+  mockAnalyzeExcel.mockResolvedValue({
+    columns: [
+      {
+        name: "id",
+        duckdbType: "INTEGER",
+        inferredType: "INTEGER",
+        nullable: false,
+      },
+    ],
+  });
+  mockRealmGateCreate.mockResolvedValue({
+    id: "gate_1",
+    tenantId: "tenant_b",
+    name: "Tenant B gate",
+    forgeEnabled: false,
+    forgeBlueprintId: null,
+  });
+  mockGatePushCreate.mockResolvedValue({ id: "push_1" });
+  mockExecutePush.mockResolvedValue({
+    rowCount: 1,
+    rowsInserted: 1,
+    rowsUpdated: 0,
+    rowsErrored: 0,
+    duration: 10,
+  });
+}
+
 describe("gates API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -106,24 +182,165 @@ describe("gates API", () => {
     });
   });
 
-  it("requires forge blueprint attachments to belong to the active tenant", async () => {
-    mockConnectionFindFirst.mockResolvedValue({ id: "conn_tenant_b", type: "POSTGRES", config: {}, credentials: null });
+  it("creates gates without forgeBlueprintId", async () => {
+    setupSuccessfulCreate();
+
+    const { POST } = await import("@/app/api/gates/route");
+    const response = await POST(gateCreateRequest("conn_tenant_b"));
+
+    expect(response.status).toBe(201);
+    expect(mockForgeBlueprintFindFirst).not.toHaveBeenCalled();
+    expect(mockRealmGateCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        forgeEnabled: false,
+        forgeBlueprintId: null,
+      }),
+    }));
+  });
+
+  it("creates gates with same-tenant forgeBlueprintId", async () => {
+    setupSuccessfulCreate();
+    mockForgeBlueprintFindFirst.mockResolvedValue(forgeBlueprint());
+    mockRealmGateCreate.mockResolvedValue({
+      id: "gate_1",
+      tenantId: "tenant_b",
+      name: "Tenant B gate",
+      forgeEnabled: true,
+      forgeBlueprintId: "forge_tenant_b",
+    });
+
+    const { POST } = await import("@/app/api/gates/route");
+    const response = await POST(gateCreateRequest("conn_tenant_b", {
+      forgeEnabled: true,
+      forgeBlueprintId: "forge_tenant_b",
+    }));
+
+    expect(response.status).toBe(201);
+    expect(mockForgeBlueprintFindFirst).toHaveBeenCalledWith({
+      where: { id: "forge_tenant_b" },
+      select: {
+        id: true,
+        routeId: true,
+        tenantId: true,
+        status: true,
+        name: true,
+        route: {
+          select: {
+            id: true,
+            userId: true,
+            tenantId: true,
+          },
+        },
+      },
+    });
+    expect(mockRealmGateCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        forgeEnabled: true,
+        forgeBlueprintId: "forge_tenant_b",
+      }),
+    }));
+  });
+
+  it("rejects missing forgeBlueprintId on gate create", async () => {
+    mockConnectionFindFirst.mockResolvedValue({
+      id: "conn_tenant_b",
+      type: "POSTGRES",
+      config: {},
+      credentials: null,
+    });
     mockForgeBlueprintFindFirst.mockResolvedValue(null);
+
+    const { POST } = await import("@/app/api/gates/route");
+    const response = await POST(gateCreateRequest("conn_tenant_b", {
+      forgeEnabled: true,
+      forgeBlueprintId: "forge_missing",
+    }));
+
+    expect(response.status).toBe(404);
+    expect(mockForgeBlueprintFindFirst).toHaveBeenCalledWith({
+      where: { id: "forge_missing" },
+      select: {
+        id: true,
+        routeId: true,
+        tenantId: true,
+        status: true,
+        name: true,
+        route: {
+          select: {
+            id: true,
+            userId: true,
+            tenantId: true,
+          },
+        },
+      },
+    });
+    expect(mockRealmGateCreate).not.toHaveBeenCalled();
+  });
+
+  it("requires forge blueprint attachments to belong to the active tenant", async () => {
+    mockConnectionFindFirst.mockResolvedValue({
+      id: "conn_tenant_b",
+      type: "POSTGRES",
+      config: {},
+      credentials: null,
+    });
+    mockForgeBlueprintFindFirst.mockResolvedValue(forgeBlueprint({
+      id: "forge_tenant_a",
+      tenantId: "tenant_a",
+      route: {
+        id: "route_tenant_a",
+        userId: "user_1",
+        tenantId: "tenant_a",
+        sourceConfig: { query: "select secret" },
+        destConfig: { password: "do-not-return" },
+      },
+    }));
 
     const { POST } = await import("@/app/api/gates/route");
     const response = await POST(gateCreateRequest("conn_tenant_b", {
       forgeEnabled: true,
       forgeBlueprintId: "forge_tenant_a",
     }));
+    const payload = await response.json();
 
     expect(response.status).toBe(404);
-    expect(mockForgeBlueprintFindFirst).toHaveBeenCalledWith({
-      where: {
-        id: "forge_tenant_a",
-        tenantId: "tenant_b",
-      },
-      select: { id: true },
-    });
+    expect(payload).toEqual({ error: "Forge blueprint not found" });
+    expect(JSON.stringify(payload)).not.toContain("select secret");
+    expect(JSON.stringify(payload)).not.toContain("do-not-return");
     expect(mockRealmGateCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-tenant forgeBlueprintId on gate update", async () => {
+    mockRealmGateFindFirst.mockResolvedValue({
+      id: "gate_1",
+      tenantId: "tenant_b",
+      forgeEnabled: false,
+      forgeBlueprintId: null,
+    });
+    mockForgeBlueprintFindFirst.mockResolvedValue(forgeBlueprint({
+      id: "forge_tenant_a",
+      tenantId: "tenant_a",
+      route: {
+        id: "route_tenant_a",
+        userId: "user_1",
+        tenantId: "tenant_a",
+        sourceConfig: { query: "select secret" },
+        destConfig: { token: "do-not-return" },
+      },
+    }));
+
+    const { PATCH } = await import("@/app/api/gates/[gateId]/route");
+    const response = await PATCH(gatePatchRequest({
+      forgeEnabled: true,
+      forgeBlueprintId: "forge_tenant_a",
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(payload).toEqual({ error: "Forge blueprint not found" });
+    expect(JSON.stringify(payload)).not.toContain("select secret");
+    expect(JSON.stringify(payload)).not.toContain("do-not-return");
+    expect(mockRealmGateCreate).not.toHaveBeenCalled();
+    expect(mockRealmGateUpdate).not.toHaveBeenCalled();
   });
 });
