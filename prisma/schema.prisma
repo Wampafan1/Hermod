@@ -115,6 +115,9 @@ model Tenant {
   connections       Connection[]
   connectionFolders ConnectionFolder[]
   bifrostRoutes     BifrostRoute[]
+  blueprints        Blueprint[]
+  blueprintVersions BlueprintVersion[]
+  blueprintVersionExecutions BlueprintVersionExecution[]
   forgeBlueprints   ForgeBlueprint[]
   sftpConnections   SftpConnection[]
   emailConnections  EmailConnection[]
@@ -269,6 +272,8 @@ model Report {
   connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
   blueprintId  String?
   blueprint    Blueprint? @relation(fields: [blueprintId], references: [id], onDelete: SetNull)
+  blueprintVersionId String?
+  blueprintVersion   BlueprintVersion? @relation(fields: [blueprintVersionId], references: [id], onDelete: Restrict)
   userId       String
   user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenantId     String?
@@ -279,6 +284,7 @@ model Report {
   updatedAt    DateTime   @updatedAt
 
   @@index([tenantId])
+  @@index([tenantId, blueprintVersionId])
   @@index([userId, updatedAt(sort: Desc)], map: "idx_report_user_updated")
 }
 
@@ -371,12 +377,22 @@ model Blueprint {
   beforeSample    String?         // Original BEFORE filename
   afterSample     String?         // Original AFTER filename
   status          BlueprintStatus @default(DRAFT)
+  scope           BlueprintScope  @default(PERSONAL_DRAFT)
+  tenantId        String?
+  tenant          Tenant?         @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  publishedFromId String?
+  publishedFrom   Blueprint?      @relation("BlueprintPublishedCopies", fields: [publishedFromId], references: [id], onDelete: SetNull)
+  publishedCopies Blueprint[]     @relation("BlueprintPublishedCopies")
   userId          String
   user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   reports         Report[]
   bifrostRoutes   BifrostRoute[]
+  versions        BlueprintVersion[]
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
+
+  @@index([tenantId, scope, status])
+  @@index([publishedFromId])
 }
 
 enum BlueprintStatus {
@@ -387,6 +403,86 @@ enum BlueprintStatus {
 }
 
 // ─── Blueprint Version Control ──────────────────────────
+
+enum BlueprintScope {
+  PERSONAL_DRAFT
+  TENANT_PUBLISHED
+}
+
+enum BlueprintVersionSource {
+  PUBLISH
+  REPUBLISH
+  ROLLBACK
+  BACKFILL
+  IMPORT
+}
+
+model BlueprintVersion {
+  id              String                 @id @default(cuid())
+  blueprintId     String
+  blueprint       Blueprint              @relation(fields: [blueprintId], references: [id], onDelete: Cascade)
+  tenantId        String
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  version         Int
+
+  steps           Json
+  stepsHash       String
+  sourceSchema    Json?
+  afterFormatting Json?
+  analysisLog     Json?
+
+  source          BlueprintVersionSource @default(PUBLISH)
+  sourceDraftId   String?
+  changeReason    String?
+  changeSummary   Json?
+  validation      Json?
+  aiModelUsed     String?
+  aiConfidence    Float?
+
+  isLocked        Boolean                @default(true)
+  lockedAt        DateTime?
+  lockedBy        String?
+  createdAt       DateTime               @default(now())
+  createdBy       String?
+
+  reports         Report[]
+  bifrostRoutes   BifrostRoute[]
+  realmGates      RealmGate[]
+  executions      BlueprintVersionExecution[]
+
+  @@unique([blueprintId, version])
+  @@index([tenantId, blueprintId, version])
+  @@index([tenantId, createdAt])
+  @@index([stepsHash])
+}
+
+model BlueprintVersionExecution {
+  id                  String           @id @default(cuid())
+  blueprintVersionId  String
+  blueprintVersion    BlueprintVersion @relation(fields: [blueprintVersionId], references: [id], onDelete: Restrict)
+  tenantId            String
+  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  consumerType        String
+  consumerId          String
+  runLogId            String?
+  routeLogId          String?
+  gatePushId          String?
+
+  stepsHash           String
+  status              String
+  inputRowCount       Int?
+  outputRowCount      Int?
+  inputHash           String?
+  outputHash          String?
+  errorMessage        String?
+  errorStep           Int?
+  startedAt           DateTime         @default(now())
+  completedAt         DateTime?
+
+  @@index([blueprintVersionId, startedAt])
+  @@index([tenantId, consumerType, consumerId, startedAt])
+}
 
 model ForgeBlueprint {
   id              String                    @id @default(cuid())
@@ -950,6 +1046,8 @@ model BifrostRoute {
   transformEnabled Boolean        @default(false)
   blueprintId      String?
   blueprint        Blueprint?     @relation(fields: [blueprintId], references: [id], onDelete: SetNull)
+  blueprintVersionId String?
+  blueprintVersion   BlueprintVersion? @relation(fields: [blueprintVersionId], references: [id], onDelete: Restrict)
 
   // Embedded schedule
   frequency        String?        // "DAILY", "WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY"
@@ -982,6 +1080,7 @@ model BifrostRoute {
   @@index([destId])
   @@index([enabled, nextRunAt])
   @@index([tenantId])
+  @@index([tenantId, blueprintVersionId])
 }
 
 model RouteLog {
@@ -1212,6 +1311,8 @@ model RealmGate {
   forgeEnabled      Boolean          @default(false)
   forgeBlueprintId  String?
   forgeBlueprint    ForgeBlueprint?  @relation(fields: [forgeBlueprintId], references: [id], onDelete: SetNull)
+  blueprintVersionId String?
+  blueprintVersion   BlueprintVersion? @relation(fields: [blueprintVersionId], references: [id], onDelete: Restrict)
 
   // Metadata
   status            String           @default("ACTIVE") // "ACTIVE" | "PAUSED" | "ARCHIVED"
@@ -1224,6 +1325,7 @@ model RealmGate {
 
   @@index([tenantId])
   @@index([tenantId, status])
+  @@index([tenantId, blueprintVersionId])
 }
 
 model GatePush {

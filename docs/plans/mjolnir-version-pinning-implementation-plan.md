@@ -1182,6 +1182,48 @@ Deliverables:
 - Legacy selector support removed.
 - Final cleanup migration only after explicit approval.
 
+## Phase 1 Schema Scaffolding Results
+
+Prisma fields/models added:
+
+- Added `BlueprintScope` with `PERSONAL_DRAFT` and `TENANT_PUBLISHED`.
+- Added `BlueprintVersionSource` with `PUBLISH`, `REPUBLISH`, `ROLLBACK`, `BACKFILL`, and `IMPORT`.
+- Added nullable `Blueprint.scope`, `Blueprint.tenantId`, `Blueprint.publishedFromId`, tenant/self-copy relations, and `Blueprint.versions`.
+- Added `BlueprintVersion` for immutable tenant-scoped version snapshots with locked steps, `stepsHash`, metadata, validation, and audit fields.
+- Added `BlueprintVersionExecution` for future version execution audit records.
+- Added nullable `blueprintVersionId` relations to `Report`, `BifrostRoute`, and `RealmGate` while retaining legacy `blueprintId` / `forgeBlueprintId` fields.
+- Added tenant relation fields for blueprints, blueprint versions, and blueprint version executions.
+
+Helper modules added:
+
+- `src/lib/mjolnir/blueprint-version.ts`: stable recursive step normalization, SHA-256 step hashing, next-version lookup, and locked version creation.
+- `src/lib/mjolnir/blueprint-version-loader.ts`: tenant-bounded safe execution-field loader stub for future runtime phases.
+- `src/lib/mjolnir/blueprint-version-attach.ts`: optional pinned-version attach validation for tenant boundary, locked state, tenant-published parent scope, attachable parent status, and optional streaming compatibility.
+
+Tests added:
+
+- `src/__tests__/mjolnir/blueprint-version.test.ts`: stable hashing, hash changes on step changes, version number selection, locked version creation, and array-order preservation.
+- `src/__tests__/mjolnir/blueprint-version-attach.test.ts`: null acceptance, missing/cross-tenant rejection, unlocked rejection, wrong-scope rejection, VALIDATED/ACTIVE acceptance, and streaming-incompatible rejection.
+
+Validation results:
+
+- Focused version helper tests passed: 2 test files and 12 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed after applying the existing Windows Prisma DLL-lock workaround.
+- `npm run test`: passed, 93 test files and 1247 tests.
+- `npm run build`: passed with existing lint warnings.
+- `npm run lint`: passed with existing warnings.
+
+Runtime behavior:
+
+- Report, Bifrost, and RealmGate execution still use legacy `blueprintId` / `forgeBlueprintId` paths.
+- No report, Bifrost, or RealmGate runtime loader has been switched to pinned versions in this phase.
+- No production data backfill or legacy field removal was performed.
+
+Next phase recommendation:
+
+- Implement the publish API next. It should create tenant-published copies, create locked `BlueprintVersion` records from sanitized personal drafts, return safe version metadata, and still avoid changing report/Bifrost/RealmGate runtime execution until the dedicated pinning phases.
+
 ## Open Product Decisions
 
 1. Should published blueprint parent reuse `Blueprint` with `scope = TENANT_PUBLISHED`, or use a separate `PublishedBlueprint` model?
