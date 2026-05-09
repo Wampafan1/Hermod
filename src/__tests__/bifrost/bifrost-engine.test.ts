@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ─── Mocks (hoisted for vi.mock factory access) ──────
 
@@ -8,6 +8,9 @@ const {
   mockUpdateMany,
   mockFindUniqueOrThrow,
   mockBifrostRouteUpdate,
+  mockForgeBlueprintFindUnique,
+  mockForgeBlueprintVersionFindFirst,
+  mockRecordExecution,
   mockExtractGen,
   mockLoad,
   mockGetSchema,
@@ -23,6 +26,9 @@ const {
   mockUpdateMany: vi.fn(),
   mockFindUniqueOrThrow: vi.fn(),
   mockBifrostRouteUpdate: vi.fn(),
+  mockForgeBlueprintFindUnique: vi.fn(),
+  mockForgeBlueprintVersionFindFirst: vi.fn(),
+  mockRecordExecution: vi.fn(),
   mockExtractGen: vi.fn(),
   mockLoad: vi.fn(),
   mockGetSchema: vi.fn(),
@@ -47,6 +53,12 @@ vi.mock("@prisma/client", () => ({
       },
       blueprint: {
         findUniqueOrThrow: mockFindUniqueOrThrow,
+      },
+      forgeBlueprint: {
+        findUnique: mockForgeBlueprintFindUnique,
+      },
+      forgeBlueprintVersion: {
+        findFirst: mockForgeBlueprintVersionFindFirst,
       },
     };
   }),
@@ -103,6 +115,12 @@ vi.mock("@/lib/mjolnir/engine/blueprint-executor", () => ({
     metrics: [],
     totalDurationMs: 0,
   })),
+}));
+
+vi.mock("@/lib/mjolnir/blueprint-versioning", () => ({
+  recordExecution: mockRecordExecution,
+  completeExecution: vi.fn().mockResolvedValue(undefined),
+  computeDataHash: vi.fn().mockReturnValue("data_hash"),
 }));
 
 vi.mock("@/lib/schedule-utils", () => ({
@@ -167,10 +185,12 @@ async function* asyncGenFromChunks(chunks: Record<string, unknown>[][]) {
 
 describe("BifrostEngine", () => {
   let engine: BifrostEngine;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     engine = new BifrostEngine();
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     // Default mocks
     mockConnect.mockResolvedValue({
@@ -182,6 +202,13 @@ describe("BifrostEngine", () => {
     mockCreate.mockResolvedValue({ id: "log_1" });
     mockUpdate.mockResolvedValue({});
     mockUpdateMany.mockResolvedValue({ count: 0 });
+    mockForgeBlueprintFindUnique.mockResolvedValue(null);
+    mockForgeBlueprintVersionFindFirst.mockResolvedValue(null);
+    mockRecordExecution.mockResolvedValue({ id: "exec_1" });
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
   });
 
   it("completes successfully with 3 chunks", async () => {
@@ -407,6 +434,81 @@ describe("BifrostEngine", () => {
 
     expect(result.duration).toBeGreaterThanOrEqual(0);
     expect(typeof result.duration).toBe("number");
+  });
+
+  it("returns a mutable blueprint execution descriptor when transform uses current Blueprint steps", async () => {
+    const steps = [
+      {
+        order: 0,
+        type: "rename_columns",
+        confidence: 1,
+        config: { mapping: { value: "Value" } },
+        description: "Rename value",
+      },
+    ];
+    mockFindUniqueOrThrow.mockResolvedValue({
+      id: "bp_1",
+      name: "Mutable Route Transform",
+      status: "ACTIVE",
+      steps,
+    });
+    mockExtractGen.mockImplementation(() => asyncGenFromChunks([[{ id: 1, value: "A" }]]));
+    mockLoad.mockResolvedValue({ rowsLoaded: 1, errors: [] });
+
+    const result = await engine.execute(
+      makeRoute({ transformEnabled: true, blueprintId: "bp_1" }),
+      "manual"
+    );
+
+    expect(result.blueprintExecutionDescriptor).toMatchObject({
+      blueprintId: "bp_1",
+      blueprintName: "Mutable Route Transform",
+      blueprintStatus: "ACTIVE",
+      blueprintVersionId: null,
+      executionMode: "MUTABLE_LEGACY",
+    });
+    expect(result.blueprintExecutionDescriptor?.stepsHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.blueprintExecutionDescriptor?.warning).toContain("Mutable legacy blueprint execution");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Mutable legacy blueprint execution")
+    );
+  });
+
+  it("warns ForgeBlueprintVersion tracking is not the source of executed mutable steps", async () => {
+    mockFindUniqueOrThrow.mockResolvedValue({
+      id: "bp_1",
+      name: "Mutable Route Transform",
+      status: "ACTIVE",
+      steps: [{
+        order: 0,
+        type: "remove_columns",
+        confidence: 1,
+        config: { columns: ["scratch"] },
+        description: "Remove scratch",
+      }],
+    });
+    mockForgeBlueprintFindUnique.mockResolvedValue({ id: "forge_1", routeId: "route_1" });
+    mockForgeBlueprintVersionFindFirst.mockResolvedValue({ id: "ver_3", version: 3 });
+    mockExtractGen.mockImplementation(() => asyncGenFromChunks([[{ id: 1, scratch: "x" }]]));
+    mockLoad.mockResolvedValue({ rowsLoaded: 1, errors: [] });
+
+    await engine.execute(
+      makeRoute({ transformEnabled: true, blueprintId: "bp_1" }),
+      "manual"
+    );
+
+    expect(mockRecordExecution).toHaveBeenCalledWith({
+      blueprintId: "forge_1",
+      versionId: "ver_3",
+      versionNumber: 3,
+      routeRunId: "log_1",
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("versionTrackingOnly=true")
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("not ForgeBlueprintVersion ver_3")
+    );
   });
 
   it("updates existing routeLog on fatal load error instead of creating orphan", async () => {

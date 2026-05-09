@@ -13,6 +13,10 @@ import type { BigQueryProvider } from "@/lib/providers/bigquery.provider";
 import { enqueueDeadLetter } from "./helheim/dead-letter";
 import { validateBlueprintForStreaming } from "./forge/forge-validator";
 import { executeBlueprint } from "@/lib/mjolnir/engine/blueprint-executor";
+import {
+  getBlueprintExecutionDescriptor,
+  type BlueprintExecutionDescriptor,
+} from "@/lib/mjolnir/blueprint-execution-descriptor";
 import { calculateNextRun } from "@/lib/schedule-utils";
 import type {
   DestConfig,
@@ -274,6 +278,7 @@ export class BifrostEngine {
 
     let routeLog: { id: string } | null = null;
     let forgeExecutionId: string | null = null;
+    let blueprintExecutionDescriptor: BlueprintExecutionDescriptor | null = null;
     let totalExtracted = 0;
     let totalLoaded = 0;
     let errorCount = 0;
@@ -324,7 +329,7 @@ export class BifrostEngine {
       if (route.transformEnabled && route.blueprintId) {
         const blueprint = await prisma.blueprint.findUniqueOrThrow({
           where: { id: route.blueprintId },
-          select: { id: true, status: true, steps: true },
+          select: { id: true, name: true, status: true, steps: true },
         });
         if (blueprint.status === "ARCHIVED") {
           throw new Error("Archived blueprints cannot be executed by Bifrost routes.");
@@ -334,6 +339,18 @@ export class BifrostEngine {
             `[Bifrost] Route ${route.id} is using legacy DRAFT blueprint ${blueprint.id}; new DRAFT attachments are blocked.`
           );
         }
+        blueprintExecutionDescriptor = getBlueprintExecutionDescriptor({
+          blueprint: {
+            id: blueprint.id,
+            name: blueprint.name,
+            status: blueprint.status,
+            steps: blueprint.steps,
+          },
+        });
+        if (blueprintExecutionDescriptor.warning) {
+          console.warn(`[Bifrost] ${blueprintExecutionDescriptor.warning}`);
+        }
+
         blueprintSteps = blueprint.steps as typeof blueprintSteps;
         const validation = validateBlueprintForStreaming(blueprintSteps!);
         if (!validation.valid) {
@@ -353,6 +370,12 @@ export class BifrostEngine {
               orderBy: { version: "desc" },
             });
             if (currentVer) {
+              console.warn(
+                `[Bifrost] Route ${route.id} is recording ForgeBlueprintExecution ` +
+                `with versionTrackingOnly=true. Executed steps came from mutable ` +
+                `Blueprint ${blueprint.id} (${blueprintExecutionDescriptor.stepsHash}), ` +
+                `not ForgeBlueprintVersion ${currentVer.id}.`
+              );
               const { recordExecution } = await import("@/lib/mjolnir/blueprint-versioning");
               const exec = await recordExecution({
                 blueprintId: forgeBlueprint.id,
@@ -905,7 +928,15 @@ export class BifrostEngine {
         `[Bifrost] ${route.name}: ${status} — ${totalLoaded}/${totalExtracted} rows in ${duration}ms`
       );
 
-      return { routeLogId: routeLog.id, status, totalExtracted, totalLoaded, errorCount, duration };
+      return {
+        routeLogId: routeLog.id,
+        status,
+        totalExtracted,
+        totalLoaded,
+        errorCount,
+        duration,
+        blueprintExecutionDescriptor,
+      };
     } catch (err) {
       // Job-level failure (auth, network, etc.)
       const duration = Date.now() - startTime;
@@ -957,6 +988,7 @@ export class BifrostEngine {
         totalLoaded: 0,
         errorCount: 0,
         duration,
+        blueprintExecutionDescriptor,
       };
     } finally {
       await sourceConn?.close();

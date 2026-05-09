@@ -986,6 +986,54 @@ Remaining product decisions:
 - User-visible AI consent for sample analysis.
 - Model/provider retention disclosures.
 
+## Blueprint Execution Visibility Patch Results
+
+Descriptors recorded:
+
+- Added `src/lib/mjolnir/blueprint-execution-descriptor.ts`.
+- Mutable main `Blueprint.steps` executions now produce a descriptor with `blueprintId`, `blueprintName`, `blueprintStatus`, `blueprintVersionId: null`, a stable `stepsHash`, `executionMode: "MUTABLE_LEGACY"`, and a warning string.
+- `hashBlueprintSteps()` hashes executable step shape and config with stable object key ordering, while ignoring non-execution prose like step descriptions.
+- `executionMode: "PINNED_VERSION"` is reserved for the future immutable version-pinning migration.
+
+What remains mutable legacy:
+
+- Report execution still loads current mutable `Blueprint.steps` when `Report.blueprintId` is present.
+- Bifrost route execution still loads current mutable `Blueprint.steps` when `transformEnabled` and `blueprintId` are present.
+- Existing legacy DRAFT runtime behavior is unchanged; new DRAFT attachments remain blocked by status attach rules.
+- ARCHIVED runtime safeguards remain unchanged.
+
+Report and route execution visibility:
+
+- `src/lib/report-runner.ts` now computes the descriptor for mutable blueprint executions, returns it in the in-memory pipeline result, and logs a structured warning.
+- `src/lib/bifrost/engine.ts` now computes the descriptor for mutable route transforms, returns it in `RouteJobResult`, and logs a structured warning.
+- When Bifrost keeps the existing `ForgeBlueprintExecution` tracking against the latest `ForgeBlueprintVersion`, it now logs that this is `versionTrackingOnly=true` and that the executed source was mutable `Blueprint.steps`, not the ForgeBlueprintVersion record.
+- `RunLog` and `RouteLog` do not currently have JSON metadata/detail fields, so descriptors are not persisted to history without a schema migration.
+
+UI visibility:
+
+- Report and Bifrost history badges were skipped in this patch because the existing history APIs cannot expose descriptor metadata without storing it first.
+- Future UI should show "Mutable blueprint" or "Version pinned" once immutable version execution metadata is persisted.
+
+Tests added or updated:
+
+- `src/__tests__/mjolnir/blueprint-execution-descriptor.test.ts`: stable hash, hash changes on executable changes, mutable legacy descriptor mode, warning text, and no warning for pinned descriptors.
+- `src/__tests__/report-pipeline.test.ts`: report pipeline returns a mutable descriptor and skips descriptors for archived blueprints.
+- `src/__tests__/bifrost/bifrost-engine.test.ts`: Bifrost returns a mutable descriptor and warns when ForgeBlueprintVersion tracking is not the source of executed steps.
+
+Validation results:
+
+- Focused execution visibility tests passed: 3 test files and 38 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 89 test files and 1222 tests.
+- `npm run build`: passed; pre-existing lint warnings were reported during the build.
+- `npm run lint`: passed with pre-existing warnings.
+
+Remaining follow-up:
+
+- Full immutable version pinning migration for reports, Bifrost routes, and RealmGates.
+- Optional `RunLog`/`RouteLog` metadata fields so execution descriptors can be persisted and shown in history UI.
+
 ## Recommended Next Prompt
 
 Make the product decision for Mjolnir ownership and retention before the next schema change:

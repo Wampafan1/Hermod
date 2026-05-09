@@ -20,6 +20,10 @@ import {
 import { buildLimitedSqlQuery, MSSQL_RESET_ROWCOUNT_SQL } from "@/lib/query-limits";
 import { executeBlueprint, validateInputSchema } from "@/lib/mjolnir";
 import type { ForgeStep, BlueprintData, BlueprintFormatting, CapturedCellStyle, StepMetric } from "@/lib/mjolnir";
+import {
+  getBlueprintExecutionDescriptor,
+  type BlueprintExecutionDescriptor,
+} from "@/lib/mjolnir/blueprint-execution-descriptor";
 
 /** Univer ICellData shape (subset we use for export) */
 interface UniverCellData {
@@ -104,6 +108,7 @@ export interface PipelineResult {
   runTimeMs: number;
   forgeWarnings: string[];
   forgeMetrics: StepMetric[];
+  blueprintExecutionDescriptor: BlueprintExecutionDescriptor | null;
 }
 
 /**
@@ -154,6 +159,7 @@ export async function executeReportPipeline(input: PipelineInput): Promise<Pipel
   let blueprintFormatting: BlueprintFormatting | null = null;
   const forgeWarnings: string[] = [];
   let forgeMetrics: StepMetric[] = [];
+  let blueprintExecutionDescriptor: BlueprintExecutionDescriptor | null = null;
   let usedBlueprint = false;
 
   // Check for active blueprint first — it takes full control of column
@@ -172,6 +178,18 @@ export async function executeReportPipeline(input: PipelineInput): Promise<Pipel
     }
 
     if (blueprint && blueprint.status !== BlueprintStatus.ARCHIVED) {
+      blueprintExecutionDescriptor = getBlueprintExecutionDescriptor({
+        blueprint: {
+          id: blueprint.id,
+          name: blueprint.name,
+          status: blueprint.status,
+          steps: blueprint.steps,
+        },
+      });
+      if (blueprintExecutionDescriptor.warning) {
+        console.warn(`[ReportRunner] ${blueprintExecutionDescriptor.warning}`);
+      }
+
       const steps = blueprint.steps as unknown as ForgeStep[];
       const sourceSchema = blueprint.sourceSchema as BlueprintData["sourceSchema"];
 
@@ -230,6 +248,7 @@ export async function executeReportPipeline(input: PipelineInput): Promise<Pipel
     runTimeMs,
     forgeWarnings: rowLimitWarning ? [rowLimitWarning, ...forgeWarnings] : forgeWarnings,
     forgeMetrics,
+    blueprintExecutionDescriptor,
   };
 }
 

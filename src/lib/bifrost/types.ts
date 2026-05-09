@@ -64,6 +64,7 @@ export interface RouteJobResult {
   errorCount: number;
   duration: number; // milliseconds
   ravenJobId?: string;
+  blueprintExecutionDescriptor?: import("@/lib/mjolnir/blueprint-execution-descriptor").BlueprintExecutionDescriptor | null;
 }
 
 export interface RouteJobPayload {

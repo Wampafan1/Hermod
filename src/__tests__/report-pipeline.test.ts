@@ -5,7 +5,7 @@
  * that connects Mjolnir to the report runner.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ForgeStep, BlueprintData } from "@/lib/mjolnir/types";
 
 // ─── Mocks ─────────────────────────────────────────
@@ -53,8 +53,11 @@ const baseInput = {
   formatting: null,
 };
 
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
 beforeEach(() => {
   vi.clearAllMocks();
+  warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
   // Mock connection lookup
   vi.mocked(prisma.connection.findUniqueOrThrow).mockResolvedValue({
@@ -81,6 +84,10 @@ beforeEach(() => {
       { Name: "Charlie", Age: 35, City: "NYC" },
     ],
   });
+});
+
+afterEach(() => {
+  warnSpy.mockRestore();
 });
 
 describe("executeReportPipeline", () => {
@@ -162,6 +169,18 @@ describe("executeReportPipeline", () => {
     expect(result.forgeMetrics[0].rowsOut).toBe(2);
     expect(result.forgeMetrics[1].type).toBe("remove_columns");
     expect(result.forgeWarnings).toEqual([]);
+    expect(result.blueprintExecutionDescriptor).toMatchObject({
+      blueprintId: "bp_1",
+      blueprintName: "NYC Filter",
+      blueprintStatus: "ACTIVE",
+      blueprintVersionId: null,
+      executionMode: "MUTABLE_LEGACY",
+    });
+    expect(result.blueprintExecutionDescriptor?.stepsHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.blueprintExecutionDescriptor?.warning).toContain("Mutable legacy blueprint execution");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Mutable legacy blueprint execution")
+    );
   });
 
   it("warns on blueprint schema mismatch instead of throwing", async () => {
@@ -220,6 +239,7 @@ describe("executeReportPipeline", () => {
     // Blueprint is archived — should be skipped, all 3 columns present
     expect(result.columns).toEqual(["Name", "Age", "City"]);
     expect(result.forgeMetrics).toEqual([]);
+    expect(result.blueprintExecutionDescriptor).toBeNull();
   });
 
   it("collects forge warnings from blueprint execution", async () => {
