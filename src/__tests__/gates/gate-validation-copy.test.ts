@@ -6,6 +6,13 @@ import {
 } from "@/lib/gates/validation-copy";
 
 describe("Gate validation copy", () => {
+  it("keeps heartbeat timeout copy diagnostic and production-safe", () => {
+    const message =
+      "Gate push validation timed out. The worker did not refresh validation heartbeat before the timeout. Check worker logs for [GateValidation] push=push_1.";
+
+    expect(gateValidationFailureMessage(message)).toBe(message);
+  });
+
   it("uses production-safe copy for validation timeouts by default", () => {
     expect(gateValidationFailureMessage("Gate push validation timed out.")).toBe(
       "Gate validation timed out before the worker finished. Please try again. If this continues, contact support."

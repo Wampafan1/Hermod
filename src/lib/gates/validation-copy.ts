@@ -1,4 +1,6 @@
 const GATE_VALIDATION_TIMEOUT_MESSAGE = "Gate push validation timed out.";
+const GATE_VALIDATION_HEARTBEAT_TIMEOUT_FRAGMENT =
+  "The worker did not refresh validation heartbeat before the timeout.";
 
 function isDevelopment(nodeEnv: string | undefined = process.env.NODE_ENV): boolean {
   return nodeEnv === "development";
@@ -8,6 +10,10 @@ export function gateValidationFailureMessage(
   message: string | null | undefined,
   options?: { nodeEnv?: string }
 ): string {
+  if (message?.includes(GATE_VALIDATION_HEARTBEAT_TIMEOUT_FRAGMENT)) {
+    return message;
+  }
+
   if (message?.includes(GATE_VALIDATION_TIMEOUT_MESSAGE)) {
     if (isDevelopment(options?.nodeEnv)) {
       return "Gate validation timed out. Make sure npm run worker is running in a separate terminal.";

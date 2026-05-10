@@ -435,7 +435,7 @@ Gate `KEY_DRIFT` candidate discovery now uses Hermod's DuckDB-backed UCC discove
 - Gate candidate discovery loads already-mapped destination rows into DuckDB and runs UCC discovery with pruning disabled for thorough mapped-column coverage.
 - `GatePush.keyDrift.candidateKeys`, `recommendation`, and `validationStats` now come from the UCC wrapper.
 - `validationStats.discoveryMode` is now `UCC` for the automatic KEY_DRIFT candidate path.
-- Gate schema analysis no longer calls `analyzeFile()` with `skipUCC: true`.
+- Gate schema analysis now calls `analyzeFile()` with `skipUCC: true`; KEY_DRIFT candidate discovery performs the UCC pass through the Gate UCC wrapper.
 
 ### Current-Key Discriminator Handling
 
@@ -461,5 +461,37 @@ Gate `KEY_DRIFT` candidate discovery now uses Hermod's DuckDB-backed UCC discove
 - `npx prisma validate` passed.
 - `npx prisma generate` passed after applying the documented Windows Prisma locked-DLL workaround.
 - `npm run test` passed: 114 files, 1408 tests.
+- `npm run build` passed with existing Next/React lint warnings.
+- `npm run lint` passed with existing warnings.
+
+## Gate Validation Heartbeat Fix
+
+Gate validation could previously report a timeout while the worker was still alive in a long DuckDB stage. The status endpoint used stale heartbeat metadata, but long-running operations only updated the heartbeat before starting.
+
+### What Changed
+
+- Added `runWithGateValidationHeartbeat()` to refresh GatePush validation heartbeat metadata throughout long validation stages.
+- Wrapped staged-file reading, schema analysis, and KEY_DRIFT preflight so active work keeps `validationHeartbeatAt` fresh.
+- Worker startup stale cleanup now checks heartbeat freshness instead of failing every old `VALIDATING` push by `createdAt` alone.
+- Timeout errors now explain that the worker did not refresh heartbeat and point operators to `[GateValidation] push=<id>` logs.
+- Worker logs now include stage timings for `READING_FILE`, `ANALYZING_FILE`, and `DISCOVERING_KEY`, plus final status, candidate count, recommendation columns, and elapsed time.
+
+### UCC Behavior
+
+- Repeat Gate validation skips the Configure Gate UCC pass during `analyzeFile()` because it only needs schema/profile at that stage.
+- KEY_DRIFT candidate discovery still uses Hermod's existing UCC engine through `discoverGateKeyCandidates()`.
+- No new key discovery algorithm was added.
+
+### Tests Added
+
+- `src/__tests__/gates/gate-validation-worker.test.ts`
+- Updated `src/__tests__/gates/gate-push-validation-status.test.ts`
+- Updated `src/__tests__/gates/gate-validation-copy.test.ts`
+
+### Validation Results
+
+- `npx prisma validate` passed.
+- `npx prisma generate` passed after applying the documented Windows Prisma locked-DLL workaround.
+- `npm run test` passed: 115 files, 1418 tests.
 - `npm run build` passed with existing Next/React lint warnings.
 - `npm run lint` passed with existing warnings.

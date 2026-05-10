@@ -11,6 +11,8 @@ import { readTempFile } from "@/lib/gates/temp-files";
 import { preflightGatePushKeyDrift, type ColumnMap } from "@/lib/gates/push-executor";
 import {
   buildGatePushValidationErrorDetails,
+  type GatePushValidationStage,
+  runWithGateValidationHeartbeat,
   updateGatePushValidationStage,
 } from "@/lib/gates/validation-timeouts";
 
@@ -83,17 +85,19 @@ export function buildSchemaDriftResolutionOptions(input: {
 
 export async function handleGateValidatePush(job: { data: GateValidatePushJob }) {
   const { pushId, gateId, tenantId } = job.data;
-  console.info(`[GateValidation] Starting gate validation pushId=${pushId} gateId=${gateId}`);
+  const startedAt = Date.now();
+  console.info(`[GateValidation] Starting gate validation pushId=${pushId} push=${pushId} gateId=${gateId}`);
 
   try {
     await validateStagedGatePush(job.data);
   } finally {
     const push = await prisma.gatePush.findFirst({
       where: { id: pushId, gateId, tenantId },
-      select: { status: true },
+      select: { status: true, keyDrift: true },
     });
+    const summary = summarizeGateValidationResult(push?.keyDrift);
     console.info(
-      `[GateValidation] Finished gate validation pushId=${pushId} gateId=${gateId} status=${push?.status ?? "UNKNOWN"}`
+      `[GateValidation] Finished gate validation pushId=${pushId} push=${pushId} gateId=${gateId} status=${push?.status ?? "UNKNOWN"}${summary} elapsedMs=${Date.now() - startedAt}`
     );
   }
 }
@@ -133,25 +137,28 @@ export async function validateStagedGatePush(input: GateValidatePushJob): Promis
   }
 
   try {
-    await updateGatePushValidationStage({
+    const tempFile = await runTimedValidationStage({
       pushId: input.pushId,
       stage: "READING_FILE",
       startedAt: push.createdAt,
+      operation: () => readTempFile(input.tempFileId),
     });
-
-    const tempFile = await readTempFile(input.tempFileId);
     if (!tempFile) {
       await markValidationFailed(input.pushId, "Temp file expired or missing.", push.createdAt);
       return;
     }
 
-    await updateGatePushValidationStage({
+    const analysis = await runTimedValidationStage({
       pushId: input.pushId,
       stage: "ANALYZING_FILE",
       startedAt: push.createdAt,
+      operation: () => {
+        // Repeat Gate validation only needs schema/profile here.
+        // KEY_DRIFT candidate discovery runs later through discoverGateKeyCandidates(),
+        // which reuses Hermod's existing UCC engine.
+        return analyzeFile(tempFile.buffer, push.fileName, { skipUCC: true });
+      },
     });
-
-    const analysis = await analyzeFile(tempFile.buffer, push.fileName);
 
     await updateGatePushValidationStage({
       pushId: input.pushId,
@@ -206,12 +213,17 @@ export async function validateStagedGatePush(input: GateValidatePushJob): Promis
       startedAt: push.createdAt,
     });
 
-    const keyPreflight = await preflightGatePushKeyDrift({
-      fileBuffer: tempFile.buffer,
-      fileExtension: tempFile.extension,
-      columnMapping: columnMapping as unknown as ColumnMap[],
-      primaryKeyColumns,
-      mergeStrategy: gate.mergeStrategy,
+    const keyPreflight = await runTimedValidationStage({
+      pushId: input.pushId,
+      stage: "DISCOVERING_KEY",
+      startedAt: push.createdAt,
+      operation: () => preflightGatePushKeyDrift({
+        fileBuffer: tempFile.buffer,
+        fileExtension: tempFile.extension,
+        columnMapping: columnMapping as unknown as ColumnMap[],
+        primaryKeyColumns,
+        mergeStrategy: gate.mergeStrategy,
+      }),
     });
 
     if (keyPreflight.keyDrift) {
@@ -246,6 +258,37 @@ export async function validateStagedGatePush(input: GateValidatePushJob): Promis
     const errorMessage = validationErrorMessage(err);
     await markValidationFailed(input.pushId, errorMessage, push.createdAt);
   }
+}
+
+async function runTimedValidationStage<T>(input: {
+  pushId: string;
+  stage: GatePushValidationStage;
+  startedAt: Date;
+  operation: () => Promise<T>;
+}): Promise<T> {
+  const stageStartedAt = Date.now();
+  try {
+    return await runWithGateValidationHeartbeat(input);
+  } finally {
+    console.info(
+      `[GateValidation] Stage ${input.stage} pushId=${input.pushId} push=${input.pushId} elapsedMs=${Date.now() - stageStartedAt}`
+    );
+  }
+}
+
+function summarizeGateValidationResult(keyDrift: unknown): string {
+  if (!keyDrift || typeof keyDrift !== "object") return "";
+  const details = keyDrift as {
+    candidateKeys?: unknown[];
+    recommendation?: { columns?: string[] | null } | null;
+  };
+  const candidateCount = Array.isArray(details.candidateKeys)
+    ? details.candidateKeys.length
+    : 0;
+  const recommendation = Array.isArray(details.recommendation?.columns)
+    ? details.recommendation.columns.join("+")
+    : "none";
+  return ` candidates=${candidateCount} recommendation=${recommendation}`;
 }
 
 async function markValidationFailed(

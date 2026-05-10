@@ -144,6 +144,8 @@ describe("Gate push validation status endpoint", () => {
 
   it("marks stale VALIDATING pushes as FAILED before returning status", async () => {
     process.env.GATE_PUSH_VALIDATION_TIMEOUT_MS = "1000";
+    const timeoutMessage =
+      "Gate push validation timed out. The worker did not refresh validation heartbeat before the timeout. Check worker logs for [GateValidation] push=push_1.";
     const oldPush = push({
       createdAt: new Date("2026-05-09T12:00:00.000Z"),
       errorDetails: {
@@ -157,11 +159,11 @@ describe("Gate push validation status endpoint", () => {
       .mockResolvedValueOnce(oldPush)
       .mockResolvedValueOnce(push({
         status: "FAILED",
-        errorMessage: "Gate push validation timed out.",
+        errorMessage: timeoutMessage,
         errorDetails: {
           gateValidation: {
             validationStage: "FAILED",
-            validationError: "Gate push validation timed out.",
+            validationError: timeoutMessage,
           },
         },
         completedAt: new Date("2026-05-09T12:06:00.000Z"),
@@ -178,15 +180,50 @@ describe("Gate push validation status endpoint", () => {
       expect(payload).toMatchObject({
         status: "FAILED",
         validationStage: "FAILED",
-        errorMessage: "Gate push validation timed out.",
+        errorMessage: timeoutMessage,
       });
       expect(mockGatePushUpdate).toHaveBeenCalledWith(expect.objectContaining({
         where: { id: "push_1" },
         data: expect.objectContaining({
           status: "FAILED",
-          errorMessage: "Gate push validation timed out.",
+          errorMessage: timeoutMessage,
         }),
       }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps active VALIDATING pushes alive when the heartbeat is fresh", async () => {
+    process.env.GATE_PUSH_VALIDATION_TIMEOUT_MS = "1000";
+    const activePush = push({
+      createdAt: new Date("2026-05-09T12:00:00.000Z"),
+      errorDetails: {
+        gateValidation: {
+          validationStage: "DISCOVERING_KEY",
+          validationStartedAt: "2026-05-09T12:00:00.000Z",
+          validationHeartbeatAt: "2026-05-09T12:05:59.500Z",
+        },
+      },
+    });
+    mockGatePushFindFirst
+      .mockResolvedValueOnce(activePush)
+      .mockResolvedValueOnce(activePush);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-09T12:06:00.000Z"));
+    try {
+      const { GET } = await import("@/app/api/gates/[gateId]/push/[pushId]/route");
+      const response = await GET(statusRequest());
+      const payload = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(payload).toMatchObject({
+        status: "VALIDATING",
+        validationStage: "DISCOVERING_KEY",
+        validationHeartbeatAt: "2026-05-09T12:05:59.500Z",
+      });
+      expect(mockGatePushUpdate).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -210,8 +247,9 @@ describe("Gate push validation status endpoint", () => {
       });
 
       const logs = info.mock.calls.map((call) => String(call[0])).join("\n");
-      expect(logs).toContain("Starting gate validation pushId=push_1 gateId=gate_1");
-      expect(logs).toContain("Finished gate validation pushId=push_1 gateId=gate_1 status=VALIDATED");
+      expect(logs).toContain("Starting gate validation pushId=push_1");
+      expect(logs).toContain("Finished gate validation pushId=push_1");
+      expect(logs).toContain("status=VALIDATED");
       expect(logs).not.toContain("rawRows");
       expect(logs).not.toContain("credentials");
       expect(logs).not.toContain("secret");
