@@ -124,6 +124,10 @@ export interface DdlPreview {
   blockReason?: string | null;
   requiresConfirmation: boolean;
   manualCandidate?: boolean;
+  selectedKeyValidForBusinessRows?: boolean;
+  requiresIncompleteRowApproval?: boolean;
+  incompleteRowsHeld?: number;
+  incompleteRowExamples?: ManualKeyValidation["nullKeyExamples"];
   manualValidation?: ManualKeyValidation;
 }
 
@@ -132,6 +136,7 @@ export interface KeyHardeningResolvePayload {
   selectedKey: string[];
   confirmedDdl: string[];
   confirm: true;
+  incompleteRowAction?: "EXCLUDE_REVIEWED_ROWS";
 }
 
 interface KeyDriftReviewPanelProps {
@@ -148,6 +153,7 @@ interface ApprovalState {
   selectedKey: string[] | null;
   ddlPreview: DdlPreview | null;
   approvalChecked: boolean;
+  incompleteRowsChecked?: boolean;
   loading: boolean;
 }
 
@@ -221,13 +227,15 @@ export function toggleManualKeyColumn(selected: string[], column: string): strin
 
 export function buildResolvePayload(
   selectedKey: string[],
-  confirmedDdl: string[]
+  confirmedDdl: string[],
+  incompleteRowAction?: "EXCLUDE_REVIEWED_ROWS"
 ): KeyHardeningResolvePayload {
   return {
     action: "APPROVE_KEY_HARDENING",
     selectedKey,
     confirmedDdl,
     confirm: true,
+    ...(incompleteRowAction ? { incompleteRowAction } : {}),
   };
 }
 
@@ -238,7 +246,14 @@ export function canApproveKeyHardening(state: ApprovalState): boolean {
       state.ddlPreview &&
       state.ddlPreview.ddl.length > 0 &&
       !state.ddlPreview.blocked &&
-      state.ddlPreview.manualValidation?.ok !== false &&
+      (
+        state.ddlPreview.manualValidation?.ok !== false ||
+        state.ddlPreview.requiresIncompleteRowApproval === true
+      ) &&
+      (
+        state.ddlPreview.requiresIncompleteRowApproval !== true ||
+        state.incompleteRowsChecked === true
+      ) &&
       state.approvalChecked &&
       !state.loading
   );
@@ -286,6 +301,10 @@ export function formatCandidateReviewSummary(candidate: CandidateKey): string {
   return candidate.requiresReview || candidate.nullCount > 0
     ? `${widthText}, ${nullText}, review required`
     : `${widthText}, ${nullText}`;
+}
+
+export function formatIncompleteRowsHeld(count: number): string {
+  return `${count.toLocaleString()} incomplete ${count === 1 ? "row" : "rows"} held for review.`;
 }
 
 export function getNoReliableKeyMessage(keyDrift: KeyDriftDetails): string | null {
@@ -353,6 +372,7 @@ export function KeyDriftReviewPanel({
   );
   const [ddlPreview, setDdlPreview] = useState<DdlPreview | null>(null);
   const [approvalChecked, setApprovalChecked] = useState(false);
+  const [incompleteRowsChecked, setIncompleteRowsChecked] = useState(false);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [approving, setApproving] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -368,6 +388,7 @@ export function KeyDriftReviewPanel({
   useEffect(() => {
     let ignore = false;
     setApprovalChecked(false);
+    setIncompleteRowsChecked(false);
     setDdlPreview(null);
 
     if (!selectedColumns || selectedColumns.length === 0) return;
@@ -418,6 +439,7 @@ export function KeyDriftReviewPanel({
     selectedKey: selectedColumns,
     ddlPreview,
     approvalChecked,
+    incompleteRowsChecked,
     loading: loadingPreview || approving,
   });
 
@@ -428,7 +450,11 @@ export function KeyDriftReviewPanel({
       const res = await fetch(`/api/gates/${gateId}/push/${pushId}/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildResolvePayload(selectedColumns, ddlPreview.ddl)),
+        body: JSON.stringify(buildResolvePayload(
+          selectedColumns,
+          ddlPreview.ddl,
+          ddlPreview.requiresIncompleteRowApproval ? "EXCLUDE_REVIEWED_ROWS" : undefined
+        )),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -732,18 +758,20 @@ export function KeyDriftReviewPanel({
           {ddlPreview?.manualValidation && (
             <div
               className={`border px-3 py-2 text-[11px] font-inconsolata ${
-                ddlPreview.manualValidation.ok
+                ddlPreview.manualValidation.ok || ddlPreview.requiresIncompleteRowApproval
                   ? "border-frost/20 bg-frost/[0.04] text-frost"
                   : "border-ember/30 bg-ember/10 text-ember"
               }`}
             >
               {ddlPreview.manualValidation.ok
                 ? "Selected key is unique in the staged upload."
+                : ddlPreview.requiresIncompleteRowApproval
+                  ? `Selected key is verified, but ${ddlPreview.incompleteRowsHeld?.toLocaleString() ?? ddlPreview.manualValidation.nullCount.toLocaleString()} incomplete ${((ddlPreview.incompleteRowsHeld ?? ddlPreview.manualValidation.nullCount) === 1) ? "row must" : "rows must"} be excluded or fixed before this push can continue.`
                 : "Selected key is not valid for the staged upload."}
             </div>
           )}
 
-          {ddlPreview?.manualValidation && !ddlPreview.manualValidation.ok && (
+          {ddlPreview?.manualValidation && !ddlPreview.manualValidation.ok && !ddlPreview.requiresIncompleteRowApproval && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <ExampleList
                 title="Selected-Key Duplicates"
@@ -755,6 +783,36 @@ export function KeyDriftReviewPanel({
                 empty="No selected-key blank examples were captured."
                 items={ddlPreview.manualValidation.nullKeyExamples.map(formatNullKeyExample)}
               />
+            </div>
+          )}
+
+          {ddlPreview?.requiresIncompleteRowApproval && (
+            <div className="border border-gold/20 bg-gold/[0.03] p-3 space-y-3">
+              <div className="space-y-2">
+                <h5 className="label-norse text-[10px] text-gold-bright">Incomplete Rows Need Review</h5>
+                <p className="text-[11px] text-text-dim font-inconsolata leading-5">
+                  Hermod found nonblank rows that are missing values for the selected key. These rows were not loaded.
+                  You can exclude the reviewed incomplete rows or cancel and fix the file.
+                </p>
+                <div className="text-[11px] text-gold font-inconsolata">
+                  {formatIncompleteRowsHeld(ddlPreview.incompleteRowsHeld ?? ddlPreview.manualValidation?.nullCount ?? 0)}
+                </div>
+              </div>
+              <ExampleList
+                title="Incomplete Row Examples"
+                empty="No incomplete row examples were captured."
+                items={(ddlPreview.incompleteRowExamples ?? ddlPreview.manualValidation?.nullKeyExamples ?? []).map(formatNullKeyExample)}
+              />
+              <label className="flex items-start gap-2 text-[11px] text-text-dim font-inconsolata">
+                <input
+                  type="checkbox"
+                  checked={incompleteRowsChecked}
+                  onChange={(event) => setIncompleteRowsChecked(event.target.checked)}
+                  disabled={!ddlPreview || ddlPreview.blocked}
+                  className="mt-0.5"
+                />
+                <span>I approve excluding the reviewed incomplete rows from this push.</span>
+              </label>
             </div>
           )}
 
@@ -795,7 +853,11 @@ export function KeyDriftReviewPanel({
               type="checkbox"
               checked={approvalChecked}
               onChange={(event) => setApprovalChecked(event.target.checked)}
-              disabled={!ddlPreview || ddlPreview.blocked || ddlPreview.manualValidation?.ok === false}
+              disabled={
+                !ddlPreview ||
+                ddlPreview.blocked ||
+                (ddlPreview.manualValidation?.ok === false && !ddlPreview.requiresIncompleteRowApproval)
+              }
               className="mt-0.5"
             />
             <span>I approve changing the destination key constraint.</span>

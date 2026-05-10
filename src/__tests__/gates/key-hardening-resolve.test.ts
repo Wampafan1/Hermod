@@ -242,9 +242,13 @@ describe("Gate key hardening resolve API", () => {
     expect(body).toMatchObject({
       selectedKey: ["job_number", "line_number", "line_value"],
       manualCandidate: false,
+      selectedKeyValidForBusinessRows: true,
+      requiresIncompleteRowApproval: true,
+      incompleteRowsHeld: 2,
       manualValidation: { ok: false, nullCount: 2, duplicateCount: 0 },
       blocked: false,
     });
+    expect(body).not.toHaveProperty("error");
     expect(body.warnings.join(" ")).toContain("null key values");
   });
 
@@ -365,7 +369,19 @@ describe("Gate key hardening resolve API", () => {
         ],
       }),
     });
-    expect(mockExecutePush).toHaveBeenCalledWith("gate_1", "push_1", expect.any(Buffer), ".csv");
+    expect(mockExecutePush).toHaveBeenCalledWith(
+      "gate_1",
+      "push_1",
+      expect.any(Buffer),
+      ".csv",
+      expect.objectContaining({
+        excludeRowIndexesForKeyReview: [],
+        keyDriftReviewMetadata: expect.objectContaining({
+          selectedKey: ["job_number", "line_number", "line_value"],
+          appliedDdl: plan.ddl,
+        }),
+      })
+    );
     expect(mockDeleteTempFile).toHaveBeenCalledWith("tmp_1");
   });
 

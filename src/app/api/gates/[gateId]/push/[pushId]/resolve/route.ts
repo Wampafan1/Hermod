@@ -34,12 +34,14 @@ import {
 } from "@/lib/gates/key-discovery";
 
 type KeyHardeningAction = "APPROVE_KEY_HARDENING" | "CANCEL";
+type IncompleteRowAction = "EXCLUDE_REVIEWED_ROWS";
 
 interface KeyHardeningBody {
   action: KeyHardeningAction;
   selectedKey?: string[];
   confirmedDdl?: string[];
   confirm?: boolean;
+  incompleteRowAction?: IncompleteRowAction;
 }
 
 interface SchemaDriftBody {
@@ -54,6 +56,11 @@ interface KeyHardeningReview {
   blankRowsSkipped: number;
   manualCandidate: boolean;
   manualValidation: SelectedGateKeyValidationResult;
+  selectedKeyValidForBusinessRows: boolean;
+  requiresIncompleteRowApproval: boolean;
+  incompleteRowsHeld: number;
+  incompleteRowExamples: SelectedGateKeyValidationResult["nullKeyExamples"];
+  excludeRowIndexesForKeyReview: number[];
 }
 
 // GET /api/gates/[gateId]/push/[pushId]/resolve?selectedKey=a,b - DDL preview
@@ -99,9 +106,14 @@ export const GET = withAuth(async (req, ctx) => {
   if ("response" in review) return review.response;
 
   return NextResponse.json({
+    status: "KEY_DRIFT",
     selectedKey,
     manualCandidate: review.manualCandidate,
-    manualValidation: review.manualValidation,
+    selectedKeyValidForBusinessRows: review.selectedKeyValidForBusinessRows,
+    requiresIncompleteRowApproval: review.requiresIncompleteRowApproval,
+    incompleteRowsHeld: review.incompleteRowsHeld,
+    incompleteRowExamples: review.incompleteRowExamples,
+    manualValidation: publicManualValidation(review.manualValidation),
     ddl: review.plan.ddl,
     warnings: review.plan.warnings,
     blocked: review.plan.blocked,
@@ -182,6 +194,7 @@ async function resolveKeyDriftPush(input: {
     manualCandidate: !candidate,
     executeDdl: input.body.confirm === true,
     confirmedDdl: input.body.confirmedDdl,
+    incompleteRowAction: input.body.incompleteRowAction,
   });
   if ("response" in review) return review.response;
 
@@ -191,7 +204,11 @@ async function resolveKeyDriftPush(input: {
       status: "KEY_DRIFT",
       selectedKey,
       manualCandidate: review.manualCandidate,
-      manualValidation: review.manualValidation,
+      selectedKeyValidForBusinessRows: review.selectedKeyValidForBusinessRows,
+      requiresIncompleteRowApproval: review.requiresIncompleteRowApproval,
+      incompleteRowsHeld: review.incompleteRowsHeld,
+      incompleteRowExamples: review.incompleteRowExamples,
+      manualValidation: publicManualValidation(review.manualValidation),
       ddl: review.plan.ddl,
       warnings: review.plan.warnings,
       blocked: review.plan.blocked,
@@ -199,6 +216,21 @@ async function resolveKeyDriftPush(input: {
       requiresConfirmation: true,
     });
   }
+
+  const reviewedKeyDrift: KeyDriftDetails = {
+    ...keyDrift,
+    selectedKey,
+    manualSelection: review.manualCandidate,
+    manualValidation: publicManualValidation(review.manualValidation),
+    appliedDdl: review.plan.ddl,
+    ...(review.requiresIncompleteRowApproval
+      ? {
+          incompleteRowAction: "EXCLUDE_REVIEWED_ROWS",
+          incompleteRowsExcluded: review.excludeRowIndexesForKeyReview.length,
+          excludedRowIndexes: review.excludeRowIndexesForKeyReview,
+        }
+      : {}),
+  };
 
   const columnMapping = gate.columnMapping as unknown as ColumnMap[];
   const storedPrimaryKeyColumns = destinationKeyToStoredPrimaryKey(selectedKey, columnMapping);
@@ -226,13 +258,7 @@ async function resolveKeyDriftPush(input: {
     where: { id: input.pushId },
     data: {
       status: "VALIDATED",
-      keyDrift: {
-        ...keyDrift,
-        selectedKey,
-        manualSelection: review.manualCandidate,
-        manualValidation: review.manualValidation,
-        appliedDdl: review.plan.ddl,
-      } as unknown as Prisma.InputJsonValue,
+      keyDrift: reviewedKeyDrift as unknown as Prisma.InputJsonValue,
     },
   });
 
@@ -241,7 +267,11 @@ async function resolveKeyDriftPush(input: {
       input.gateId,
       input.pushId,
       review.tempFile.buffer,
-      review.tempFile.extension
+      review.tempFile.extension,
+      {
+        excludeRowIndexesForKeyReview: review.excludeRowIndexesForKeyReview,
+        keyDriftReviewMetadata: reviewedKeyDrift,
+      }
     );
     if (result.status === "SUCCESS" && input.push.tempFileId) {
       await deleteTempFile(input.push.tempFileId);
@@ -475,6 +505,7 @@ async function buildKeyHardeningReview(input: {
   manualCandidate?: boolean;
   executeDdl?: boolean;
   confirmedDdl?: string[];
+  incompleteRowAction?: IncompleteRowAction;
 }): Promise<KeyHardeningReview | { response: NextResponse }> {
   if (!input.push.tempFileId) {
     return { response: NextResponse.json({ error: "Temp file reference missing" }, { status: 410 }) };
@@ -495,6 +526,7 @@ async function buildKeyHardeningReview(input: {
   });
   const manualValidation = validateSelectedGateKey({
     rows: prepared.mappedRows,
+    rowIndexes: prepared.indexedMappedRows.map((row) => row.rowIndex),
     selectedKey: input.selectedKey,
     blankRowsAlreadyRemoved: true,
   });
@@ -505,6 +537,21 @@ async function buildKeyHardeningReview(input: {
     selectedCandidate.reviewReason === "KEY_HAS_NULLS" &&
     manualValidation.nullCount > 0 &&
     manualValidation.duplicateCount === 0;
+  const incompleteRowExamples = manualValidation.nullKeyExamples;
+  const nullableReviewFields = selectedNullableVerifiedCandidate
+    ? {
+        selectedKeyValidForBusinessRows: true,
+        requiresIncompleteRowApproval: true,
+        incompleteRowsHeld: manualValidation.nullCount,
+        incompleteRowExamples,
+      }
+    : {
+        selectedKeyValidForBusinessRows: manualValidation.ok,
+        requiresIncompleteRowApproval: false,
+        incompleteRowsHeld: 0,
+        incompleteRowExamples: [],
+      };
+
   if (prepared.keyDrift) {
     const responseValidation: SelectedGateKeyValidationResult = {
       ...manualValidation,
@@ -517,7 +564,40 @@ async function buildKeyHardeningReview(input: {
         : manualValidation.nullKeyExamples,
     };
 
-    const allowNullablePreview = selectedNullableVerifiedCandidate && !input.executeDdl;
+    const allowNullableReview = selectedNullableVerifiedCandidate;
+    const missingIncompleteRowApproval =
+      selectedNullableVerifiedCandidate &&
+      input.executeDdl &&
+      input.incompleteRowAction !== "EXCLUDE_REVIEWED_ROWS";
+    if (missingIncompleteRowApproval) {
+      return {
+        response: NextResponse.json(
+          {
+            status: "KEY_DRIFT",
+            error: "Selected key is verified, but incomplete rows must be excluded or fixed before this push can continue.",
+            selectedKey: input.selectedKey,
+            manualCandidate: input.manualCandidate === true,
+            ...nullableReviewFields,
+            manualValidation: publicManualValidation(responseValidation),
+            blocked: true,
+            blockReason: "Approve excluding the reviewed incomplete rows or cancel and fix the file.",
+            keyDrift: {
+              ...input.keyDrift,
+              selectedKey: input.selectedKey,
+              manualSelection: input.manualCandidate === true,
+              manualValidation: publicManualValidation(responseValidation),
+              duplicateExamples: prepared.keyDrift.duplicateExamples,
+              nullKeyExamples: prepared.keyDrift.nullKeyExamples,
+              reason: prepared.keyDrift.reason,
+            },
+            blankRowsSkipped: prepared.blankRowsSkipped,
+          },
+          { status: 409 }
+        ),
+      };
+    }
+
+    const allowNullablePreview = allowNullableReview;
     if (!allowNullablePreview) {
       return {
         response: NextResponse.json(
@@ -528,7 +608,11 @@ async function buildKeyHardeningReview(input: {
               : "Selected key no longer validates against the staged upload.",
             selectedKey: input.selectedKey,
             manualCandidate: input.manualCandidate === true,
-            manualValidation: responseValidation,
+            selectedKeyValidForBusinessRows: false,
+            requiresIncompleteRowApproval: false,
+            incompleteRowsHeld: 0,
+            incompleteRowExamples: [],
+            manualValidation: publicManualValidation(responseValidation),
             blocked: true,
             blockReason: selectedNullableVerifiedCandidate
               ? "Selected verified key contains null values that require review before approval."
@@ -537,7 +621,7 @@ async function buildKeyHardeningReview(input: {
               ...input.keyDrift,
               selectedKey: input.selectedKey,
               manualSelection: input.manualCandidate === true,
-              manualValidation: responseValidation,
+              manualValidation: publicManualValidation(responseValidation),
               duplicateExamples: prepared.keyDrift.duplicateExamples,
               nullKeyExamples: prepared.keyDrift.nullKeyExamples,
               reason: prepared.keyDrift.reason,
@@ -639,7 +723,8 @@ async function buildKeyHardeningReview(input: {
             error: destinationValidation.reason,
             selectedKey: input.selectedKey,
             manualCandidate: input.manualCandidate === true,
-            manualValidation,
+            ...nullableReviewFields,
+            manualValidation: publicManualValidation(manualValidation),
             destinationValidation,
             ddl: planWithReviewWarnings.ddl,
             warnings: planWithReviewWarnings.warnings,
@@ -658,7 +743,8 @@ async function buildKeyHardeningReview(input: {
             status: "KEY_DRIFT",
             selectedKey: input.selectedKey,
             manualCandidate: input.manualCandidate === true,
-            manualValidation,
+            ...nullableReviewFields,
+            manualValidation: publicManualValidation(manualValidation),
             ddl: planWithReviewWarnings.ddl,
             warnings: planWithReviewWarnings.warnings,
             blocked: true,
@@ -689,10 +775,24 @@ async function buildKeyHardeningReview(input: {
       blankRowsSkipped: prepared.blankRowsSkipped,
       manualCandidate: input.manualCandidate === true,
       manualValidation,
+      ...nullableReviewFields,
+      excludeRowIndexesForKeyReview: selectedNullableVerifiedCandidate
+        ? manualValidation.nullRowIndexes
+        : [],
     };
   } finally {
     await providerConn.close();
   }
+}
+
+function publicManualValidation(validation: SelectedGateKeyValidationResult) {
+  return {
+    ok: validation.ok,
+    nullCount: validation.nullCount,
+    duplicateCount: validation.duplicateCount,
+    duplicateExamples: validation.duplicateExamples,
+    nullKeyExamples: validation.nullKeyExamples,
+  };
 }
 
 async function loadGateForResolve(gateId: string, tenantId: string) {

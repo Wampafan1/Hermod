@@ -106,6 +106,7 @@ export interface KeyDiscoveryOptions {
 export interface SelectedGateKeyValidationResult {
   ok: boolean;
   nullCount: number;
+  nullRowIndexes: number[];
   duplicateCount: number;
   duplicateExamples: Array<{
     keyValues: Record<string, string | number | boolean | null>;
@@ -121,6 +122,7 @@ export interface SelectedGateKeyValidationResult {
 export interface SelectedGateKeyValidationOptions {
   rows: Record<string, unknown>[];
   selectedKey: string[];
+  rowIndexes?: number[];
   blankRowsAlreadyRemoved?: boolean;
   maxExamples?: number;
 }
@@ -378,17 +380,20 @@ export function validateSelectedGateKey(
     { keyValues: Record<string, string | number | boolean | null>; rowIndexes: number[] }
   >();
   const nullKeyExamples: SelectedGateKeyValidationResult["nullKeyExamples"] = [];
+  const nullRowIndexes: number[] = [];
   let nullCount = 0;
 
   rows.forEach((row, index) => {
+    const rowIndex = input.rowIndexes?.[index] ?? index + 1;
     const keyValues = buildSafeKeyValues(row, selectedKey);
     const missingColumns = selectedKey.filter((column) => isBlankValue(row[column]));
 
     if (missingColumns.length > 0) {
       nullCount++;
+      nullRowIndexes.push(rowIndex);
       if (nullKeyExamples.length < maxExamples) {
         nullKeyExamples.push({
-          rowIndex: index + 1,
+          rowIndex,
           keyValues,
           missingColumns,
         });
@@ -399,11 +404,11 @@ export function validateSelectedGateKey(
     const signature = JSON.stringify(selectedKey.map((column) => normalizeKeyValue(row[column])));
     const existing = duplicateCandidates.get(signature);
     if (existing) {
-      existing.rowIndexes.push(index + 1);
+      existing.rowIndexes.push(rowIndex);
     } else {
       duplicateCandidates.set(signature, {
         keyValues,
-        rowIndexes: [index + 1],
+        rowIndexes: [rowIndex],
       });
     }
   });
@@ -419,6 +424,7 @@ export function validateSelectedGateKey(
   return {
     ok: selectedKey.length > 0 && nullCount === 0 && duplicateCount === 0,
     nullCount,
+    nullRowIndexes,
     duplicateCount,
     duplicateExamples,
     nullKeyExamples,

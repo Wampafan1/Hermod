@@ -82,6 +82,10 @@ export interface KeyDriftDetails {
   mappedColumns?: KeyDriftMappedColumn[];
   manualSelection?: boolean;
   manualValidation?: unknown;
+  appliedDdl?: string[];
+  incompleteRowAction?: "EXCLUDE_REVIEWED_ROWS";
+  incompleteRowsExcluded?: number;
+  excludedRowIndexes?: number[];
   selectedKey: string[] | null;
 }
 
@@ -95,6 +99,11 @@ export interface PushResult {
   keyDrift?: KeyDriftDetails;
   duration: number;
   errorMessage?: string;
+}
+
+export interface ExecutePushOptions {
+  excludeRowIndexesForKeyReview?: number[];
+  keyDriftReviewMetadata?: KeyDriftDetails;
 }
 
 export interface PreparedGateRows {
@@ -116,7 +125,8 @@ export async function executePush(
   gateId: string,
   pushId: string,
   fileBuffer: Buffer,
-  fileExtension: string
+  fileExtension: string,
+  options: ExecutePushOptions = {}
 ): Promise<PushResult> {
   const startTime = Date.now();
 
@@ -144,6 +154,7 @@ export async function executePush(
       rowsUpdated: 0,
       rowsErrored: 0,
       blankRowsSkipped: 0,
+      keyDrift: options.keyDriftReviewMetadata,
       duration: Date.now() - startTime,
     };
     await persistPushResult(pushId, result);
@@ -175,6 +186,7 @@ export async function executePush(
       columnMapping: effectiveColumnMapping,
       primaryKeyColumns,
       mergeStrategy,
+      excludeRowIndexesForKeyReview: options.excludeRowIndexesForKeyReview,
     });
 
     if (prepared.keyDrift) {
@@ -225,6 +237,9 @@ export async function executePush(
     result.duration = Date.now() - startTime;
     result.rowCount = rows.length;
     result.blankRowsSkipped = prepared.blankRowsSkipped;
+    if (options.keyDriftReviewMetadata) {
+      result.keyDrift = options.keyDriftReviewMetadata;
+    }
     applyDefaultErrorMessage(result);
 
     await persistPushResult(pushId, result);
@@ -358,7 +373,9 @@ export function prepareMappedRowsForPush(input: {
   columnMapping: ColumnMap[];
   primaryKeyColumns: string[];
   mergeStrategy: string;
+  excludeRowIndexesForKeyReview?: number[];
 }): PreparedGateRows {
+  const excludedRowIndexes = new Set(input.excludeRowIndexesForKeyReview ?? []);
   const indexedMappedRows = input.rows.map((row, index) => {
     const mapped: Record<string, unknown> = {};
     for (const col of input.columnMapping) {
@@ -367,11 +384,14 @@ export function prepareMappedRowsForPush(input: {
     return { row: mapped, rowIndex: index + 1 };
   });
 
-  const nonBlankRows = indexedMappedRows.filter(({ row }) => !isFullyBlankMappedRow(row));
+  const nonBlankRowsBeforeReviewExclusion = indexedMappedRows
+    .filter(({ row }) => !isFullyBlankMappedRow(row));
+  const nonBlankRows = nonBlankRowsBeforeReviewExclusion
+    .filter(({ rowIndex }) => !excludedRowIndexes.has(rowIndex));
   const prepared: PreparedGateRows = {
     mappedRows: nonBlankRows.map(({ row }) => row),
     indexedMappedRows: nonBlankRows,
-    blankRowsSkipped: indexedMappedRows.length - nonBlankRows.length,
+    blankRowsSkipped: indexedMappedRows.length - nonBlankRowsBeforeReviewExclusion.length,
   };
 
   if (input.mergeStrategy === "UPSERT" && nonBlankRows.length > 0) {
@@ -396,6 +416,7 @@ async function prepareMappedRowsForPushWithRecommendation(input: {
   columnMapping: ColumnMap[];
   primaryKeyColumns: string[];
   mergeStrategy: string;
+  excludeRowIndexesForKeyReview?: number[];
 }): Promise<PreparedGateRows> {
   const prepared = prepareMappedRowsForPush(input);
   if (!prepared.keyDrift) return prepared;

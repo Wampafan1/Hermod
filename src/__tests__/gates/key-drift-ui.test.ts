@@ -5,6 +5,7 @@ import {
   formatBlankRowsSkipped,
   formatCandidateReviewSummary,
   formatDuplicateExample,
+  formatIncompleteRowsHeld,
   getDefaultManualSelection,
   getDiscoveryDiagnostics,
   getMappedColumnsForManualSelection,
@@ -211,6 +212,68 @@ describe("Gate key drift UI helpers", () => {
     ).toBe(true);
   });
 
+  it("requires incomplete-row approval for nullable verified candidates", () => {
+    const preview = {
+      selectedKey: ["job_number", "line_number", "line_value"],
+      ddl: ['ALTER TABLE "public"."orders" ADD CONSTRAINT "x" UNIQUE ("job_number", "line_number", "line_value");'],
+      warnings: ["Review incomplete rows."],
+      blocked: false,
+      requiresConfirmation: true,
+      selectedKeyValidForBusinessRows: true,
+      requiresIncompleteRowApproval: true,
+      incompleteRowsHeld: 1,
+      incompleteRowExamples: [
+        {
+          rowIndex: 5491,
+          keyValues: {
+            job_number: "",
+            line_number: "",
+            line_value: "22901728",
+          },
+          missingColumns: ["job_number", "line_number"],
+        },
+      ],
+      manualValidation: {
+        ok: false,
+        nullCount: 1,
+        duplicateCount: 0,
+        duplicateExamples: [],
+        nullKeyExamples: [
+          {
+            rowIndex: 5491,
+            keyValues: {
+              job_number: "",
+              line_number: "",
+              line_value: "22901728",
+            },
+            missingColumns: ["job_number", "line_number"],
+          },
+        ],
+      },
+    };
+
+    expect(formatIncompleteRowsHeld(1)).toBe("1 incomplete row held for review.");
+    expect(
+      canApproveKeyHardening({
+        selectedKey: preview.selectedKey,
+        ddlPreview: preview,
+        approvalChecked: true,
+        incompleteRowsChecked: false,
+        loading: false,
+      })
+    ).toBe(false);
+    expect(
+      canApproveKeyHardening({
+        selectedKey: preview.selectedKey,
+        ddlPreview: preview,
+        approvalChecked: true,
+        incompleteRowsChecked: true,
+        loading: false,
+      })
+    ).toBe(true);
+    expect(JSON.stringify(preview)).not.toContain("rawRows");
+  });
+
   it("renders no reliable key and blank row messages", () => {
     expect(
       getNoReliableKeyMessage({
@@ -255,6 +318,19 @@ describe("Gate key drift UI helpers", () => {
       selectedKey: ["job_number", "line_number"],
       confirmedDdl: ["ALTER TABLE example;"],
       confirm: true,
+    });
+    expect(
+      buildResolvePayload(
+        ["job_number", "line_number", "line_value"],
+        ["ALTER TABLE example;"],
+        "EXCLUDE_REVIEWED_ROWS"
+      )
+    ).toEqual({
+      action: "APPROVE_KEY_HARDENING",
+      selectedKey: ["job_number", "line_number", "line_value"],
+      confirmedDdl: ["ALTER TABLE example;"],
+      confirm: true,
+      incompleteRowAction: "EXCLUDE_REVIEWED_ROWS",
     });
   });
 

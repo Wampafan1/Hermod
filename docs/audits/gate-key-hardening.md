@@ -495,3 +495,31 @@ Gate validation could previously report a timeout while the worker was still ali
 - `npm run test` passed: 115 files, 1418 tests.
 - `npm run build` passed with existing Next/React lint warnings.
 - `npm run lint` passed with existing warnings.
+
+## Nullable UCC Candidate Approval Results
+
+UCC can verify a replacement key even when one or more staged rows have blank key components. Those candidates now remain reviewable instead of being treated as invalid.
+
+### What Changed
+
+- Verified UCC candidates with null key values return DDL preview as a review state, not as "Selected key is not valid."
+- Preview responses include `requiresIncompleteRowApproval`, `incompleteRowsHeld`, and limited incomplete-row examples.
+- Approval requires both destination-key DDL confirmation and `incompleteRowAction: "EXCLUDE_REVIEWED_ROWS"` when incomplete rows exist.
+- The final reviewed push excludes only the explicitly reviewed incomplete row indexes.
+- Fully blank mapped rows remain counted separately as `blankRowsSkipped`.
+- Duplicate selected-key rows and destination validation failures still block DDL.
+
+### Tests Added
+
+- `src/__tests__/gates/key-hardening-nullable-ucc-approval.test.ts`
+- Updated `src/__tests__/gates/key-hardening-resolve.test.ts`
+- Updated `src/__tests__/gates/key-drift-ui.test.ts`
+- Updated `src/__tests__/gates/gate-push-preflight.test.ts`
+
+### Validation Results
+
+- `npx prisma validate` passed.
+- `npx prisma generate` passed after applying the documented Windows Prisma locked-DLL workaround.
+- `npm run test` passed: 116 files, 1426 tests.
+- `npm run build` passed after clearing stale generated `.next` cache; existing warnings remain.
+- `npm run lint` passed with existing warnings.

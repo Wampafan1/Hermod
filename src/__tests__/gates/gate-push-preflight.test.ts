@@ -110,6 +110,28 @@ describe("gate push key preflight", () => {
     expect(prepared.mappedRows).toHaveLength(2);
   });
 
+  it("excludes only explicitly reviewed incomplete rows from final mapped rows", () => {
+    const prepared = prepareMappedRowsForPush({
+      rows: [
+        { "Customer ID": "C-1", Name: "Ada", Email: "ada@example.com" },
+        { "Customer ID": "", Name: "Incomplete", Email: "hold@example.com" },
+        { "Customer ID": "C-2", Name: "Grace", Email: "grace@example.com" },
+      ],
+      columnMapping: mapping,
+      primaryKeyColumns: ["Customer ID"],
+      mergeStrategy: "UPSERT",
+      excludeRowIndexesForKeyReview: [2],
+    });
+
+    expect(prepared.blankRowsSkipped).toBe(0);
+    expect(prepared.indexedMappedRows.map((row) => row.rowIndex)).toEqual([1, 3]);
+    expect(prepared.mappedRows).toEqual([
+      { customer_id: "C-1", name: "Ada", email: "ada@example.com" },
+      { customer_id: "C-2", name: "Grace", email: "grace@example.com" },
+    ]);
+    expect(prepared.keyDrift).toBeUndefined();
+  });
+
   it("limits duplicate and blank-key examples to safe key fields and row indexes", () => {
     const rows = Array.from({ length: 8 }, (_, index) => ({
       row: { customer_id: index % 2 === 0 ? "DUP" : "", name: `Sensitive ${index}` },
