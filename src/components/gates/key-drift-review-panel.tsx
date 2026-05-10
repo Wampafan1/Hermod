@@ -44,6 +44,12 @@ export interface ManualKeyValidation {
 
 export interface KeyDriftDetails {
   oldKey: string[];
+  driftType?: "DUPLICATE_KEY" | "BLANK_KEY" | "DUPLICATE_AND_BLANK_KEY";
+  currentKeyStillUniqueForBusinessRows?: boolean;
+  requiresIncompleteRowApproval?: boolean;
+  incompleteRowsHeld?: number;
+  incompleteRowExamples?: ManualKeyValidation["nullKeyExamples"];
+  recommendedAction?: "REVIEW_INCOMPLETE_ROWS" | "HARDEN_KEY";
   reason: string;
   candidateKeys?: CandidateKey[];
   recommendation?: {
@@ -132,7 +138,7 @@ export interface DdlPreview {
 }
 
 export interface KeyHardeningResolvePayload {
-  action: "APPROVE_KEY_HARDENING";
+  action: "APPROVE_KEY_HARDENING" | "APPROVE_INCOMPLETE_ROW_EXCLUSION";
   selectedKey: string[];
   confirmedDdl: string[];
   confirm: true;
@@ -150,6 +156,7 @@ interface KeyDriftReviewPanelProps {
 }
 
 interface ApprovalState {
+  approvalMode?: "KEY_HARDENING" | "INCOMPLETE_ROW_EXCLUSION";
   selectedKey: string[] | null;
   ddlPreview: DdlPreview | null;
   approvalChecked: boolean;
@@ -169,6 +176,9 @@ export function selectDefaultCandidate(keyDrift: KeyDriftDetails): CandidateKey 
 }
 
 export function getDefaultManualSelection(keyDrift: KeyDriftDetails): string[] {
+  if (isBlankCurrentKeyReview(keyDrift)) {
+    return keyDrift.oldKey?.filter(Boolean) ?? [];
+  }
   const recommended = keyDrift.recommendation?.columns?.filter(Boolean) ?? [];
   if (recommended.length > 0) return recommended;
   const oldKey = keyDrift.oldKey?.filter(Boolean) ?? [];
@@ -228,10 +238,11 @@ export function toggleManualKeyColumn(selected: string[], column: string): strin
 export function buildResolvePayload(
   selectedKey: string[],
   confirmedDdl: string[],
-  incompleteRowAction?: "EXCLUDE_REVIEWED_ROWS"
+  incompleteRowAction?: "EXCLUDE_REVIEWED_ROWS",
+  action: "APPROVE_KEY_HARDENING" | "APPROVE_INCOMPLETE_ROW_EXCLUSION" = "APPROVE_KEY_HARDENING"
 ): KeyHardeningResolvePayload {
   return {
-    action: "APPROVE_KEY_HARDENING",
+    action,
     selectedKey,
     confirmedDdl,
     confirm: true,
@@ -240,6 +251,15 @@ export function buildResolvePayload(
 }
 
 export function canApproveKeyHardening(state: ApprovalState): boolean {
+  if (state.approvalMode === "INCOMPLETE_ROW_EXCLUSION") {
+    return Boolean(
+      state.selectedKey &&
+        state.selectedKey.length > 0 &&
+        state.incompleteRowsChecked === true &&
+        !state.loading
+    );
+  }
+
   return Boolean(
     state.selectedKey &&
       state.selectedKey.length > 0 &&
@@ -256,6 +276,13 @@ export function canApproveKeyHardening(state: ApprovalState): boolean {
       ) &&
       state.approvalChecked &&
       !state.loading
+  );
+}
+
+export function isBlankCurrentKeyReview(keyDrift: KeyDriftDetails): boolean {
+  return (
+    keyDrift.driftType === "BLANK_KEY" &&
+    (keyDrift.duplicateExamples?.length ?? 0) === 0
   );
 }
 
@@ -365,6 +392,7 @@ export function KeyDriftReviewPanel({
   onCancelled,
   onError,
 }: KeyDriftReviewPanelProps) {
+  const blankCurrentKeyReview = isBlankCurrentKeyReview(keyDrift);
   const defaultManualSelection = useMemo(() => getDefaultManualSelection(keyDrift), [keyDrift]);
   const manualColumns = useMemo(() => getMappedColumnsForManualSelection(keyDrift), [keyDrift]);
   const [selectedColumns, setSelectedColumns] = useState<string[] | null>(
@@ -393,6 +421,7 @@ export function KeyDriftReviewPanel({
 
     if (!selectedColumns || selectedColumns.length === 0) return;
     const previewColumns = selectedColumns;
+    if (blankCurrentKeyReview && sameColumns(previewColumns, keyDrift.oldKey)) return;
 
     async function loadPreview() {
       setLoadingPreview(true);
@@ -433,7 +462,7 @@ export function KeyDriftReviewPanel({
       ignore = true;
       window.clearTimeout(timer);
     };
-  }, [gateId, onError, pushId, selectedColumns]);
+  }, [blankCurrentKeyReview, gateId, keyDrift.oldKey, onError, pushId, selectedColumns]);
 
   const canApprove = canApproveKeyHardening({
     selectedKey: selectedColumns,
@@ -442,6 +471,17 @@ export function KeyDriftReviewPanel({
     incompleteRowsChecked,
     loading: loadingPreview || approving,
   });
+  const canApproveCurrentKeyExclusion = canApproveKeyHardening({
+    approvalMode: "INCOMPLETE_ROW_EXCLUSION",
+    selectedKey: keyDrift.oldKey,
+    ddlPreview: null,
+    approvalChecked: false,
+    incompleteRowsChecked,
+    loading: approving || cancelling,
+  });
+  const showingCurrentKeyReviewSelection =
+    blankCurrentKeyReview &&
+    Boolean(selectedColumns && sameColumns(selectedColumns, keyDrift.oldKey));
 
   async function approve() {
     if (!selectedColumns || !ddlPreview || !canApprove) return;
@@ -465,6 +505,34 @@ export function KeyDriftReviewPanel({
       onResolved(data);
     } catch {
       onError("Network error while applying hardened key");
+    } finally {
+      setApproving(false);
+    }
+  }
+
+  async function approveCurrentKeyExclusion() {
+    if (!canApproveCurrentKeyExclusion) return;
+    setApproving(true);
+    try {
+      const res = await fetch(`/api/gates/${gateId}/push/${pushId}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildResolvePayload(
+          keyDrift.oldKey,
+          [],
+          "EXCLUDE_REVIEWED_ROWS",
+          "APPROVE_INCOMPLETE_ROW_EXCLUSION"
+        )),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        onError(data.error || data.blockReason || "Unable to approve incomplete row exclusion");
+        return;
+      }
+      setActionResult(data);
+      onResolved(data);
+    } catch {
+      onError("Network error while approving incomplete row exclusion");
     } finally {
       setApproving(false);
     }
@@ -501,8 +569,9 @@ export function KeyDriftReviewPanel({
           </span>
         </div>
         <p className="text-text-dim text-xs font-inconsolata leading-6">
-          Hermod found that the current UPSERT key no longer uniquely identifies rows in this upload.
-          No nonblank rows have been loaded yet. Changing destination key constraints requires approval.
+          {blankCurrentKeyReview
+            ? "The current key is still unique for business rows, but some rows are missing key values. No nonblank rows have been loaded yet."
+            : "Hermod found that the current UPSERT key no longer uniquely identifies rows in this upload. No nonblank rows have been loaded yet. Changing destination key constraints requires approval."}
         </p>
       </div>
 
@@ -576,6 +645,58 @@ export function KeyDriftReviewPanel({
           items={(keyDrift.nullKeyExamples ?? []).map(formatNullKeyExample)}
         />
       </div>
+
+      {blankCurrentKeyReview && (
+        <div className="border border-gold/20 bg-gold/[0.03] p-4 space-y-3">
+          <div className="space-y-2">
+            <h4 className="heading-norse text-xs text-gold-bright">Incomplete Rows Need Review</h4>
+            <p className="text-[11px] text-text-dim font-inconsolata leading-5">
+              The current key is still unique for business rows, but some rows are missing key values.
+              Hermod has not loaded those rows. You can exclude the reviewed incomplete rows or cancel and fix the file.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] font-inconsolata">
+            <div className="border border-[rgba(201,147,58,0.08)] bg-void/40 p-3">
+              <div className="label-norse text-[9px] mb-2">Keep Current Key</div>
+              <div className="text-gold break-words">{keyDrift.oldKey.join(" + ")}</div>
+            </div>
+            <div className="border border-[rgba(201,147,58,0.08)] bg-void/40 p-3">
+              <div className="label-norse text-[9px] mb-2">Rows Held</div>
+              <div className="text-gold">
+                {formatIncompleteRowsHeld(
+                  keyDrift.incompleteRowsHeld ??
+                    keyDrift.incompleteRowExamples?.length ??
+                    keyDrift.nullKeyExamples?.length ??
+                    0
+                )}
+              </div>
+            </div>
+          </div>
+          <ExampleList
+            title="Incomplete Row Examples"
+            empty="No incomplete row examples were captured."
+            items={(keyDrift.incompleteRowExamples ?? keyDrift.nullKeyExamples ?? []).map(formatNullKeyExample)}
+          />
+          <label className="flex items-start gap-2 text-[11px] text-text-dim font-inconsolata">
+            <input
+              type="checkbox"
+              checked={incompleteRowsChecked}
+              onChange={(event) => setIncompleteRowsChecked(event.target.checked)}
+              disabled={approving || cancelling}
+              className="mt-0.5"
+            />
+            <span>I approve excluding the reviewed incomplete rows from this push.</span>
+          </label>
+          <button
+            type="button"
+            onClick={approveCurrentKeyExclusion}
+            disabled={!canApproveCurrentKeyExclusion}
+            className="btn-primary text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {approving ? "Pushing..." : "Approve Exclusion & Push"}
+          </button>
+        </div>
+      )}
 
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3">
@@ -748,7 +869,7 @@ export function KeyDriftReviewPanel({
         </div>
       )}
 
-      {selectedColumns && (
+      {selectedColumns && !showingCurrentKeyReviewSelection && (
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <h4 className="label-norse text-[10px]">DDL Preview</h4>
@@ -873,14 +994,16 @@ export function KeyDriftReviewPanel({
       )}
 
       <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={approve}
-          disabled={!canApprove}
-          className="btn-primary text-xs disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {approving ? "Applying..." : "Approve Key Change & Push"}
-        </button>
+        {!showingCurrentKeyReviewSelection && (
+          <button
+            type="button"
+            onClick={approve}
+            disabled={!canApprove}
+            className="btn-primary text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {approving ? "Applying..." : "Approve Key Change & Push"}
+          </button>
+        )}
         <button
           type="button"
           onClick={cancel}

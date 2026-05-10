@@ -523,3 +523,29 @@ UCC can verify a replacement key even when one or more staged rows have blank ke
 - `npm run test` passed: 116 files, 1426 tests.
 - `npm run build` passed after clearing stale generated `.next` cache; existing warnings remain.
 - `npm run lint` passed with existing warnings.
+
+## Blank Current-Key Row Review Results
+
+Blank-only current-key failures are now treated differently from duplicate key drift. If the current UPSERT key has missing values in staged nonblank rows but no duplicate complete key combinations, Hermod keeps the existing key as the primary path.
+
+### What Changed
+
+- KEY_DRIFT metadata now records `driftType` as `DUPLICATE_KEY`, `BLANK_KEY`, or `DUPLICATE_AND_BLANK_KEY`.
+- Blank-only current-key drift records `currentKeyStillUniqueForBusinessRows`, `requiresIncompleteRowApproval`, `incompleteRowsHeld`, and `recommendedAction: "REVIEW_INCOMPLETE_ROWS"`.
+- The resolve API supports `APPROVE_INCOMPLETE_ROW_EXCLUSION` for keeping the current key and excluding only reviewed incomplete row indexes.
+- No DDL is generated or executed for the keep-current-key row review path.
+- `RealmGate.primaryKeyColumns`, `keyConstraintName`, and key constraint history are not changed for blank-only row review.
+- Duplicate key drift still uses the existing UCC-backed hardening and DDL approval flow.
+
+### Tests Added
+
+- `src/__tests__/gates/key-drift-blank-current-key.test.ts`
+- Updated `src/__tests__/gates/key-drift-ui.test.ts`
+
+### Validation Results
+
+- `npx prisma validate` passed.
+- `npx prisma generate` passed after applying the documented Windows Prisma locked-DLL workaround.
+- `npm run test` passed: 117 files, 1431 tests.
+- `npm run build` passed with existing Next/React lint warnings.
+- `npm run lint` passed with existing warnings.

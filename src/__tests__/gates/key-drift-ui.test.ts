@@ -12,6 +12,7 @@ import {
   formatKeyDriftReason,
   formatNullKeyExample,
   getNoReliableKeyMessage,
+  isBlankCurrentKeyReview,
   selectDefaultCandidate,
   type KeyDriftDetails,
 } from "@/components/gates/key-drift-review-panel";
@@ -332,6 +333,71 @@ describe("Gate key drift UI helpers", () => {
       confirm: true,
       incompleteRowAction: "EXCLUDE_REVIEWED_ROWS",
     });
+    expect(
+      buildResolvePayload(
+        ["job_number", "line_number", "line_value"],
+        [],
+        "EXCLUDE_REVIEWED_ROWS",
+        "APPROVE_INCOMPLETE_ROW_EXCLUSION"
+      )
+    ).toEqual({
+      action: "APPROVE_INCOMPLETE_ROW_EXCLUSION",
+      selectedKey: ["job_number", "line_number", "line_value"],
+      confirmedDdl: [],
+      confirm: true,
+      incompleteRowAction: "EXCLUDE_REVIEWED_ROWS",
+    });
+  });
+
+  it("uses keep-current-key approval for blank-only current-key drift", () => {
+    const keyDrift: KeyDriftDetails = {
+      ...baseKeyDrift,
+      oldKey: ["job_number", "line_number", "line_value"],
+      driftType: "BLANK_KEY",
+      currentKeyStillUniqueForBusinessRows: true,
+      requiresIncompleteRowApproval: true,
+      incompleteRowsHeld: 1,
+      recommendedAction: "REVIEW_INCOMPLETE_ROWS",
+      duplicateExamples: [],
+      nullKeyExamples: [
+        {
+          rowIndex: 5491,
+          keyValues: {
+            job_number: "",
+            line_number: "",
+            line_value: "22901728",
+          },
+          missingColumns: ["job_number", "line_number"],
+        },
+      ],
+    };
+
+    expect(isBlankCurrentKeyReview(keyDrift)).toBe(true);
+    expect(getDefaultManualSelection(keyDrift)).toEqual([
+      "job_number",
+      "line_number",
+      "line_value",
+    ]);
+    expect(
+      canApproveKeyHardening({
+        approvalMode: "INCOMPLETE_ROW_EXCLUSION",
+        selectedKey: keyDrift.oldKey,
+        ddlPreview: null,
+        approvalChecked: false,
+        incompleteRowsChecked: false,
+        loading: false,
+      })
+    ).toBe(false);
+    expect(
+      canApproveKeyHardening({
+        approvalMode: "INCOMPLETE_ROW_EXCLUSION",
+        selectedKey: keyDrift.oldKey,
+        ddlPreview: null,
+        approvalChecked: false,
+        incompleteRowsChecked: true,
+        loading: false,
+      })
+    ).toBe(true);
   });
 
   it("exposes discovery diagnostics without raw rows", () => {

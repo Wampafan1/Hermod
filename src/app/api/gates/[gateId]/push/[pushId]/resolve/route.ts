@@ -33,7 +33,10 @@ import {
   type SelectedGateKeyValidationResult,
 } from "@/lib/gates/key-discovery";
 
-type KeyHardeningAction = "APPROVE_KEY_HARDENING" | "CANCEL";
+type KeyHardeningAction =
+  | "APPROVE_KEY_HARDENING"
+  | "APPROVE_INCOMPLETE_ROW_EXCLUSION"
+  | "CANCEL";
 type IncompleteRowAction = "EXCLUDE_REVIEWED_ROWS";
 
 interface KeyHardeningBody {
@@ -60,6 +63,13 @@ interface KeyHardeningReview {
   requiresIncompleteRowApproval: boolean;
   incompleteRowsHeld: number;
   incompleteRowExamples: SelectedGateKeyValidationResult["nullKeyExamples"];
+  excludeRowIndexesForKeyReview: number[];
+}
+
+interface CurrentKeyIncompleteRowReview {
+  tempFile: { buffer: Buffer; extension: string };
+  blankRowsSkipped: number;
+  manualValidation: SelectedGateKeyValidationResult;
   excludeRowIndexesForKeyReview: number[];
 }
 
@@ -186,6 +196,18 @@ async function resolveKeyDriftPush(input: {
   const keyDrift = parseKeyDrift(input.push.keyDrift);
   const candidate = findVerifiedCandidate(keyDrift, selectedKey);
 
+  if (input.body.action === "APPROVE_INCOMPLETE_ROW_EXCLUSION") {
+    return approveCurrentKeyIncompleteRows({
+      body: input.body,
+      gate,
+      gateId: input.gateId,
+      pushId: input.pushId,
+      push: input.push,
+      keyDrift,
+      selectedKey,
+    });
+  }
+
   const review = await buildKeyHardeningReview({
     gate,
     push: input.push,
@@ -295,6 +317,125 @@ async function resolveKeyDriftPush(input: {
         pushId: input.pushId,
         status: "FAILED",
         error: err instanceof Error ? err.message : "Push failed after key hardening",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+async function approveCurrentKeyIncompleteRows(input: {
+  body: KeyHardeningBody;
+  gate: NonNullable<Awaited<ReturnType<typeof loadGateForResolve>>>;
+  gateId: string;
+  pushId: string;
+  push: { id: string; status: string; tempFileId: string | null; keyDrift: unknown };
+  keyDrift: KeyDriftDetails;
+  selectedKey: string[];
+}) {
+  if (
+    input.keyDrift.driftType !== "BLANK_KEY" &&
+    input.keyDrift.currentKeyStillUniqueForBusinessRows !== true
+  ) {
+    return NextResponse.json(
+      { error: "Current key row exclusion is only available for blank-only key drift." },
+      { status: 409 }
+    );
+  }
+
+  if (!arraysEqual(input.selectedKey, input.keyDrift.oldKey)) {
+    return NextResponse.json(
+      { error: "Incomplete-row exclusion must use the current UPSERT key." },
+      { status: 400 }
+    );
+  }
+
+  const review = await buildCurrentKeyIncompleteRowReview({
+    gate: input.gate,
+    push: input.push,
+    keyDrift: input.keyDrift,
+    selectedKey: input.selectedKey,
+  });
+  if ("response" in review) return review.response;
+
+  if (
+    !input.body.confirm ||
+    input.body.incompleteRowAction !== "EXCLUDE_REVIEWED_ROWS"
+  ) {
+    return NextResponse.json(
+      {
+        status: "KEY_DRIFT",
+        error: "Approve excluding the reviewed incomplete rows or cancel and fix the file.",
+        selectedKey: input.selectedKey,
+        currentKeyStillUniqueForBusinessRows: true,
+        requiresIncompleteRowApproval: true,
+        incompleteRowsHeld: review.manualValidation.nullCount,
+        incompleteRowExamples: review.manualValidation.nullKeyExamples,
+        manualValidation: publicManualValidation(review.manualValidation),
+        blocked: true,
+        blockReason: "Approve excluding the reviewed incomplete rows or cancel and fix the file.",
+        blankRowsSkipped: review.blankRowsSkipped,
+      },
+      { status: 409 }
+    );
+  }
+
+  const reviewedKeyDrift: KeyDriftDetails = {
+    ...input.keyDrift,
+    driftType: "BLANK_KEY",
+    selectedKey: input.selectedKey,
+    manualSelection: false,
+    manualValidation: publicManualValidation(review.manualValidation),
+    currentKeyStillUniqueForBusinessRows: true,
+    requiresIncompleteRowApproval: true,
+    incompleteRowsHeld: review.excludeRowIndexesForKeyReview.length,
+    incompleteRowExamples: review.manualValidation.nullKeyExamples,
+    recommendedAction: "REVIEW_INCOMPLETE_ROWS",
+    incompleteRowAction: "EXCLUDE_REVIEWED_ROWS",
+    incompleteRowsExcluded: review.excludeRowIndexesForKeyReview.length,
+    excludedRowIndexes: review.excludeRowIndexesForKeyReview,
+  };
+
+  await prisma.gatePush.update({
+    where: { id: input.pushId },
+    data: {
+      status: "VALIDATED",
+      keyDrift: reviewedKeyDrift as unknown as Prisma.InputJsonValue,
+    },
+  });
+
+  try {
+    const result = await executePush(
+      input.gateId,
+      input.pushId,
+      review.tempFile.buffer,
+      review.tempFile.extension,
+      {
+        excludeRowIndexesForKeyReview: review.excludeRowIndexesForKeyReview,
+        keyDriftReviewMetadata: reviewedKeyDrift,
+      }
+    );
+    if (result.status === "SUCCESS" && input.push.tempFileId) {
+      await deleteTempFile(input.push.tempFileId);
+    }
+
+    return NextResponse.json({
+      pushId: input.pushId,
+      status: result.status,
+      rowCount: result.rowCount,
+      rowsInserted: result.rowsInserted,
+      rowsUpdated: result.rowsUpdated,
+      rowsErrored: result.rowsErrored,
+      blankRowsSkipped: result.blankRowsSkipped,
+      keyDrift: result.keyDrift,
+      errorMessage: result.errorMessage,
+      duration: result.duration,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      {
+        pushId: input.pushId,
+        status: "FAILED",
+        error: err instanceof Error ? err.message : "Push failed after incomplete row review",
       },
       { status: 500 }
     );
@@ -495,6 +636,121 @@ async function resolveSchemaDriftPush(input: {
       { status: 500 }
     );
   }
+}
+
+async function buildCurrentKeyIncompleteRowReview(input: {
+  gate: NonNullable<Awaited<ReturnType<typeof loadGateForResolve>>>;
+  push: { tempFileId: string | null };
+  keyDrift: KeyDriftDetails;
+  selectedKey: string[];
+}): Promise<CurrentKeyIncompleteRowReview | { response: NextResponse }> {
+  if (!input.push.tempFileId) {
+    return { response: NextResponse.json({ error: "Temp file reference missing" }, { status: 410 }) };
+  }
+
+  const tempFile = await readTempFile(input.push.tempFileId);
+  if (!tempFile) {
+    return { response: NextResponse.json({ error: "Temp file expired or missing" }, { status: 410 }) };
+  }
+
+  const rows = await loadRowsFromGateFile(tempFile.buffer, tempFile.extension);
+  const columnMapping = input.gate.columnMapping as unknown as ColumnMap[];
+  const prepared = prepareMappedRowsForPush({
+    rows,
+    columnMapping,
+    primaryKeyColumns: input.selectedKey,
+    mergeStrategy: "UPSERT",
+  });
+  const manualValidation = validateSelectedGateKey({
+    rows: prepared.mappedRows,
+    rowIndexes: prepared.indexedMappedRows.map((row) => row.rowIndex),
+    selectedKey: input.selectedKey,
+    blankRowsAlreadyRemoved: true,
+  });
+
+  if (manualValidation.duplicateCount > 0) {
+    return {
+      response: NextResponse.json(
+        {
+          status: "KEY_DRIFT",
+          error: "Current key has duplicate values in the staged upload and requires key hardening.",
+          selectedKey: input.selectedKey,
+          currentKeyStillUniqueForBusinessRows: false,
+          requiresIncompleteRowApproval: false,
+          manualValidation: publicManualValidation(manualValidation),
+          blocked: true,
+          blockReason: "Duplicate current-key values require choosing a hardened key.",
+          keyDrift: {
+            ...input.keyDrift,
+            driftType: "DUPLICATE_KEY",
+            currentKeyStillUniqueForBusinessRows: false,
+            manualValidation: publicManualValidation(manualValidation),
+          },
+          blankRowsSkipped: prepared.blankRowsSkipped,
+        },
+        { status: 409 }
+      ),
+    };
+  }
+
+  if (manualValidation.nullCount <= 0) {
+    return {
+      response: NextResponse.json(
+        {
+          status: "KEY_DRIFT",
+          error: "No incomplete current-key rows remain in the staged upload.",
+          selectedKey: input.selectedKey,
+          manualValidation: publicManualValidation(manualValidation),
+          blocked: true,
+          blockReason: "Re-upload or run the push again.",
+          blankRowsSkipped: prepared.blankRowsSkipped,
+        },
+        { status: 409 }
+      ),
+    };
+  }
+
+  const revalidated = prepareMappedRowsForPush({
+    rows,
+    columnMapping,
+    primaryKeyColumns: input.selectedKey,
+    mergeStrategy: "UPSERT",
+    excludeRowIndexesForKeyReview: manualValidation.nullRowIndexes,
+  });
+  if (revalidated.keyDrift) {
+    return {
+      response: NextResponse.json(
+        {
+          status: "KEY_DRIFT",
+          error: "Current key still does not validate after excluding reviewed incomplete rows.",
+          selectedKey: input.selectedKey,
+          currentKeyStillUniqueForBusinessRows: false,
+          requiresIncompleteRowApproval: true,
+          incompleteRowsHeld: manualValidation.nullCount,
+          incompleteRowExamples: manualValidation.nullKeyExamples,
+          manualValidation: publicManualValidation(manualValidation),
+          blocked: true,
+          blockReason: "Current key still has duplicate or blank values after reviewed exclusions.",
+          keyDrift: {
+            ...input.keyDrift,
+            manualValidation: publicManualValidation(manualValidation),
+            duplicateExamples: revalidated.keyDrift.duplicateExamples,
+            nullKeyExamples: revalidated.keyDrift.nullKeyExamples,
+            reason: revalidated.keyDrift.reason,
+          },
+          blankRowsSkipped: revalidated.blankRowsSkipped,
+        },
+        { status: 409 }
+      ),
+    };
+  }
+
+  return {
+    tempFile,
+    blankRowsSkipped: prepared.blankRowsSkipped,
+    manualValidation,
+    excludeRowIndexesForKeyReview: manualValidation.nullRowIndexes,
+  };
 }
 
 async function buildKeyHardeningReview(input: {
@@ -816,6 +1072,7 @@ function isKeyHardeningBody(body: unknown): body is KeyHardeningBody {
     body !== null &&
     "action" in body &&
     ((body as { action?: unknown }).action === "APPROVE_KEY_HARDENING" ||
+      (body as { action?: unknown }).action === "APPROVE_INCOMPLETE_ROW_EXCLUSION" ||
       (body as { action?: unknown }).action === "CANCEL")
   );
 }
@@ -824,6 +1081,16 @@ function parseKeyDrift(value: unknown): KeyDriftDetails {
   const keyDrift = value as Partial<KeyDriftDetails> | null | undefined;
   return {
     oldKey: Array.isArray(keyDrift?.oldKey) ? keyDrift.oldKey : [],
+    driftType: keyDrift?.driftType,
+    currentKeyStillUniqueForBusinessRows: keyDrift?.currentKeyStillUniqueForBusinessRows === true,
+    requiresIncompleteRowApproval: keyDrift?.requiresIncompleteRowApproval === true,
+    incompleteRowsHeld: typeof keyDrift?.incompleteRowsHeld === "number"
+      ? keyDrift.incompleteRowsHeld
+      : undefined,
+    incompleteRowExamples: Array.isArray(keyDrift?.incompleteRowExamples)
+      ? keyDrift.incompleteRowExamples
+      : undefined,
+    recommendedAction: keyDrift?.recommendedAction,
     duplicateExamples: Array.isArray(keyDrift?.duplicateExamples) ? keyDrift.duplicateExamples : [],
     nullKeyExamples: Array.isArray(keyDrift?.nullKeyExamples) ? keyDrift.nullKeyExamples : [],
     reason: typeof keyDrift?.reason === "string" ? keyDrift.reason : "Current UPSERT key failed preflight.",
@@ -845,6 +1112,13 @@ function parseKeyDrift(value: unknown): KeyDriftDetails {
     mappedColumns: Array.isArray(keyDrift?.mappedColumns) ? keyDrift.mappedColumns : undefined,
     manualSelection: keyDrift?.manualSelection === true,
     manualValidation: keyDrift?.manualValidation,
+    incompleteRowAction: keyDrift?.incompleteRowAction,
+    incompleteRowsExcluded: typeof keyDrift?.incompleteRowsExcluded === "number"
+      ? keyDrift.incompleteRowsExcluded
+      : undefined,
+    excludedRowIndexes: Array.isArray(keyDrift?.excludedRowIndexes)
+      ? keyDrift.excludedRowIndexes
+      : undefined,
     selectedKey: Array.isArray(keyDrift?.selectedKey) ? keyDrift.selectedKey : null,
   };
 }

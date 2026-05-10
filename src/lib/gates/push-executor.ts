@@ -56,6 +56,16 @@ export interface KeyDriftMappedColumn {
 
 export interface KeyDriftDetails {
   oldKey: string[];
+  driftType?: "DUPLICATE_KEY" | "BLANK_KEY" | "DUPLICATE_AND_BLANK_KEY";
+  currentKeyStillUniqueForBusinessRows?: boolean;
+  requiresIncompleteRowApproval?: boolean;
+  incompleteRowsHeld?: number;
+  incompleteRowExamples?: Array<{
+    rowIndex: number;
+    keyValues: Record<string, string | number | boolean | null>;
+    missingColumns: string[];
+  }>;
+  recommendedAction?: "REVIEW_INCOMPLETE_ROWS" | "HARDEN_KEY";
   duplicateExamples: Array<{
     keyValues: Record<string, string | number | boolean | null>;
     rowIndexes: number[];
@@ -452,6 +462,7 @@ export function preflightUpsertKey(input: {
     { keyValues: Record<string, string | number | boolean | null>; rowIndexes: number[] }
   >();
   const nullKeyExamples: KeyDriftDetails["nullKeyExamples"] = [];
+  let nullKeyCount = 0;
 
   for (const indexedRow of input.rows) {
     const keyValues = buildSafeKeyValues(indexedRow.row, input.primaryKeyColumns);
@@ -460,6 +471,7 @@ export function preflightUpsertKey(input: {
     );
 
     if (missingColumns.length > 0) {
+      nullKeyCount++;
       if (nullKeyExamples.length < maxExamples) {
         nullKeyExamples.push({
           rowIndex: indexedRow.rowIndex,
@@ -491,7 +503,12 @@ export function preflightUpsertKey(input: {
   }
 
   const hasDuplicates = duplicateExamples.length > 0;
-  const hasNullKeys = nullKeyExamples.length > 0;
+  const hasNullKeys = nullKeyCount > 0;
+  const driftType = hasDuplicates && hasNullKeys
+    ? "DUPLICATE_AND_BLANK_KEY"
+    : hasDuplicates
+      ? "DUPLICATE_KEY"
+      : "BLANK_KEY";
   const reason = hasDuplicates && hasNullKeys
     ? "Current UPSERT key has duplicate and blank values in this upload."
     : hasDuplicates
@@ -502,6 +519,14 @@ export function preflightUpsertKey(input: {
     ok: false,
     keyDrift: {
       oldKey: input.primaryKeyColumns,
+      driftType,
+      currentKeyStillUniqueForBusinessRows: !hasDuplicates,
+      requiresIncompleteRowApproval: !hasDuplicates && hasNullKeys,
+      incompleteRowsHeld: nullKeyCount,
+      incompleteRowExamples: nullKeyExamples,
+      recommendedAction: !hasDuplicates && hasNullKeys
+        ? "REVIEW_INCOMPLETE_ROWS"
+        : "HARDEN_KEY",
       duplicateExamples,
       nullKeyExamples,
       reason,
@@ -529,6 +554,22 @@ async function enrichKeyDriftRecommendation(input: {
   columnMapping: ColumnMap[];
   columns: string[];
 }): Promise<KeyDriftDetails> {
+  if (
+    input.keyDrift.driftType === "BLANK_KEY" &&
+    input.keyDrift.duplicateExamples.length === 0
+  ) {
+    return {
+      ...input.keyDrift,
+      mappedColumns: buildMappedColumnMetadata({
+        mappedRows: input.mappedRows,
+        columnMapping: input.columnMapping,
+        currentKeyColumns: input.keyDrift.oldKey,
+        discriminatorColumns: [],
+      }),
+      selectedKey: null,
+    };
+  }
+
   const discovery = await discoverGateKeyCandidates({
     mappedRows: input.mappedRows,
     mappedColumns: input.columns,
