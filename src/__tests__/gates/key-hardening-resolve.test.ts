@@ -202,6 +202,52 @@ describe("Gate key hardening resolve API", () => {
     });
   });
 
+  it("previews a verified nullable UCC candidate with a review warning", async () => {
+    mockGatePushFindFirst.mockResolvedValue({
+      id: "push_1",
+      gateId: "gate_1",
+      tenantId: "tenant_1",
+      status: "KEY_DRIFT",
+      tempFileId: "tmp_1",
+      keyDrift: {
+        ...keyDrift,
+        candidateKeys: [
+          {
+            columns: ["job_number", "line_number", "line_value"],
+            unique: true,
+            nullCount: 2,
+            duplicateCount: 0,
+            coverage: 1,
+            width: 3,
+            score: 980,
+            source: "UCC",
+            requiresReview: true,
+            reviewReason: "KEY_HAS_NULLS",
+          },
+        ],
+      },
+    });
+    mockLoadRowsFromGateFile.mockResolvedValue([
+      { "Job Number": "J1", "Line Number": "1", "Line Value": "A" },
+      { "Job Number": "J1", "Line Number": "1", "Line Value": "B" },
+      { "Job Number": "J2", "Line Number": "1", "Line Value": null },
+      { "Job Number": "J3", "Line Number": "1", "Line Value": null },
+    ]);
+
+    const { GET } = await import("@/app/api/gates/[gateId]/push/[pushId]/resolve/route");
+    const response = await GET(previewRequest(["job_number", "line_number", "line_value"]));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      selectedKey: ["job_number", "line_number", "line_value"],
+      manualCandidate: false,
+      manualValidation: { ok: false, nullCount: 2, duplicateCount: 0 },
+      blocked: false,
+    });
+    expect(body.warnings.join(" ")).toContain("null key values");
+  });
+
   it("previews a manually selected key after staged upload validation", async () => {
     const plan = buildReplaceKeyConstraintPlan({
       providerType: "POSTGRES",

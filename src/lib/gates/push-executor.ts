@@ -529,7 +529,7 @@ async function enrichKeyDriftRecommendation(input: {
   return {
     ...input.keyDrift,
     candidateKeys: discovery.candidateKeys,
-    recommendation: aiResult.recommendation ?? discovery.recommendation,
+    recommendation: aiResult.aiUsed ? aiResult.recommendation : discovery.recommendation,
     validationStats: discovery.validationStats,
     aiUsed: aiResult.aiUsed,
     aiExplanation: aiResult.aiExplanation,

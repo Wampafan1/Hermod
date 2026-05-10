@@ -3,6 +3,7 @@ import {
   buildResolvePayload,
   canApproveKeyHardening,
   formatBlankRowsSkipped,
+  formatCandidateReviewSummary,
   formatDuplicateExample,
   getDefaultManualSelection,
   getDiscoveryDiagnostics,
@@ -106,6 +107,23 @@ describe("Gate key drift UI helpers", () => {
       "line_number",
       "line_value",
     ]);
+  });
+
+  it("formats nullable verified candidates as review required", () => {
+    expect(
+      formatCandidateReviewSummary({
+        columns: ["job_number", "line_number", "line_value"],
+        unique: true,
+        nullCount: 2,
+        duplicateCount: 0,
+        coverage: 1,
+        width: 3,
+        score: 980,
+        source: "UCC",
+        requiresReview: true,
+        reviewReason: "KEY_HAS_NULLS",
+      })
+    ).toBe("3 columns, 2 nulls, review required");
   });
 
   it("falls back to the current key for manual selection when recommendation is unavailable", () => {

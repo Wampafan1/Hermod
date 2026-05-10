@@ -68,6 +68,61 @@ describe("discoverGateKeyCandidates", () => {
     );
   });
 
+  it("preserves verified UCC candidates that contain null key values", async () => {
+    const result = await discoverGateKeyCandidates({
+      mappedRows: [
+        { job_number: "J1", line_number: "1", line_entered_value: "100" },
+        { job_number: "J1", line_number: "1", line_entered_value: "101" },
+        { job_number: "J1", line_number: "2", line_entered_value: null },
+        { job_number: "J2", line_number: "1", line_entered_value: null },
+      ],
+      mappedColumns: ["job_number", "line_number", "line_entered_value"],
+      currentKeyColumns: ["job_number", "line_number"],
+      thorough: true,
+    });
+
+    const candidate = result.candidateKeys.find((item) =>
+      sameColumns(item.columns, ["job_number", "line_number", "line_entered_value"])
+    );
+
+    expect(candidate).toMatchObject({
+      unique: true,
+      nullCount: 2,
+      duplicateCount: 0,
+      requiresReview: true,
+      reviewReason: "KEY_HAS_NULLS",
+      source: "UCC",
+    });
+    expect(result.noReliableKeyReason).toBeNull();
+    expect(result.recommendation?.reason).toContain("null key values require review");
+  });
+
+  it("keeps nullable current-key discriminator candidates instead of reporting no key", async () => {
+    const result = await discoverGateKeyCandidates({
+      mappedRows: [
+        { job_number: "SNGB0097414", "7501_line_number": "0001", line_entered_value: "110.25" },
+        { job_number: "SNGB0097414", "7501_line_number": "0001", line_entered_value: "115.75" },
+        { job_number: "SNGB0097746", "7501_line_number": "0001", line_entered_value: "210.00" },
+        { job_number: "SNGB0097746", "7501_line_number": "0001", line_entered_value: "211.00" },
+        { job_number: "SNGB0102183", "7501_line_number": "0007", line_entered_value: "310.00" },
+        { job_number: "SNGB0102183", "7501_line_number": "0007", line_entered_value: "315.00" },
+        { job_number: "SNGB0103000", "7501_line_number": "0008", line_entered_value: null },
+        { job_number: "SNGB0103001", "7501_line_number": "0008", line_entered_value: null },
+      ],
+      mappedColumns: ["job_number", "7501_line_number", "line_entered_value"],
+      currentKeyColumns: ["job_number", "7501_line_number"],
+      thorough: true,
+    });
+
+    expect(result.candidateKeys).not.toHaveLength(0);
+    expect(result.candidateKeys.some((candidate) =>
+      sameColumns(candidate.columns, ["job_number", "7501_line_number", "line_entered_value"]) &&
+      candidate.nullCount === 2
+    )).toBe(true);
+    expect(result.noReliableKeyReason).toBeNull();
+    expect(result.validationStats.discoveryMode).toBe("UCC");
+  });
+
   it("analyzes all mapped columns instead of the custom 24-column cap", async () => {
     const fillerColumns = Array.from({ length: 30 }, (_, index) => `filler_${index + 1}`);
     const rows = Array.from({ length: 5 }, (_, index) => ({

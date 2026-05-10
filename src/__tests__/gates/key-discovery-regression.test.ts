@@ -11,6 +11,8 @@ import {
 describe("Gate key discovery regression", () => {
   it("finds job_number + 7501_line_number + line_entered_value for duplicate current keys", async () => {
     const rows = buildJobLineValueRows();
+    rows[10] = { ...rows[10], line_entered_value: null };
+    rows[11] = { ...rows[11], line_entered_value: null };
 
     const prepared = prepareMappedRowsForPush({
       rows,
@@ -44,9 +46,14 @@ describe("Gate key discovery regression", () => {
     });
 
     expect(discovery.noReliableKeyReason).toBeNull();
-    expect(discovery.candidateKeys.some((candidate) =>
+    const hardened = discovery.candidateKeys.find((candidate) =>
       candidate.columns.join("|") === jobLineValueHardenedKey.join("|")
-    )).toBe(true);
+    );
+    expect(hardened).toMatchObject({
+      nullCount: 2,
+      requiresReview: true,
+      reviewReason: "KEY_HAS_NULLS",
+    });
     expect(discovery.validationStats.discoveryMode).toBe("UCC");
     expect(
       discovery.validationStats.searchExhaustive || discovery.candidateKeys.length > 0

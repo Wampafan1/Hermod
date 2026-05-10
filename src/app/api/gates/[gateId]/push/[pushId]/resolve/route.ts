@@ -498,6 +498,13 @@ async function buildKeyHardeningReview(input: {
     selectedKey: input.selectedKey,
     blankRowsAlreadyRemoved: true,
   });
+  const selectedCandidate = findVerifiedCandidate(input.keyDrift, input.selectedKey);
+  const selectedNullableVerifiedCandidate =
+    input.manualCandidate !== true &&
+    selectedCandidate?.requiresReview === true &&
+    selectedCandidate.reviewReason === "KEY_HAS_NULLS" &&
+    manualValidation.nullCount > 0 &&
+    manualValidation.duplicateCount === 0;
   if (prepared.keyDrift) {
     const responseValidation: SelectedGateKeyValidationResult = {
       ...manualValidation,
@@ -509,30 +516,38 @@ async function buildKeyHardeningReview(input: {
         ? prepared.keyDrift.nullKeyExamples
         : manualValidation.nullKeyExamples,
     };
-    return {
-      response: NextResponse.json(
-        {
-          status: "KEY_DRIFT",
-          error: "Selected key no longer validates against the staged upload.",
-          selectedKey: input.selectedKey,
-          manualCandidate: input.manualCandidate === true,
-          manualValidation: responseValidation,
-          blocked: true,
-          blockReason: buildManualValidationBlockReason(responseValidation),
-          keyDrift: {
-            ...input.keyDrift,
+
+    const allowNullablePreview = selectedNullableVerifiedCandidate && !input.executeDdl;
+    if (!allowNullablePreview) {
+      return {
+        response: NextResponse.json(
+          {
+            status: "KEY_DRIFT",
+            error: selectedNullableVerifiedCandidate
+              ? "Selected verified key contains null values that require review before approval."
+              : "Selected key no longer validates against the staged upload.",
             selectedKey: input.selectedKey,
-            manualSelection: input.manualCandidate === true,
+            manualCandidate: input.manualCandidate === true,
             manualValidation: responseValidation,
-            duplicateExamples: prepared.keyDrift.duplicateExamples,
-            nullKeyExamples: prepared.keyDrift.nullKeyExamples,
-            reason: prepared.keyDrift.reason,
+            blocked: true,
+            blockReason: selectedNullableVerifiedCandidate
+              ? "Selected verified key contains null values that require review before approval."
+              : buildManualValidationBlockReason(responseValidation),
+            keyDrift: {
+              ...input.keyDrift,
+              selectedKey: input.selectedKey,
+              manualSelection: input.manualCandidate === true,
+              manualValidation: responseValidation,
+              duplicateExamples: prepared.keyDrift.duplicateExamples,
+              nullKeyExamples: prepared.keyDrift.nullKeyExamples,
+              reason: prepared.keyDrift.reason,
+            },
+            blankRowsSkipped: prepared.blankRowsSkipped,
           },
-          blankRowsSkipped: prepared.blankRowsSkipped,
-        },
-        { status: 409 }
-      ),
-    };
+          { status: 409 }
+        ),
+      };
+    }
   }
 
   if (!isKeyDdlProviderType(input.gate.connection.type)) {
@@ -606,6 +621,15 @@ async function buildKeyHardeningReview(input: {
       matchedExistingConstraint: matchedConstraint,
       foreignKeyDependencyCount: foreignKeys.count,
     });
+    const planWithReviewWarnings = selectedNullableVerifiedCandidate
+      ? {
+          ...plan,
+          warnings: [
+            ...plan.warnings,
+            "UCC verified this candidate, but it contains null key values in the staged upload. Review incomplete rows before approving key hardening.",
+          ],
+        }
+      : plan;
 
     if (!destinationValidation.ok) {
       return {
@@ -617,8 +641,8 @@ async function buildKeyHardeningReview(input: {
             manualCandidate: input.manualCandidate === true,
             manualValidation,
             destinationValidation,
-            ddl: plan.ddl,
-            warnings: plan.warnings,
+            ddl: planWithReviewWarnings.ddl,
+            warnings: planWithReviewWarnings.warnings,
             blocked: true,
             blockReason: destinationValidation.reason,
           },
@@ -627,7 +651,7 @@ async function buildKeyHardeningReview(input: {
       };
     }
 
-    if (plan.blocked) {
+    if (planWithReviewWarnings.blocked) {
       return {
         response: NextResponse.json(
           {
@@ -635,10 +659,10 @@ async function buildKeyHardeningReview(input: {
             selectedKey: input.selectedKey,
             manualCandidate: input.manualCandidate === true,
             manualValidation,
-            ddl: plan.ddl,
-            warnings: plan.warnings,
+            ddl: planWithReviewWarnings.ddl,
+            warnings: planWithReviewWarnings.warnings,
             blocked: true,
-            blockReason: plan.blockReason,
+            blockReason: planWithReviewWarnings.blockReason,
           },
           { status: 409 }
         ),
@@ -646,7 +670,7 @@ async function buildKeyHardeningReview(input: {
     }
 
     if (input.executeDdl) {
-      if (!arraysEqual(input.confirmedDdl ?? [], plan.ddl)) {
+      if (!arraysEqual(input.confirmedDdl ?? [], planWithReviewWarnings.ddl)) {
         return {
           response: NextResponse.json(
             { error: "Confirmed DDL does not match the current generated key replacement plan." },
@@ -654,13 +678,13 @@ async function buildKeyHardeningReview(input: {
           ),
         };
       }
-      for (const statement of plan.ddl) {
+      for (const statement of planWithReviewWarnings.ddl) {
         await provider.query(providerConn, statement);
       }
     }
 
     return {
-      plan,
+      plan: planWithReviewWarnings,
       tempFile,
       blankRowsSkipped: prepared.blankRowsSkipped,
       manualCandidate: input.manualCandidate === true,
@@ -729,7 +753,6 @@ function findVerifiedCandidate(keyDrift: KeyDriftDetails, selectedKey: string[])
   return keyDrift.candidateKeys.find(
     (candidate) =>
       candidate.unique &&
-      candidate.nullCount === 0 &&
       candidate.duplicateCount === 0 &&
       arraysEqual(candidate.columns, selectedKey)
   );

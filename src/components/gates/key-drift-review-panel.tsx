@@ -12,6 +12,8 @@ export interface CandidateKey {
   score: number;
   source?: "UCC" | string;
   quality?: unknown;
+  requiresReview?: boolean;
+  reviewReason?: "KEY_HAS_NULLS" | string;
 }
 
 export interface MappedKeyColumn {
@@ -276,6 +278,14 @@ export function formatNullKeyExample(example: {
 export function formatBlankRowsSkipped(count: number): string | null {
   if (count <= 0) return null;
   return `${count.toLocaleString()} fully blank mapped ${count === 1 ? "row was" : "rows were"} skipped and counted.`;
+}
+
+export function formatCandidateReviewSummary(candidate: CandidateKey): string {
+  const widthText = `${candidate.width.toLocaleString()} ${candidate.width === 1 ? "column" : "columns"}`;
+  const nullText = `${candidate.nullCount.toLocaleString()} ${candidate.nullCount === 1 ? "null" : "nulls"}`;
+  return candidate.requiresReview || candidate.nullCount > 0
+    ? `${widthText}, ${nullText}, review required`
+    : `${widthText}, ${nullText}`;
 }
 
 export function getNoReliableKeyMessage(keyDrift: KeyDriftDetails): string | null {
@@ -587,7 +597,19 @@ export function KeyDriftReviewPanel({
                             Recommended
                           </span>
                         )}
+                        {(candidate.requiresReview || candidate.nullCount > 0) && (
+                          <span className="text-[8px] uppercase tracking-[0.16em] border border-ember/30 text-gold-bright px-1.5 py-0.5">
+                            Review Required
+                          </span>
+                        )}
                       </div>
+                      <p className={`text-[10px] font-inconsolata leading-5 ${
+                        candidate.requiresReview || candidate.nullCount > 0
+                          ? "text-gold-bright"
+                          : "text-text-dim"
+                      }`}>
+                        {formatCandidateReviewSummary(candidate)}
+                      </p>
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-[10px] text-text-dim font-inconsolata">
                         <Metric label="Width" value={candidate.width} />
                         <Metric label="Coverage" value={`${Math.round(candidate.coverage * 100)}%`} />

@@ -22,6 +22,8 @@ export interface CandidateKey {
   score: number;
   source?: "UCC";
   quality?: unknown;
+  requiresReview?: boolean;
+  reviewReason?: "KEY_HAS_NULLS";
   examples?: {
     rowIndexes: number[];
   };

@@ -64,7 +64,7 @@ export async function discoverGateKeyCandidates(
     });
 
     const uccCandidates = result.uccs
-      .filter((ucc) => ucc.verified && ucc.quality.allColumnsNotNull)
+      .filter((ucc) => ucc.verified)
       .map((ucc) => toCandidateKey(ucc, {
         rowCount: rows.length,
         currentKeyColumns,
@@ -163,17 +163,20 @@ async function discoverCurrentKeyDiscriminatorCandidates(input: {
       const columns = uniqueStrings([...currentKey, ...discriminatorSet]);
       const signature = keySignature(columns);
       if (existing.has(signature)) continue;
-      if (columns.some((column) => (nullCounts.get(column.toLowerCase()) ?? 0) > 0)) continue;
 
       const isUnique = await verifyUniqueColumns(input.session, input.tableName, columns);
       queriesExecuted++;
       if (!isUnique) continue;
 
       existing.add(signature);
+      const totalNullCount = columns.reduce(
+        (sum, column) => sum + (nullCounts.get(column.toLowerCase()) ?? 0),
+        0
+      );
       const candidate: CandidateKey & { unique: true; source: "UCC"; quality: unknown } = {
         columns,
         unique: true,
-        nullCount: 0,
+        nullCount: totalNullCount,
         duplicateCount: 0,
         coverage: input.rowCount > 0 ? 1 : 0,
         width: columns.length,
@@ -181,12 +184,16 @@ async function discoverCurrentKeyDiscriminatorCandidates(input: {
         source: "UCC",
         quality: {
           columnCount: columns.length,
-          totalNullCount: 0,
+          totalNullCount,
           hasIdPattern: columns.some((column) => STABLE_NAME_PATTERN.test(column)),
-          allColumnsNotNull: true,
+          allColumnsNotNull: totalNullCount === 0,
           currentKeyDiscriminator: true,
         },
       };
+      if (totalNullCount > 0) {
+        candidate.requiresReview = true;
+        candidate.reviewReason = "KEY_HAS_NULLS";
+      }
       candidate.score = scoreUccCandidate(candidate, {
         currentKeyColumns: input.currentKeyColumns,
         discriminatorColumns: input.discriminatorColumns,
@@ -232,6 +239,11 @@ function toCandidateKey(
     quality: ucc.quality,
   };
 
+  if (candidate.nullCount > 0) {
+    candidate.requiresReview = true;
+    candidate.reviewReason = "KEY_HAS_NULLS";
+  }
+
   candidate.score = scoreUccCandidate(candidate, context);
   return candidate;
 }
@@ -256,7 +268,7 @@ function scoreUccCandidate(
   if (candidate.nullCount === 0) score += 100;
   score += stableNameCount * 35;
   score -= candidate.width * 25;
-  score -= candidate.nullCount * 10;
+  score -= candidate.nullCount * 5;
   return score;
 }
 
@@ -289,10 +301,18 @@ function deterministicUccReason(candidate: CandidateKey, currentKeyColumns: stri
     currentKey.every((column) => candidate.columns.some((candidateColumn) => candidateColumn.toLowerCase() === column));
 
   if (includesCurrentKey && candidate.columns.length > currentKey.length) {
-    return "UCC discovery verified this null-free key and it extends the current key with discriminator columns.";
+    if (candidate.nullCount > 0) {
+      return `UCC discovery verified this key and it extends the current key with discriminator columns, but ${candidate.nullCount.toLocaleString()} null key ${candidate.nullCount === 1 ? "value requires" : "values require"} review.`;
+    }
+
+    return "UCC discovery verified this key and it extends the current key with discriminator columns.";
   }
 
-  return "UCC discovery verified this null-free unique key across the mapped upload rows.";
+  if (candidate.nullCount > 0) {
+    return `UCC discovery verified this key across the mapped upload rows, but ${candidate.nullCount.toLocaleString()} null key ${candidate.nullCount === 1 ? "value requires" : "values require"} review.`;
+  }
+
+  return "UCC discovery verified this unique key across the mapped upload rows.";
 }
 
 function buildStats(input: {
@@ -352,7 +372,7 @@ function buildNoReliableKeyReason(stats: KeyDiscoveryStats): string {
     return `No reliable key was found before UCC discovery completed. Hermod checked ${stats.combinationsTested} UCC query batches across ${stats.columnsAnalyzed} mapped columns.${blankNote}`;
   }
 
-  return `No null-free unique key was found by UCC after checking ${stats.columnsAnalyzed} mapped columns up to width ${stats.levelsSearched ?? stats.maxWidth}.${blankNote}`;
+  return `No verified UCC key was found after checking ${stats.columnsAnalyzed} mapped columns up to width ${stats.levelsSearched ?? stats.maxWidth}.${blankNote}`;
 }
 
 function analyzeCurrentKeyDuplicateGroups(
