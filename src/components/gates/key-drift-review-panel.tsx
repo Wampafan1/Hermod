@@ -10,6 +10,8 @@ export interface CandidateKey {
   coverage: number;
   width: number;
   score: number;
+  source?: "UCC" | string;
+  quality?: unknown;
 }
 
 export interface MappedKeyColumn {
@@ -63,7 +65,7 @@ export interface KeyDriftDetails {
     truncated: boolean;
     destinationValidated: boolean;
     destinationValidationMode?: string;
-    discoveryMode?: "QUICK" | "DUPLICATE_DISCRIMINATOR" | "THOROUGH" | "CAPPED";
+    discoveryMode?: "QUICK" | "DUPLICATE_DISCRIMINATOR" | "THOROUGH" | "CAPPED" | "UCC";
     searchExhaustive?: boolean;
     columnsConsidered?: string[];
     columnsExcluded?: Array<{ column: string; reason: string }>;
@@ -81,7 +83,7 @@ export interface KeyDriftDetails {
       combinationsTested: number;
     };
   } | null;
-  discoveryMode?: "QUICK" | "DUPLICATE_DISCRIMINATOR" | "THOROUGH" | "CAPPED";
+  discoveryMode?: "QUICK" | "DUPLICATE_DISCRIMINATOR" | "THOROUGH" | "CAPPED" | "UCC";
   searchExhaustive?: boolean;
   columnsConsidered?: string[];
   columnsExcluded?: Array<{ column: string; reason: string }>;

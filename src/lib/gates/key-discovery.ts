@@ -9,7 +9,8 @@ export type KeyDiscoveryMode =
   | "QUICK"
   | "DUPLICATE_DISCRIMINATOR"
   | "THOROUGH"
-  | "CAPPED";
+  | "CAPPED"
+  | "UCC";
 
 export interface CandidateKey {
   columns: string[];
@@ -19,6 +20,8 @@ export interface CandidateKey {
   coverage: number;
   width: number;
   score: number;
+  source?: "UCC";
+  quality?: unknown;
   examples?: {
     rowIndexes: number[];
   };
@@ -63,6 +66,9 @@ export interface KeyDiscoveryStats {
   currentKeyDuplicateGroupCount: number;
   currentKeyColumns?: string[];
   candidateSearchLimits: CandidateSearchLimits;
+  levelsSearched?: number;
+  timedOut?: boolean;
+  durationMs?: number;
 }
 
 export interface KeyDiscoveryResult {

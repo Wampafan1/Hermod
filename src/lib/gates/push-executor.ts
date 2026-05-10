@@ -16,8 +16,6 @@ import { Prisma } from "@prisma/client";
 import { normalizeDestinationColumnName } from "./alter-generator";
 import { fullSqlTableRef, quoteSqlIdentifier } from "./sql-identifiers";
 import {
-  buildKeyDriftRecommendation,
-  discoverUniqueColumnCombinations,
   type CandidateKey,
   type CandidateSearchLimits,
   type ColumnExclusion,
@@ -26,6 +24,7 @@ import {
   type KeyDiscoveryStats,
   type KeyRecommendation,
 } from "./key-discovery";
+import { discoverGateKeyCandidates } from "./gate-ucc-discovery";
 import { recommendGateKey } from "./key-recommendation-ai";
 
 // ─── Types ──────────────────────────────────────────
@@ -509,17 +508,15 @@ async function enrichKeyDriftRecommendation(input: {
   columnMapping: ColumnMap[];
   columns: string[];
 }): Promise<KeyDriftDetails> {
-  const discovery = discoverUniqueColumnCombinations(input.mappedRows, input.columns, {
+  const discovery = await discoverGateKeyCandidates({
+    mappedRows: input.mappedRows,
+    mappedColumns: input.columns,
     currentKeyColumns: input.keyDrift.oldKey,
-  });
-  const deterministic = buildKeyDriftRecommendation({
-    candidateKeys: discovery.candidates,
-    validationStats: discovery.stats,
-    noReliableKeyReason: discovery.noReliableKeyReason,
+    thorough: true,
   });
   const aiResult = await recommendGateKey({
-    candidateKeys: deterministic.candidateKeys,
-    validationStats: deterministic.validationStats,
+    candidateKeys: discovery.candidateKeys,
+    validationStats: discovery.validationStats,
     currentKeyFailure: {
       oldKey: input.keyDrift.oldKey,
       reason: input.keyDrift.reason,
@@ -531,24 +528,24 @@ async function enrichKeyDriftRecommendation(input: {
 
   return {
     ...input.keyDrift,
-    candidateKeys: deterministic.candidateKeys,
-    recommendation: aiResult.recommendation,
-    validationStats: deterministic.validationStats,
+    candidateKeys: discovery.candidateKeys,
+    recommendation: aiResult.recommendation ?? discovery.recommendation,
+    validationStats: discovery.validationStats,
     aiUsed: aiResult.aiUsed,
     aiExplanation: aiResult.aiExplanation,
-    noReliableKeyReason: deterministic.noReliableKeyReason,
-    discoveryMode: discovery.stats.discoveryMode,
-    searchExhaustive: discovery.stats.searchExhaustive,
-    columnsConsidered: discovery.stats.columnsConsidered,
-    columnsExcluded: discovery.stats.columnsExcluded,
-    discriminatorColumns: discovery.stats.discriminatorColumns,
-    currentKeyDuplicateGroupCount: discovery.stats.currentKeyDuplicateGroupCount,
-    candidateSearchLimits: discovery.stats.candidateSearchLimits,
+    noReliableKeyReason: discovery.noReliableKeyReason,
+    discoveryMode: discovery.validationStats.discoveryMode,
+    searchExhaustive: discovery.validationStats.searchExhaustive,
+    columnsConsidered: discovery.validationStats.columnsConsidered,
+    columnsExcluded: discovery.validationStats.columnsExcluded,
+    discriminatorColumns: discovery.validationStats.discriminatorColumns,
+    currentKeyDuplicateGroupCount: discovery.validationStats.currentKeyDuplicateGroupCount,
+    candidateSearchLimits: discovery.validationStats.candidateSearchLimits,
     mappedColumns: buildMappedColumnMetadata({
       mappedRows: input.mappedRows,
       columnMapping: input.columnMapping,
       currentKeyColumns: input.keyDrift.oldKey,
-      discriminatorColumns: discovery.stats.discriminatorColumns.map((column) => column.column),
+      discriminatorColumns: discovery.validationStats.discriminatorColumns.map((column) => column.column),
     }),
     selectedKey: null,
   };

@@ -29,10 +29,11 @@ describe("worker health route", () => {
     expect(payload).toEqual({
       ok: true,
       workerRequired: true,
-      message: "Gate validation requires npm run worker in development.",
+      message: "Gate validation is processed by the Hermod worker.",
     });
     expect(JSON.stringify(payload)).not.toContain("DATABASE_URL");
     expect(JSON.stringify(payload)).not.toContain("credentials");
+    expect(JSON.stringify(payload)).not.toContain("npm run worker");
     expect(mockWithAuth).toHaveBeenCalled();
   });
 });

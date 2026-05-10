@@ -151,7 +151,7 @@ export async function validateStagedGatePush(input: GateValidatePushJob): Promis
       startedAt: push.createdAt,
     });
 
-    const analysis = await analyzeFile(tempFile.buffer, push.fileName, { skipUCC: true });
+    const analysis = await analyzeFile(tempFile.buffer, push.fileName);
 
     await updateGatePushValidationStage({
       pushId: input.pushId,

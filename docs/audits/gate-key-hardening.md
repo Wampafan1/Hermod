@@ -424,3 +424,42 @@ The stages are stored in `GatePush.errorDetails.gateValidation` to avoid a schem
 
 - Add a dedicated worker timeout test around pg-boss runtime behavior if the worker harness is expanded.
 - Consider explicit Prisma fields for validation progress if the metadata needs to be queried directly at scale.
+
+## UCC Discovery Integration Results
+
+Gate `KEY_DRIFT` candidate discovery now uses Hermod's DuckDB-backed UCC discovery pipeline instead of the capped Gate-only combination finder.
+
+### What Changed
+
+- Added `src/lib/gates/gate-ucc-discovery.ts` as a Gate-specific wrapper around `discoverUCCs()`.
+- Gate candidate discovery loads already-mapped destination rows into DuckDB and runs UCC discovery with pruning disabled for thorough mapped-column coverage.
+- `GatePush.keyDrift.candidateKeys`, `recommendation`, and `validationStats` now come from the UCC wrapper.
+- `validationStats.discoveryMode` is now `UCC` for the automatic KEY_DRIFT candidate path.
+- Gate schema analysis no longer calls `analyzeFile()` with `skipUCC: true`.
+
+### Current-Key Discriminator Handling
+
+- UCC discovery returns minimal keys, which can be narrower than the business-preferred hardened key.
+- The Gate wrapper now also runs narrow DuckDB verification for `current key + discriminator` combinations found inside duplicate current-key groups.
+- This keeps the known `job_number + 7501_line_number + line_entered_value` path visible while still using full-table DuckDB verification rather than the old broad custom search.
+
+### Preserved Behavior
+
+- Duplicate and blank current-key examples still come from current-key preflight.
+- Fully blank mapped rows are still skipped and counted before key drift and UCC discovery.
+- Manual key selection, DDL preview, exact `confirmedDdl` matching, and user approval remain unchanged.
+- No nonblank rows are loaded until key validation, DDL safety checks, and explicit approval succeed.
+
+### Tests Added
+
+- `src/__tests__/gates/gate-ucc-discovery.test.ts`
+- Updated `src/__tests__/gates/key-discovery-regression.test.ts`
+- Re-ran the Gate key hardening end-to-end acceptance test for the known job/line/value case.
+
+### Validation Results
+
+- `npx prisma validate` passed.
+- `npx prisma generate` passed after applying the documented Windows Prisma locked-DLL workaround.
+- `npm run test` passed: 114 files, 1408 tests.
+- `npm run build` passed with existing Next/React lint warnings.
+- `npm run lint` passed with existing warnings.

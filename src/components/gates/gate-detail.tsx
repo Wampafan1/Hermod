@@ -8,7 +8,10 @@ import {
   KeyDriftReviewPanel,
   type KeyDriftDetails,
 } from "@/components/gates/key-drift-review-panel";
-import { gateValidationFailureMessage } from "@/lib/gates/validation-copy";
+import {
+  gateValidationFailureMessage,
+  gateValidationWorkerProgressMessage,
+} from "@/lib/gates/validation-copy";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -692,7 +695,7 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
             {validationStageText(validation?.validationStage)}
           </span>
           <span className="mt-2 max-w-md text-[10px] font-inconsolata text-text-dim">
-            Validation runs in the Hermod worker. Keep npm run worker running in development.
+            {gateValidationWorkerProgressMessage()}
           </span>
           {validation?.pushId && !validationTakingLong && (
             <button

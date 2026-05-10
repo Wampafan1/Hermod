@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { discoverUniqueColumnCombinations } from "@/lib/gates/key-discovery";
+import { discoverGateKeyCandidates } from "@/lib/gates/gate-ucc-discovery";
 import { prepareMappedRowsForPush } from "@/lib/gates/push-executor";
 import {
   buildJobLineValueRows,
@@ -9,7 +9,7 @@ import {
 } from "./fixtures/key-drift-job-line-value";
 
 describe("Gate key discovery regression", () => {
-  it("finds job_number + 7501_line_number + line_entered_value for duplicate current keys", () => {
+  it("finds job_number + 7501_line_number + line_entered_value for duplicate current keys", async () => {
     const rows = buildJobLineValueRows();
 
     const prepared = prepareMappedRowsForPush({
@@ -36,21 +36,22 @@ describe("Gate key discovery regression", () => {
     ]);
     expect(prepared.keyDrift?.nullKeyExamples).toEqual([]);
 
-    const discovery = discoverUniqueColumnCombinations(
-      prepared.mappedRows,
-      jobLineValueHardenedKey,
-      { currentKeyColumns: jobLineValueCurrentKey }
-    );
+    const discovery = await discoverGateKeyCandidates({
+      mappedRows: prepared.mappedRows,
+      mappedColumns: jobLineValueHardenedKey,
+      currentKeyColumns: jobLineValueCurrentKey,
+      thorough: true,
+    });
 
     expect(discovery.noReliableKeyReason).toBeNull();
-    expect(discovery.candidates.some((candidate) =>
+    expect(discovery.candidateKeys.some((candidate) =>
       candidate.columns.join("|") === jobLineValueHardenedKey.join("|")
     )).toBe(true);
-    expect(discovery.stats.discoveryMode).toMatch(/DUPLICATE_DISCRIMINATOR|THOROUGH/);
+    expect(discovery.validationStats.discoveryMode).toBe("UCC");
     expect(
-      discovery.stats.searchExhaustive || discovery.candidates.length > 0
+      discovery.validationStats.searchExhaustive || discovery.candidateKeys.length > 0
     ).toBe(true);
-    expect(discovery.stats.discriminatorColumns.map((column) => column.column)).toContain(
+    expect(discovery.validationStats.discriminatorColumns.map((column) => column.column)).toContain(
       "line_entered_value"
     );
   });
