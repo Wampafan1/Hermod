@@ -1445,6 +1445,35 @@ What is intentionally not changed:
 - `RealmGate.forgeBlueprintId` remains in schema and legacy fallback.
 - No Gate key-hardening behavior was changed.
 
+## Legacy Attachment Inventory Results
+
+Inventory helper:
+
+- Added `src/lib/mjolnir/legacy-blueprint-usage-inventory.ts`.
+- The helper inventories legacy report `blueprintId`, Bifrost route `blueprintId`, and RealmGate `forgeBlueprintId` attachments.
+- It separately lists pinned report, Bifrost route, and RealmGate `blueprintVersionId` attachments.
+- Ambiguous records where both legacy and pinned IDs are present are flagged instead of mutated.
+- The helper accepts optional `tenantId` and `userId` scope inputs and performs no data migration or record updates.
+
+Inventory endpoint:
+
+- Added `GET /api/mjolnir/version-pinning/inventory`.
+- The endpoint uses `withAuth()` and defaults to the active tenant and user context.
+- Responses include safe metadata only: IDs, names, statuses, tenant ID/name, attachment IDs, version summary, and `updatedAt`.
+- Responses intentionally omit credentials, SQL, route configs, push payloads, raw steps, and analysis logs.
+
+Tests added:
+
+- `src/__tests__/mjolnir/legacy-blueprint-usage-inventory.test.ts` covers legacy report/Bifrost/RealmGate attachments, pinned attachments, ambiguous records, tenant/user scoping, the API route, and sensitive-field omission.
+
+Validation results:
+
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 119 test files and 1440 tests.
+- `npm run build`: passed with existing lint warnings.
+- `npm run lint`: passed with existing warnings.
+
 ## Open Product Decisions
 
 1. Should published blueprint parent reuse `Blueprint` with `scope = TENANT_PUBLISHED`, or use a separate `PublishedBlueprint` model?
