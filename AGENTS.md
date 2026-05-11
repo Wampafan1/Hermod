@@ -36,6 +36,17 @@ npm run db:migrate   # Run Prisma migrations
 - **Schedule math**: `calculateNextRun()` in `src/lib/schedule-utils.ts` uses date-fns-tz for timezone-aware computation. This is the highest-risk code — test edge cases thoroughly.
 - **Toast notifications**: `useToast()` hook from `src/components/toast.tsx`. Success/error feedback everywhere.
 
+## Known Canonical Helpers
+
+Before adding new logic, search for and reuse these helpers:
+
+- **UCC/key discovery**: use `analyzeFile()` from `src/lib/duckdb/file-analyzer.ts`, `discoverUCCs()` from `src/lib/ucc/discovery.ts`, and the Gate adapter `discoverGateKeyCandidates()` from `src/lib/gates/gate-ucc-discovery.ts`. Do not create another Gate key finder.
+- **Gate push prep**: use `prepareMappedRowsForPush()`, `preflightUpsertKey()`, and `validateSelectedGateKey()` for blank-row handling, current-key preflight, and manual selected-key validation.
+- **Blueprint version attach**: use `validateOptionalAttachableBlueprintVersion()` and the consumer wrappers (`validateReportBlueprintAttachment()`, `validateBifrostBlueprintAttachment()`, `validateRealmGateBlueprintAttachment()`) instead of repeating tenant/locked/scope/status checks.
+- **SQL identifiers for Gate DDL/push**: use `quoteSqlIdentifier()` and `fullSqlTableRef()` from `src/lib/gates/sql-identifiers.ts`.
+- **Worker timeouts and stale jobs**: use `src/lib/worker-guardrails.ts` for general worker stale/singleton helpers and `src/lib/gates/validation-timeouts.ts` for Gate validation heartbeat/timeout state.
+- **Retention/redaction**: use Mjolnir retention helpers from `src/lib/mjolnir/retention.ts`, especially `sanitizeBlueprintCreatePayload()`, `sanitizeForgeSteps()`, `sanitizeAnalysisLog()`, `sanitizeAfterFormatting()`, and `redactSampleValue()`.
+
 ### File Organization
 
 - `src/components/` organized by feature: `connections/`, `reports/`, `schedule/`
