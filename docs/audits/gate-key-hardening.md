@@ -1,5 +1,10 @@
 # Adaptive Gate Key Hardening
 
+## Operator Runbooks
+
+- [Gate Key Hardening Runbook](../runbooks/gate-key-hardening-runbook.md)
+- [Gate Key Hardening Test Matrix](../runbooks/gate-key-hardening-test-matrix.md)
+
 ## Phase 1 Results
 
 This patch stops RealmGate pushes from reporting false success when the active UPSERT key no longer fits the uploaded file.
