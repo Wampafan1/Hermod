@@ -1510,6 +1510,28 @@ Validation results:
 - `npm run build`: passed with existing lint warnings.
 - `npm run lint`: passed with existing warnings.
 
+## Cross-Consumer Pinned Execution Acceptance Results
+
+Acceptance coverage:
+
+- Added `src/__tests__/mjolnir/pinned-execution-consumers.test.ts` to verify consistent pinned BlueprintVersion behavior across the three production consumers.
+- Report execution with `blueprintVersionId` loads immutable `BlueprintVersion.steps`, records `PINNED_VERSION`, preserves `stepsHash`, and does not load mutable `Blueprint.steps`.
+- Report legacy fallback with `blueprintId` still records `MUTABLE_LEGACY` and keeps the mutable execution warning.
+- Bifrost execution with `blueprintVersionId` loads immutable `BlueprintVersion.steps`, records `PINNED_VERSION`, preserves `stepsHash`, and does not load mutable `Blueprint.steps`.
+- Bifrost legacy fallback with `blueprintId` still records `MUTABLE_LEGACY`.
+- Bifrost streaming-incompatible pinned versions fail before chunk extraction or execution.
+- RealmGate attachment validation keeps `blueprintVersionId` version-first behavior and legacy `forgeBlueprintId` fallback.
+- RealmGate push acceptance confirms current Gate KEY_DRIFT behavior still works when pinned version metadata is present; the existing Gate push executor still does not invent a Forge transform path.
+
+Validation results:
+
+- Focused cross-consumer suite passed: 1 test file and 9 tests.
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 121 test files and 1457 tests.
+- `npm run build`: passed with existing lint warnings.
+- `npm run lint`: passed with existing warnings.
+
 ## Open Product Decisions
 
 1. Should published blueprint parent reuse `Blueprint` with `scope = TENANT_PUBLISHED`, or use a separate `PublishedBlueprint` model?
