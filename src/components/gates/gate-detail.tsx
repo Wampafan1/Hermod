@@ -16,6 +16,11 @@ import {
   gateValidationFailureMessage,
   gateValidationWorkerProgressMessage,
 } from "@/lib/gates/validation-copy";
+import {
+  buildGateSummary,
+  type GateSummary,
+  type GateSummaryPush,
+} from "@/lib/gates/gate-summary";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -189,6 +194,70 @@ function validationStageText(stage?: string | null): string {
     default:
       return "Validating schema...";
   }
+}
+
+function summaryToneClasses(tone: GateSummary["tone"]): string {
+  switch (tone) {
+    case "success":
+      return "border-emerald-700/20 bg-emerald-900/[0.04] text-emerald-400";
+    case "info":
+      return "border-frost/20 bg-frost/[0.04] text-frost";
+    case "warning":
+      return "border-ember/30 bg-ember/[0.04] text-gold-bright";
+    case "danger":
+      return "border-red-700/25 bg-red-900/[0.05] text-red-400";
+    default:
+      return "border-[rgba(201,147,58,0.1)] bg-void/50 text-text";
+  }
+}
+
+function ExplainThisGateCard({ summary }: { summary: GateSummary }) {
+  const facts = [
+    { label: "Target", value: summary.target },
+    { label: "Current key", value: summary.currentKey },
+    { label: "Merge strategy", value: summary.mergeStrategy },
+    { label: "Latest push", value: summary.latestPushResult },
+  ];
+
+  return (
+    <section className="card-norse p-5 space-y-4" aria-label="Explain This Gate">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="label-norse text-[9px]">Explain This Gate</p>
+          <h2 className="heading-norse text-sm mt-1">Plain-language contract</h2>
+        </div>
+        <div className={`border px-3 py-2 font-inconsolata text-[10px] uppercase tracking-[0.18em] ${summaryToneClasses(summary.tone)}`}>
+          {summary.tone}
+        </div>
+      </div>
+
+      <p className="font-inconsolata text-text-dim text-xs leading-7 tracking-[0.04em]">
+        {summary.overview}
+      </p>
+
+      <div className="grid grid-cols-1 gap-px bg-[rgba(201,147,58,0.08)] md:grid-cols-2">
+        {facts.map((fact) => (
+          <div key={fact.label} className="bg-deep/95 px-3 py-3">
+            <p className="font-inconsolata text-[9px] uppercase tracking-[0.2em] text-text-dim">
+              {fact.label}
+            </p>
+            <p className="mt-2 break-words font-inconsolata text-xs leading-relaxed text-text">
+              {fact.value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className={`border px-3 py-3 ${summaryToneClasses(summary.tone)}`}>
+        <p className="font-inconsolata text-[9px] uppercase tracking-[0.2em] text-text-dim">
+          Recommended next action
+        </p>
+        <p className="mt-2 font-inconsolata text-xs leading-relaxed">
+          {summary.recommendedNextAction}
+        </p>
+      </div>
+    </section>
+  );
 }
 
 // ─── Main Component ─────────────────────────────────
@@ -730,6 +799,24 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
       validationTimeoutAt: validation.validationTimeoutAt,
     };
   })();
+  const gateSummary = buildGateSummary({
+    targetSchema: gate.targetSchema,
+    targetTable: gate.targetTable,
+    mergeStrategy: gate.mergeStrategy,
+    primaryKeyColumns: gate.primaryKeyColumns,
+    latestPush: missionControlPush
+      ? ({
+          status: missionControlPush.status,
+          rowCount: missionControlPush.rowCount,
+          rowsInserted: missionControlPush.rowsInserted,
+          rowsUpdated: missionControlPush.rowsUpdated,
+          rowsErrored: missionControlPush.rowsErrored,
+          blankRowsSkipped: missionControlPush.blankRowsSkipped,
+          errorMessage: missionControlPush.errorMessage,
+          keyDrift: missionControlPush.keyDrift as GateSummaryPush["keyDrift"],
+        } satisfies GateSummaryPush)
+      : null,
+  });
 
   // ── Render ────────────────────────────────────────
 
@@ -781,6 +868,8 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
           </button>
         </div>
       </div>
+
+      <ExplainThisGateCard summary={gateSummary} />
 
       <GatePushMissionControl push={missionControlPush} now={now} />
 
