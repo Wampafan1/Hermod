@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { serializeMssqlRun } from "@/lib/backups/mssql/api-helpers";
+import { backupWorkerStuckMessage } from "@/lib/system/worker-health";
 
 function extractId(url: string): string | null {
   return url.split("/backups/mssql/policies/")[1]?.split("/")[0]?.split("?")[0] ?? null;
@@ -25,7 +26,7 @@ export const GET = withAuth(async (req, session) => {
     },
     data: {
       status: "FAILED",
-      error: "Timed out - worker crashed or hung before completion",
+      error: backupWorkerStuckMessage(),
       completedAt: new Date(),
     },
   });

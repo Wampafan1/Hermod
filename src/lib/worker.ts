@@ -35,6 +35,10 @@ import {
   STALE_POSTGRES_RESTORE_JOB_MS,
   STALE_ROUTE_LOG_MS,
 } from "./worker-guardrails";
+import {
+  backupWorkerStuckMessage,
+  scheduledWorkerStuckMessage,
+} from "./system/worker-health";
 
 const prisma = new PrismaClient();
 const POLL_INTERVAL = 60_000; // 60 seconds
@@ -70,7 +74,7 @@ async function main() {
     },
     data: {
       status: "failed",
-      error: "Timed out — process crashed or hung before completion",
+      error: scheduledWorkerStuckMessage(),
       completedAt: new Date(),
     },
   });
@@ -86,7 +90,7 @@ async function main() {
     },
     data: {
       status: "FAILED",
-      error: "Timed out - worker crashed or hung before completion",
+      error: backupWorkerStuckMessage(),
       completedAt: new Date(),
     },
   });
@@ -101,7 +105,7 @@ async function main() {
     },
     data: {
       status: "FAILED",
-      error: "Timed out - worker crashed or hung before completion",
+      error: backupWorkerStuckMessage(),
       completedAt: new Date(),
     },
   });
@@ -116,7 +120,7 @@ async function main() {
     },
     data: {
       status: "FAILED",
-      error: "Timed out - worker crashed or hung before completion",
+      error: backupWorkerStuckMessage(),
       completedAt: new Date(),
     },
   });
