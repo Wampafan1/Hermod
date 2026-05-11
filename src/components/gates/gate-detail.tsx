@@ -9,6 +9,10 @@ import {
   type KeyDriftDetails,
 } from "@/components/gates/key-drift-review-panel";
 import {
+  GatePushMissionControl,
+  type MissionControlPush,
+} from "@/components/gates/gate-push-mission-control";
+import {
   gateValidationFailureMessage,
   gateValidationWorkerProgressMessage,
 } from "@/lib/gates/validation-copy";
@@ -31,6 +35,10 @@ interface GatePush {
   schemaDiff: unknown | null;
   createdAt: string;
   completedAt: string | null;
+  validationStage?: string | null;
+  validationStartedAt?: string | null;
+  validationHeartbeatAt?: string | null;
+  validationTimeoutAt?: string | null;
 }
 
 interface PushExecutionResult {
@@ -619,6 +627,109 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
       validationSubmittedAt != null &&
       now - validationSubmittedAt > 45_000
   );
+  const matchingValidationPush =
+    validation?.pushId != null
+      ? gate.pushes.find((push) => push.id === validation.pushId) ?? null
+      : null;
+  const missionControlPush: MissionControlPush | null = (() => {
+    if (!validation?.pushId) return latestPush;
+
+    const createdAt =
+      matchingValidationPush?.createdAt ??
+      (validationSubmittedAt != null
+        ? new Date(validationSubmittedAt).toISOString()
+        : new Date(now).toISOString());
+    const completedAt =
+      matchingValidationPush?.completedAt ??
+      (pushResult && ["SUCCESS", "PARTIAL", "FAILED"].includes(pushResult.status)
+        ? new Date(now).toISOString()
+        : null);
+
+    if (pushResult) {
+      return {
+        id: validation.pushId,
+        fileName: validation.fileName ?? matchingValidationPush?.fileName ?? "Staged upload",
+        fileSize: matchingValidationPush?.fileSize ?? null,
+        status: pushResult.status,
+        rowCount: pushResult.rowCount,
+        rowsInserted: pushResult.rowsInserted,
+        rowsUpdated: pushResult.rowsUpdated,
+        rowsErrored: pushResult.rowsErrored,
+        blankRowsSkipped: pushResult.blankRowsSkipped,
+        keyDrift: pushResult.keyDrift ?? validation.keyDrift ?? matchingValidationPush?.keyDrift ?? null,
+        duration: pushResult.duration,
+        errorMessage: pushResult.errorMessage ?? pushResult.error ?? error ?? matchingValidationPush?.errorMessage ?? null,
+        createdAt,
+        completedAt,
+        validationStage: validation.validationStage,
+        validationStartedAt: validation.validationStartedAt,
+        validationHeartbeatAt: validation.validationHeartbeatAt,
+        validationTimeoutAt: validation.validationTimeoutAt,
+      };
+    }
+
+    if (pushState === "pushing") {
+      return {
+        ...(matchingValidationPush ?? {}),
+        id: validation.pushId,
+        fileName: validation.fileName ?? matchingValidationPush?.fileName ?? "Staged upload",
+        status: "PUSHING",
+        rowCount: validation.rowCount ?? matchingValidationPush?.rowCount ?? null,
+        blankRowsSkipped: validation.blankRowsSkipped ?? matchingValidationPush?.blankRowsSkipped ?? null,
+        keyDrift: validation.keyDrift ?? matchingValidationPush?.keyDrift ?? null,
+        createdAt,
+        completedAt: null,
+        validationStage: validation.validationStage,
+        validationStartedAt: validation.validationStartedAt,
+        validationHeartbeatAt: validation.validationHeartbeatAt,
+        validationTimeoutAt: validation.validationTimeoutAt,
+      };
+    }
+
+    if (pushState === "failed") {
+      return {
+        ...(matchingValidationPush ?? {}),
+        id: validation.pushId,
+        fileName: validation.fileName ?? matchingValidationPush?.fileName ?? "Staged upload",
+        status: "FAILED",
+        rowCount: validation.rowCount ?? matchingValidationPush?.rowCount ?? null,
+        rowsInserted: matchingValidationPush?.rowsInserted ?? null,
+        rowsUpdated: matchingValidationPush?.rowsUpdated ?? null,
+        rowsErrored: matchingValidationPush?.rowsErrored ?? null,
+        blankRowsSkipped: validation.blankRowsSkipped ?? matchingValidationPush?.blankRowsSkipped ?? null,
+        keyDrift: validation.keyDrift ?? matchingValidationPush?.keyDrift ?? null,
+        duration: matchingValidationPush?.duration ?? null,
+        errorMessage: error ?? validation.errorMessage ?? validation.error ?? matchingValidationPush?.errorMessage ?? null,
+        createdAt,
+        completedAt: matchingValidationPush?.completedAt ?? new Date(now).toISOString(),
+        validationStage: validation.validationStage,
+        validationStartedAt: validation.validationStartedAt,
+        validationHeartbeatAt: validation.validationHeartbeatAt,
+        validationTimeoutAt: validation.validationTimeoutAt,
+      };
+    }
+
+    return {
+      ...(matchingValidationPush ?? {}),
+      id: validation.pushId,
+      fileName: validation.fileName ?? matchingValidationPush?.fileName ?? "Staged upload",
+      status: validation.status,
+      rowCount: validation.rowCount ?? matchingValidationPush?.rowCount ?? null,
+      rowsInserted: matchingValidationPush?.rowsInserted ?? null,
+      rowsUpdated: matchingValidationPush?.rowsUpdated ?? null,
+      rowsErrored: matchingValidationPush?.rowsErrored ?? null,
+      blankRowsSkipped: validation.blankRowsSkipped ?? matchingValidationPush?.blankRowsSkipped ?? null,
+      keyDrift: validation.keyDrift ?? matchingValidationPush?.keyDrift ?? null,
+      duration: matchingValidationPush?.duration ?? null,
+      errorMessage: validation.errorMessage ?? validation.error ?? matchingValidationPush?.errorMessage ?? null,
+      createdAt,
+      completedAt: matchingValidationPush?.completedAt ?? null,
+      validationStage: validation.validationStage,
+      validationStartedAt: validation.validationStartedAt,
+      validationHeartbeatAt: validation.validationHeartbeatAt,
+      validationTimeoutAt: validation.validationTimeoutAt,
+    };
+  })();
 
   // ── Render ────────────────────────────────────────
 
@@ -670,6 +781,8 @@ export function GateDetail({ gate: initialGate, initialNow }: { gate: GateData; 
           </button>
         </div>
       </div>
+
+      <GatePushMissionControl push={missionControlPush} now={now} />
 
       {/* Drop zone / Push flow */}
       {pushState === "idle" && (
