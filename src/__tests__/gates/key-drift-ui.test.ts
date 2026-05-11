@@ -275,6 +275,95 @@ describe("Gate key drift UI helpers", () => {
     expect(JSON.stringify(preview)).not.toContain("rawRows");
   });
 
+  it("keeps duplicate key drift on the key hardening DDL approval path", () => {
+    const duplicateDrift: KeyDriftDetails = {
+      ...baseKeyDrift,
+      driftType: "DUPLICATE_AND_BLANK_KEY",
+      duplicateExamples: [
+        {
+          keyValues: { job_number: "SNGB0097414", line_number: "0001" },
+          rowIndexes: [1144, 1145],
+        },
+      ],
+      nullKeyExamples: [
+        {
+          rowIndex: 5491,
+          keyValues: {
+            job_number: "",
+            line_number: "",
+            line_value: "22901728",
+          },
+          missingColumns: ["job_number", "line_number"],
+        },
+      ],
+    };
+    const preview = {
+      selectedKey: ["job_number", "line_number", "line_value"],
+      ddl: ['ALTER TABLE "public"."orders" ADD CONSTRAINT "x" UNIQUE ("job_number", "line_number", "line_value");'],
+      warnings: ["Review incomplete rows."],
+      blocked: false,
+      requiresConfirmation: true,
+      requiresIncompleteRowApproval: true,
+      manualValidation: {
+        ok: false,
+        nullCount: 1,
+        duplicateCount: 0,
+        duplicateExamples: [],
+        nullKeyExamples: [
+          {
+            rowIndex: 5491,
+            keyValues: {
+              job_number: "",
+              line_number: "",
+              line_value: "22901728",
+            },
+            missingColumns: ["job_number", "line_number"],
+          },
+        ],
+      },
+    };
+
+    expect(isBlankCurrentKeyReview(duplicateDrift)).toBe(false);
+    expect(
+      canApproveKeyHardening({
+        selectedKey: preview.selectedKey,
+        ddlPreview: preview,
+        approvalChecked: false,
+        incompleteRowsChecked: true,
+        loading: false,
+      })
+    ).toBe(false);
+    expect(
+      canApproveKeyHardening({
+        selectedKey: preview.selectedKey,
+        ddlPreview: preview,
+        approvalChecked: true,
+        incompleteRowsChecked: false,
+        loading: false,
+      })
+    ).toBe(false);
+    expect(
+      canApproveKeyHardening({
+        selectedKey: preview.selectedKey,
+        ddlPreview: preview,
+        approvalChecked: true,
+        incompleteRowsChecked: true,
+        loading: false,
+      })
+    ).toBe(true);
+    expect(
+      buildResolvePayload(
+        preview.selectedKey,
+        preview.ddl,
+        "EXCLUDE_REVIEWED_ROWS"
+      )
+    ).toMatchObject({
+      action: "APPROVE_KEY_HARDENING",
+      confirmedDdl: preview.ddl,
+      incompleteRowAction: "EXCLUDE_REVIEWED_ROWS",
+    });
+  });
+
   it("renders no reliable key and blank row messages", () => {
     expect(
       getNoReliableKeyMessage({

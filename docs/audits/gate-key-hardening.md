@@ -549,3 +549,37 @@ Blank-only current-key failures are now treated differently from duplicate key d
 - `npm run test` passed: 117 files, 1431 tests.
 - `npm run build` passed with existing Next/React lint warnings.
 - `npm run lint` passed with existing warnings.
+
+## Real-World Gate Acceptance Results
+
+The final regression pass locks the two LOVES upload paths that exposed the key-hardening edge cases.
+
+### 2025 Duplicate-Key Hardening Path
+
+- A repeat upload with duplicate `job_number + 7501_line_number` groups enters KEY_DRIFT.
+- UCC candidate discovery surfaces `job_number + 7501_line_number + line_entered_value` with `source: "UCC"`.
+- Nullable verified candidates remain visible with review-required metadata instead of producing `candidateKeys: []` or "No reliable key found."
+- DDL preview is available for the verified hardened key.
+- Approval requires both destination-key DDL confirmation and `incompleteRowAction: "EXCLUDE_REVIEWED_ROWS"` when incomplete rows exist.
+- After approval, Hermod executes DDL, updates `RealmGate.primaryKeyColumns`, stores `keyConstraintName`, appends `keyHistory`, and reruns the push excluding only the reviewed incomplete row indexes.
+
+### 2026 Blank-Current-Key Row Review Path
+
+- A repeat upload where the persisted key `job_number + 7501_line_number + line_entered_value` has no duplicate complete key groups but has incomplete nonblank rows enters `driftType: "BLANK_KEY"`.
+- The current key remains the primary path with `recommendedAction: "REVIEW_INCOMPLETE_ROWS"`.
+- Users approve `APPROVE_INCOMPLETE_ROW_EXCLUSION`, which excludes only reviewed incomplete row indexes and reruns the push.
+- No DDL is generated or executed for the keep-current-key path.
+- `RealmGate.primaryKeyColumns`, `keyConstraintName`, and key replacement history are not changed.
+
+### Tests Added
+
+- `src/__tests__/gates/gate-key-hardening-real-world-acceptance.test.ts`
+- Updated `src/__tests__/gates/key-drift-ui.test.ts`
+
+### Validation Results
+
+- `npx prisma validate` passed.
+- `npx prisma generate` passed after applying the documented Windows Prisma locked-DLL workaround.
+- `npm run test` passed: 118 files, 1434 tests.
+- `npm run build` passed with existing Next/React lint warnings.
+- `npm run lint` passed with existing warnings.
