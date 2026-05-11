@@ -1474,6 +1474,42 @@ Validation results:
 - `npm run build`: passed with existing lint warnings.
 - `npm run lint`: passed with existing warnings.
 
+## Backfill Dry Run Planner Results
+
+Planner helper:
+
+- Added `src/lib/mjolnir/version-pinning-backfill-plan.ts`.
+- The helper builds a dry-run plan for legacy report `blueprintId`, Bifrost route `blueprintId`, and RealmGate `forgeBlueprintId` attachments.
+- The planner reuses the legacy attachment inventory to count pinned no-op records and existing ambiguous dual-ID records.
+- The planner computes safe `stepsHash` metadata with `calculateBlueprintStepsHash()` but does not call `publishBlueprintToTenant()` or `createLockedBlueprintVersion()`.
+- No database records are created, updated, backfilled, or pinned by this helper.
+
+Plan buckets:
+
+- `safeToAutoPin`: legacy consumers where a locked tenant-published `BlueprintVersion` already exists and could be attached in a later approved migration.
+- `needsPublish`: valid single-tenant legacy sources that would need publish/backfill version creation before pinning.
+- `ambiguous`: records with both legacy and pinned IDs, sources attached across multiple tenants, or multiple candidate tenant-published parents.
+- `blocked`: missing sources, archived sources, invalid statuses, owner mismatches, tenant mismatches, or RealmGate Forge sources without a version snapshot.
+
+Inventory endpoint:
+
+- Added `GET /api/mjolnir/version-pinning/backfill-plan`.
+- The endpoint uses `withAuth()` and scopes the dry-run plan to the active tenant and user.
+- Responses include safe metadata only: consumer IDs/names/statuses, legacy IDs, target version IDs, version hashes, and reasons.
+- Responses intentionally omit credentials, SQL, route configs, gate mappings, push payloads, raw steps, and analysis logs.
+
+Tests added:
+
+- `src/__tests__/mjolnir/version-pinning-backfill-plan.test.ts` covers safe report auto-pin planning, Bifrost publish planning, RealmGate Forge publish planning, multi-tenant ambiguity, missing/archived/invalid/owner-mismatch blocks, already pinned no-op counts, API routing, and sensitive-field omission.
+
+Validation results:
+
+- `npx prisma validate`: passed.
+- `npx prisma generate`: passed.
+- `npm run test`: passed, 120 test files and 1448 tests.
+- `npm run build`: passed with existing lint warnings.
+- `npm run lint`: passed with existing warnings.
+
 ## Open Product Decisions
 
 1. Should published blueprint parent reuse `Blueprint` with `scope = TENANT_PUBLISHED`, or use a separate `PublishedBlueprint` model?
