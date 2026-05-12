@@ -1,6 +1,8 @@
 import type { LlmProvider, LlmProviderConfig } from "./types";
 import { OpenAICompatibleProvider } from "./providers/openai-compatible";
 import { AnthropicProvider } from "./providers/anthropic";
+import { AntonProvider } from "./providers/anton";
+import { hasAntonConfig } from "@/lib/anton/client";
 
 // Re-export all types
 export type {
@@ -14,10 +16,21 @@ export type {
 // ─── Factory ────────────────────────────────────────
 
 export function getLlmProvider(config?: Partial<LlmProviderConfig>): LlmProvider {
-  const provider = config?.provider ?? process.env.LLM_PROVIDER;
-  const model = config?.model ?? process.env.LLM_MODEL;
+  const provider =
+    config?.provider ??
+    process.env.LLM_PROVIDER ??
+    (hasAntonConfig() ? "anton" : undefined);
+  const model =
+    config?.model ??
+    process.env.LLM_MODEL ??
+    (provider === "anton" ? process.env.ANTON_MODEL ?? "anton" : undefined);
   const apiKey = config?.apiKey ?? process.env.LLM_API_KEY;
-  const baseUrl = config?.baseUrl ?? process.env.LLM_BASE_URL ?? undefined;
+  const baseUrl =
+    config?.baseUrl ??
+    (provider === "anton"
+      ? process.env.ANTON_API_BASE_URL ?? process.env.LLM_BASE_URL
+      : process.env.LLM_BASE_URL) ??
+    undefined;
 
   if (!provider) {
     throw new Error(
@@ -29,6 +42,11 @@ export function getLlmProvider(config?: Partial<LlmProviderConfig>): LlmProvider
       "LLM model is required. Set LLM_MODEL env var or pass config.model"
     );
   }
+
+  if (provider === "anton") {
+    return new AntonProvider({ model, baseUrl });
+  }
+
   if (!apiKey) {
     throw new Error(
       "LLM API key is required. Set LLM_API_KEY env var or pass config.apiKey"

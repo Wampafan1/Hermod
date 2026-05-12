@@ -1,13 +1,15 @@
 /**
  * AI Router — Hermod AI inference layer.
  *
- * Primary: local Ollama GPU (gemma4:31b, always hot, free tokens)
- * Fallback: Anthropic API (claude-sonnet-4-20250514, paid per-token)
+ * Primary when configured: Anton tenant AI.
+ * Fallback when Anton is not configured: local Ollama GPU, then Anthropic API.
  *
  * CRITICAL: Always set `think: false` for structured/deterministic tasks.
  * Models have thinking mode enabled by default — without this flag they
  * burn tokens on internal reasoning and return empty content.
  */
+
+import { fetchAntonJson, hasAntonConfig } from "@/lib/anton/client";
 
 export interface AIRequest {
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
@@ -21,7 +23,7 @@ export interface AIResponse {
   content: string;
   thinking?: string;
   model: string;
-  provider: "ollama" | "anthropic";
+  provider: "anton" | "ollama" | "anthropic";
   durationMs: number;
 }
 
@@ -34,6 +36,78 @@ const OLLAMA_TIMEOUT = 0; // 0 = no timeout (model runs to completion)
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
 const ANTHROPIC_TIMEOUT = 60_000;
+
+const ANTON_TIMEOUT = 60_000;
+
+interface AntonChatCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+  model?: string;
+}
+
+function shouldUseAnton(): boolean {
+  return (
+    hasAntonConfig() ||
+    process.env.LLM_PROVIDER === "anton" ||
+    Boolean(process.env.ANTON_API_KEY || process.env.ANTON_API_BASE_URL)
+  );
+}
+
+function getAntonModel(): string {
+  return process.env.ANTON_MODEL || process.env.LLM_MODEL || OLLAMA_MODEL;
+}
+
+// ─── Anton ─────────────────────────────────────────
+
+async function callAnton(request: AIRequest): Promise<AIResponse> {
+  const timeout = request.timeout ?? ANTON_TIMEOUT;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  const start = Date.now();
+  const model = getAntonModel();
+  const messages = prepareMessages(request);
+
+  try {
+    const data = await fetchAntonJson<AntonChatCompletionResponse>(
+      "/v1/chat/completions",
+      {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: request.temperature ?? 0,
+          response_format:
+            request.responseFormat === "json"
+              ? { type: "json_object" }
+              : undefined,
+        }),
+      }
+    );
+
+    const content = data.choices?.[0]?.message?.content ?? "";
+    if (!content) {
+      throw new Error("Anton returned no content in response");
+    }
+
+    return {
+      content,
+      model: data.model ?? model,
+      provider: "anton",
+      durationMs: Date.now() - start,
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`Anton request timed out after ${timeout}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // ─── Ollama ─────────────────────────────────────────
 
@@ -173,12 +247,16 @@ function prepareMessages(
 /**
  * Run an AI inference request.
  *
- * Tries local Ollama first (free, fast). Falls back to Anthropic API
- * if Ollama is unreachable or errors.
+ * Uses Anton when configured. Without Anton config, tries local Ollama first
+ * and falls back to Anthropic if Ollama is unreachable or errors.
  *
- * @throws Only if BOTH providers fail
+ * @throws If Anton is configured and fails, or if both fallback providers fail.
  */
 export async function runAI(request: AIRequest): Promise<AIResponse> {
+  if (shouldUseAnton()) {
+    return callAnton(request);
+  }
+
   // Try Ollama first
   try {
     return await callOllama(request);

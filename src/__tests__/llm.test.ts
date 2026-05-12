@@ -17,6 +17,7 @@ afterEach(() => {
 
 import { OpenAICompatibleProvider } from "@/lib/llm/providers/openai-compatible";
 import { AnthropicProvider } from "@/lib/llm/providers/anthropic";
+import { AntonProvider } from "@/lib/llm/providers/anton";
 import { getLlmProvider } from "@/lib/llm";
 
 // ─── Helpers ────────────────────────────────────────
@@ -40,6 +41,12 @@ const anthropicSuccess = {
   content: [{ type: "text", text: "Hello from Claude" }],
   usage: { input_tokens: 12, output_tokens: 8 },
   model: "claude-sonnet-4-20250514",
+};
+
+const antonSuccess = {
+  choices: [{ message: { content: "Hello from Anton" } }],
+  usage: { prompt_tokens: 14, completion_tokens: 6 },
+  model: "anton-local",
 };
 
 const simpleRequest = {
@@ -355,6 +362,74 @@ describe("AnthropicProvider", () => {
   });
 });
 
+// ─── Anton Provider ─────────────────────────────────
+
+describe("AntonProvider", () => {
+  it("sends ANTON_API_KEY unchanged as a Bearer token", async () => {
+    vi.stubEnv("ANTON_API_BASE_URL", "https://anton.test");
+    vi.stubEnv("ANTON_API_KEY", "client_id:client_secret");
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(antonSuccess));
+
+    const provider = new AntonProvider({
+      model: "anton-local",
+      baseUrl: "https://anton.test",
+    });
+
+    const result = await provider.chat({
+      messages: [{ role: "user", content: "Hi" }],
+    });
+
+    expect(result.content).toBe("Hello from Anton");
+    expect(result.usage).toEqual({ inputTokens: 14, outputTokens: 6 });
+    expect(result.model).toBe("anton-local");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://anton.test/v1/chat/completions");
+    expect(opts.headers.Authorization).toBe("Bearer client_id:client_secret");
+    expect(opts.headers.Authorization).not.toMatch(/^Basic /);
+
+    const body = JSON.parse(opts.body);
+    expect(body.model).toBe("anton-local");
+    expect(body.messages).toEqual([{ role: "user", content: "Hi" }]);
+  });
+
+  it("passes response_format for JSON mode", async () => {
+    vi.stubEnv("ANTON_API_BASE_URL", "https://anton.test");
+    vi.stubEnv("ANTON_API_KEY", "client_id:client_secret");
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(antonSuccess));
+
+    const provider = new AntonProvider({ model: "anton-local" });
+    await provider.chat({
+      messages: [{ role: "user", content: "Hi" }],
+      responseFormat: { type: "json_object" },
+    });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.response_format).toEqual({ type: "json_object" });
+  });
+
+  it("surfaces Anton 401 and 403 errors safely", async () => {
+    vi.stubEnv("ANTON_API_BASE_URL", "https://anton.test");
+    vi.stubEnv("ANTON_API_KEY", "client_id:client_secret");
+    mockFetch.mockResolvedValueOnce(mockJsonResponse({ error: "bad" }, 401));
+
+    const provider = new AntonProvider({ model: "anton-local" });
+    await expect(
+      provider.chat({ messages: [{ role: "user", content: "Hi" }] })
+    ).rejects.toThrow("ANTON_API_KEY is missing or invalid");
+
+    mockFetch.mockResolvedValueOnce(mockJsonResponse({ error: "forbidden" }, 403));
+    await expect(
+      provider.chat({ messages: [{ role: "user", content: "Hi" }] })
+    ).rejects.toThrow("lacks permission");
+  });
+
+  it("returns provider/model as name", () => {
+    const provider = new AntonProvider({ model: "anton-local" });
+    expect(provider.name).toBe("anton/anton-local");
+  });
+});
+
 // ─── Factory (getLlmProvider) ───────────────────────
 
 describe("getLlmProvider", () => {
@@ -374,6 +449,25 @@ describe("getLlmProvider", () => {
 
     const provider = getLlmProvider();
     expect(provider.name).toBe("anthropic/claude-sonnet-4-20250514");
+  });
+
+  it("creates Anton provider without LLM_API_KEY", () => {
+    vi.stubEnv("LLM_PROVIDER", "anton");
+    vi.stubEnv("ANTON_MODEL", "anton-local");
+    vi.stubEnv("ANTON_API_BASE_URL", "https://anton.test");
+    vi.stubEnv("ANTON_API_KEY", "client_id:client_secret");
+
+    const provider = getLlmProvider();
+    expect(provider.name).toBe("anton/anton-local");
+  });
+
+  it("defaults to Anton when Anton env is configured", () => {
+    vi.stubEnv("ANTON_MODEL", "anton-local");
+    vi.stubEnv("ANTON_API_BASE_URL", "https://anton.test");
+    vi.stubEnv("ANTON_API_KEY", "client_id:client_secret");
+
+    const provider = getLlmProvider();
+    expect(provider.name).toBe("anton/anton-local");
   });
 
   it("creates xai provider from env vars", () => {
