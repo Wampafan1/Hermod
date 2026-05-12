@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { OdinCommandPalette } from "@/components/odin-command-palette";
 
 const PATH_LABELS: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -53,8 +54,11 @@ export function Topbar() {
           </>
         )}
       </div>
-      <div className="text-text-dim text-xs tracking-[0.08em] font-space-grotesk">
-        {time}
+      <div className="flex items-center gap-3">
+        <OdinCommandPalette />
+        <div className="text-text-dim text-xs tracking-[0.08em] font-space-grotesk">
+          {time}
+        </div>
       </div>
     </header>
   );
