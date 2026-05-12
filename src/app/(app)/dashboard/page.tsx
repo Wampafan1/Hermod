@@ -5,6 +5,7 @@ import { RouteHealthGrid } from "@/components/dashboard/route-health-grid";
 import { UpcomingRuns } from "@/components/dashboard/upcoming-runs";
 import { ExecutionTimeline } from "@/components/dashboard/execution-timeline";
 import { HelheimStrip } from "@/components/dashboard/helheim-strip";
+import { BackupCoverageWidget } from "@/components/dashboard/backup-coverage-widget";
 import { RealmBanner } from "@/components/realm-banner";
 import { DAILY_GREETINGS } from "@/lib/realm-config";
 
@@ -82,7 +83,12 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {/* [E] Helheim Summary Strip */}
+      {/* [E] Niflheim Backup Coverage */}
+      <div className="animate-fade-up" style={{ animationDelay: "0.18s" }}>
+        <BackupCoverageWidget coverage={data.backupCoverage} />
+      </div>
+
+      {/* [F] Helheim Summary Strip */}
       <div className="animate-fade-up" style={{ animationDelay: "0.2s" }}>
         <h2 className="label-norse text-gold mb-2">Helheim — Dead Letter Queue</h2>
         <HelheimStrip helheim={data.helheim} />

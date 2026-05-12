@@ -1,4 +1,8 @@
 import { prisma } from "@/lib/db";
+import {
+  buildBackupCoverageDashboard,
+  type BackupCoverageDashboard,
+} from "@/lib/backups/dashboard-coverage";
 
 export interface DashboardStats {
   activeRoutes: number;
@@ -63,6 +67,7 @@ export interface DashboardData {
   upcomingRuns: DashboardUpcoming[];
   recentRuns: DashboardRecentRun[];
   helheim: DashboardHelheim;
+  backupCoverage: BackupCoverageDashboard;
   totalRunCount: number;
 }
 
@@ -83,6 +88,7 @@ export async function getDashboardData(userId: string, tenantId: string): Promis
     helheimByRoute,
     upcomingRuns,
     recentRuns,
+    backupPolicies,
     totalRunCount,
   ] = await Promise.all([
     // [A] Active routes count
@@ -167,6 +173,32 @@ export async function getDashboardData(userId: string, tenantId: string): Promis
       include: { route: { select: { name: true } } },
     }),
 
+    // [F] Niflheim backup coverage snapshot
+    prisma.postgresBackupPolicy.findMany({
+      where: { userId, tenantId },
+      orderBy: { name: "asc" },
+      include: {
+        sourceConnection: {
+          select: { name: true, type: true },
+        },
+        storageTarget: {
+          select: { name: true, provider: true, status: true },
+        },
+        runs: {
+          orderBy: { startedAt: "desc" },
+          take: 10,
+          select: {
+            type: true,
+            status: true,
+            triggeredBy: true,
+            startedAt: true,
+            completedAt: true,
+            error: true,
+          },
+        },
+      },
+    }),
+
     // [D] Total run count for pagination
     prisma.routeLog.count({
       where: { route: { userId, tenantId } },
@@ -247,6 +279,29 @@ export async function getDashboardData(userId: string, tenantId: string): Promis
       recovered,
       recoveryRate,
     },
+    backupCoverage: buildBackupCoverageDashboard(
+      backupPolicies.map((policy) => ({
+        id: policy.id,
+        name: policy.name,
+        enabled: policy.enabled,
+        status: policy.status,
+        fullFrequency: policy.fullFrequency,
+        walFrequency: policy.walFrequency,
+        walEnabled: policy.walEnabled,
+        lastSuccessfulFullAt: policy.lastSuccessfulFullAt,
+        lastSuccessfulWalAt: policy.lastSuccessfulWalAt,
+        nextFullRunAt: policy.nextFullRunAt,
+        nextWalRunAt: policy.nextWalRunAt,
+        databaseSelectionMode: policy.databaseSelectionMode,
+        selectedDatabases: policy.selectedDatabases,
+        databasePattern: policy.databasePattern,
+        sourceConnection: policy.sourceConnection,
+        storageTarget: policy.storageTarget,
+        latestRun: policy.runs[0] ?? null,
+        latestFailedRun: policy.runs.find((run) => run.status === "FAILED") ?? null,
+      })),
+      now
+    ),
     totalRunCount,
   };
 }

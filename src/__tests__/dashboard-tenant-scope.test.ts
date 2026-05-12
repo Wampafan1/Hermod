@@ -9,6 +9,7 @@ const {
   mockRouteLogFindMany,
   mockHelheimCount,
   mockHelheimGroupBy,
+  mockPostgresBackupPolicyFindMany,
 } = vi.hoisted(() => ({
   mockBifrostRouteCount: vi.fn(),
   mockBifrostRouteFindMany: vi.fn(),
@@ -18,6 +19,7 @@ const {
   mockRouteLogFindMany: vi.fn(),
   mockHelheimCount: vi.fn(),
   mockHelheimGroupBy: vi.fn(),
+  mockPostgresBackupPolicyFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -36,6 +38,9 @@ vi.mock("@/lib/db", () => ({
       count: mockHelheimCount,
       groupBy: mockHelheimGroupBy,
     },
+    postgresBackupPolicy: {
+      findMany: mockPostgresBackupPolicyFindMany,
+    },
   },
 }));
 
@@ -50,6 +55,7 @@ describe("dashboard tenant scoping", () => {
     mockHelheimGroupBy.mockResolvedValue([]);
     mockBifrostRouteFindMany.mockResolvedValue([]);
     mockRouteLogFindMany.mockResolvedValue([]);
+    mockPostgresBackupPolicyFindMany.mockResolvedValue([]);
   });
 
   it("scopes all dashboard route-backed queries to the active tenant", async () => {
@@ -79,5 +85,10 @@ describe("dashboard tenant scoping", () => {
         tenantId: "tenant_1",
       });
     }
+    expect(mockPostgresBackupPolicyFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: "user_1", tenantId: "tenant_1" },
+      })
+    );
   });
 });
