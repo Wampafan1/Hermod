@@ -56,13 +56,15 @@ export function buildSchemaDriftResolutionOptions(input: {
 
   const adjustFileActions: string[] = [];
   for (const col of input.diff.added) {
-    adjustFileActions.push(`Remove column: ${col.name} (not in destination)`);
+    adjustFileActions.push(`Remove column: ${formatSchemaDriftColumnLabel(col.name)} (not in destination)`);
   }
   for (const col of input.diff.removed) {
-    adjustFileActions.push(`Add column: ${col.name} (expected by destination, will be NULL)`);
+    adjustFileActions.push(`Add column: ${formatSchemaDriftColumnLabel(col.name)} (expected by destination, will be NULL)`);
   }
   for (const col of input.diff.typeChanged) {
-    adjustFileActions.push(`Cast column: ${col.name} from ${col.newType} to ${col.oldType}`);
+    adjustFileActions.push(
+      `Cast column: ${formatSchemaDriftColumnLabel(col.name)} from ${col.newType} to ${col.oldType}`
+    );
   }
 
   return {
@@ -81,6 +83,10 @@ export function buildSchemaDriftResolutionOptions(input: {
       warning: "These statements will modify your production table. Review carefully.",
     },
   };
+}
+
+function formatSchemaDriftColumnLabel(name: string): string {
+  return /^column_\d+$/i.test(name) ? `${name} (blank header)` : name;
 }
 
 export async function handleGateValidatePush(job: { data: GateValidatePushJob }) {

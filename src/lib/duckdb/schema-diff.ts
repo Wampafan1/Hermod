@@ -35,8 +35,54 @@ export interface DriftResult {
  * Determine if two types are compatible enough to NOT flag as drift.
  * E.g., INTEGER ↔ BIGINT is fine, INTEGER ↔ VARCHAR is not.
  */
-function typesAreCompatible(savedType: string, newType: string): boolean {
-  if (savedType === newType) return true;
+function normalizedDuckdbType(type: string): string {
+  return type.toUpperCase().replace(/\(.*\)/, "").trim();
+}
+
+function isIntegerDuckdbType(type: string): boolean {
+  return toHermodType(type) === "INTEGER";
+}
+
+function isDateOrDateStringDuckdbType(type: string): boolean {
+  const hermod = toHermodType(type);
+  return hermod === "TIMESTAMP" || hermod === "STRING";
+}
+
+function isDateLikeColumnName(name: string): boolean {
+  const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return (
+    /\b(date|dt|eta|etd|arrival|departure|departures|posted|shipped|delivered)\b/.test(normalized) ||
+    /\b(created|updated|modified) at\b/.test(normalized)
+  );
+}
+
+function isDateLikeSample(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    /^\d{4}-\d{1,2}-\d{1,2}(?:[t\s].*)?$/i.test(trimmed) ||
+    /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(trimmed) ||
+    /^\d{1,2}-[A-Za-z]{3}-\d{2,4}$/.test(trimmed)
+  );
+}
+
+function hasDateLikeValueProfile(column: AnalyzedColumn): boolean {
+  const samples = column.sampleValues ?? [];
+  if (samples.length === 0) return true;
+
+  const dateLikeCount = samples.filter(isDateLikeSample).length;
+  return dateLikeCount / samples.length >= 0.6;
+}
+
+function isExcelSerialDateCompatibility(savedType: string, newColumn: AnalyzedColumn): boolean {
+  if (!isIntegerDuckdbType(savedType)) return false;
+  if (!isDateOrDateStringDuckdbType(newColumn.duckdbType)) return false;
+  if (!isDateLikeColumnName(newColumn.name)) return false;
+  return toHermodType(newColumn.duckdbType) === "TIMESTAMP" || hasDateLikeValueProfile(newColumn);
+}
+
+function typesAreCompatible(savedType: string, newColumn: AnalyzedColumn): boolean {
+  const newType = newColumn.duckdbType;
+  if (normalizedDuckdbType(savedType) === normalizedDuckdbType(newType)) return true;
 
   const savedHermod = toHermodType(savedType);
   const newHermod = toHermodType(newType);
@@ -49,6 +95,10 @@ function typesAreCompatible(savedType: string, newType: string): boolean {
     (savedHermod === "INTEGER" && newHermod === "FLOAT") ||
     (savedHermod === "FLOAT" && newHermod === "INTEGER")
   ) {
+    return true;
+  }
+
+  if (isExcelSerialDateCompatibility(savedType, newColumn)) {
     return true;
   }
 
@@ -91,7 +141,7 @@ export function computeSchemaDiff(
   // Check for type changes (in both, but different types)
   for (const col of newColumns) {
     const saved = savedMap.get(col.name.toLowerCase());
-    if (saved && !typesAreCompatible(saved.duckdbType, col.duckdbType)) {
+    if (saved && !typesAreCompatible(saved.duckdbType, col)) {
       diff.typeChanged.push({
         name: col.name,
         oldType: saved.duckdbType,

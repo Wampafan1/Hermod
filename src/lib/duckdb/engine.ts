@@ -120,6 +120,89 @@ function makeUniqueHeaders(headers: string[]): string[] {
   });
 }
 
+const MAX_EXCEL_LOAD_COLUMNS = 300;
+const EXCEL_SERIAL_DATE_MIN = 20_000;
+const EXCEL_SERIAL_DATE_MAX = 80_000;
+const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function isBlankScalarValue(value: unknown): boolean {
+  return value === null || value === undefined || (typeof value === "string" && value.trim() === "");
+}
+
+function isLikelyExcelDateHeader(header: string): boolean {
+  const normalized = header.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!normalized) return false;
+  return (
+    /\b(date|dt|eta|etd|arrival|departure|departures|posted|shipped|delivered)\b/.test(normalized) ||
+    /\b(created|updated|modified) at\b/.test(normalized)
+  );
+}
+
+function excelSerialDateToIsoDate(value: number): string | null {
+  if (!Number.isFinite(value)) return null;
+  if (value < EXCEL_SERIAL_DATE_MIN || value > EXCEL_SERIAL_DATE_MAX) return null;
+
+  const date = new Date(EXCEL_EPOCH_MS + Math.round(value * MS_PER_DAY));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
+
+export function normalizeExcelValueForDuckDb(
+  value: unknown,
+  options?: { dateLike?: boolean }
+): string | number | boolean | null {
+  if (value === null || value === undefined) return null;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return options?.dateLike ? value.toISOString().slice(0, 10) : value.toISOString();
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed === "" ? null : trimmed;
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    if (options?.dateLike) {
+      return excelSerialDateToIsoDate(value) ?? value;
+    }
+    return value;
+  }
+
+  if (typeof value === "boolean") return value;
+
+  if (typeof value === "object") {
+    if ("result" in value) {
+      return normalizeExcelValueForDuckDb((value as { result?: unknown }).result, options);
+    }
+    if ("richText" in value) {
+      const richText = (value as ExcelJS.CellRichTextValue).richText;
+      return Array.isArray(richText)
+        ? normalizeExcelValueForDuckDb(richText.map((part) => part.text ?? "").join(""), options)
+        : null;
+    }
+    if ("hyperlink" in value && "text" in value) {
+      return normalizeExcelValueForDuckDb((value as { text?: unknown }).text, options);
+    }
+    if ("text" in value) {
+      return normalizeExcelValueForDuckDb((value as { text?: unknown }).text, options);
+    }
+  }
+
+  return null;
+}
+
+function firstNonBlankScalar(values: Array<string | number | boolean | null>): string | number | boolean | null {
+  return values.find((value) => !isBlankScalarValue(value)) ?? null;
+}
+
+function isGrandTotalFooterRow(values: Array<string | number | boolean | null>): boolean {
+  const firstValue = firstNonBlankScalar(values);
+  return typeof firstValue === "string" && /\bgrand\s+total\b\s*:?\s*$/i.test(firstValue.trim());
+}
+
 /** Write buffer to a temp file, return path. Caller MUST delete in finally block. */
 async function writeTempFile(buffer: Buffer, ext: string): Promise<string> {
   const tempPath = join(tmpdir(), `hermod_duckdb_${randomUUID()}.${ext}`);
@@ -242,16 +325,22 @@ class DuckDBAnalyticsSession implements AnalyticsSession {
     const headerRow = worksheet.getRow(headerRowIdx);
     const headers: string[] = [];
     const generatedHeaders: boolean[] = [];
-    headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      const val = excelCellToValue(cell);
-      const hasValue = val !== null && val !== undefined && String(val).trim() !== "";
+    let maxColumn = Math.max(
+      headerRow.cellCount,
+      worksheet.actualColumnCount || 0,
+      worksheet.columnCount || 0,
+      1
+    );
+    for (let r = dataStartIdx; r <= worksheet.rowCount; r++) {
+      maxColumn = Math.max(maxColumn, worksheet.getRow(r).cellCount);
+    }
+    maxColumn = Math.min(maxColumn, MAX_EXCEL_LOAD_COLUMNS);
+
+    for (let colNumber = 1; colNumber <= maxColumn; colNumber++) {
+      const val = normalizeExcelValueForDuckDb(excelCellToValue(headerRow.getCell(colNumber)));
+      const hasValue = !isBlankScalarValue(val);
       headers[colNumber - 1] = hasHeaders && hasValue ? String(val).trim() : `column_${colNumber}`;
       generatedHeaders[colNumber - 1] = !hasValue;
-    });
-
-    // Trim trailing empty headers
-    while (headers.length > 0 && !headers[headers.length - 1]) {
-      headers.pop();
     }
 
     if (headers.length === 0) {
@@ -260,24 +349,23 @@ class DuckDBAnalyticsSession implements AnalyticsSession {
     }
 
     // Read data rows
-    const rowValues: unknown[][] = [];
+    const dateLikeColumns = headers.map((header, idx) =>
+      !generatedHeaders[idx] && isLikelyExcelDateHeader(header)
+    );
+    const rowValues: Array<Array<string | number | boolean | null>> = [];
     for (let r = dataStartIdx; r <= worksheet.rowCount; r++) {
       const row = worksheet.getRow(r);
-      const values: unknown[] = [];
+      const values: Array<string | number | boolean | null> = [];
       let hasValue = false;
       for (let c = 0; c < headers.length; c++) {
         const cell = row.getCell(c + 1);
-        const val = excelCellToValue(cell);
-        if (val !== null && val !== undefined && String(val).trim() !== "") hasValue = true;
-        if (val instanceof Date) {
-          values[c] = val.toISOString();
-        } else if (typeof val === "object" && val !== null && "result" in val) {
-          // Formula cell — use result value
-          values[c] = (val as { result?: unknown }).result ?? null;
-        } else {
-          values[c] = val ?? null;
-        }
+        const val = normalizeExcelValueForDuckDb(excelCellToValue(cell), {
+          dateLike: dateLikeColumns[c],
+        });
+        if (!isBlankScalarValue(val)) hasValue = true;
+        values[c] = val;
       }
+      if (isGrandTotalFooterRow(values)) break;
       if (hasValue) rowValues.push(values);
     }
 
@@ -285,7 +373,7 @@ class DuckDBAnalyticsSession implements AnalyticsSession {
       if (!generatedHeaders[idx]) return true;
       return rowValues.some((row) => {
         const val = row[idx];
-        return val !== null && val !== undefined && String(val).trim() !== "";
+        return !isBlankScalarValue(val);
       });
     });
     const uniqueHeaders = makeUniqueHeaders(headers.filter((_, idx) => keepColumns[idx]));

@@ -1230,6 +1230,9 @@ function SchemaDriftPanel({
   onCancel: () => void;
   resolving: boolean;
 }) {
+  const formatColumnName = (name: string) =>
+    /^column_\d+$/i.test(name) ? `${name} (blank header)` : name;
+
   return (
     <div className="space-y-4">
       {/* Warning banner */}
@@ -1244,7 +1247,7 @@ function SchemaDriftPanel({
         {diff.added.map((c) => (
           <div key={c.name} className="flex items-center gap-2 px-3 py-1.5 bg-frost/[0.04] border border-frost/10 text-xs">
             <span className="text-frost text-[9px] uppercase tracking-wider">+ Added</span>
-            <span className="font-inconsolata text-text">{c.name}</span>
+            <span className="font-inconsolata text-text">{formatColumnName(c.name)}</span>
             <span className="badge-neutral text-[8px]">{c.type}</span>
             <span className="text-text-dim text-[9px]">— new in file, not in destination</span>
           </div>
@@ -1252,7 +1255,7 @@ function SchemaDriftPanel({
         {diff.removed.map((c) => (
           <div key={c.name} className="flex items-center gap-2 px-3 py-1.5 bg-red-900/[0.04] border border-red-700/10 text-xs">
             <span className="text-red-400 text-[9px] uppercase tracking-wider">- Missing</span>
-            <span className="font-inconsolata text-text">{c.name}</span>
+            <span className="font-inconsolata text-text">{formatColumnName(c.name)}</span>
             <span className="badge-neutral text-[8px]">{c.type}</span>
             <span className="text-text-dim text-[9px]">— expected by destination, not in file</span>
           </div>
@@ -1260,7 +1263,7 @@ function SchemaDriftPanel({
         {diff.typeChanged.map((c) => (
           <div key={c.name} className="flex items-center gap-2 px-3 py-1.5 bg-void/50 border border-ember/20 text-xs">
             <span className="text-gold-bright text-[9px] uppercase tracking-wider">~ Changed</span>
-            <span className="font-inconsolata text-text">{c.name}</span>
+            <span className="font-inconsolata text-text">{formatColumnName(c.name)}</span>
             <span className="text-text-dim text-[9px]">{c.oldType} → {c.newType}</span>
           </div>
         ))}

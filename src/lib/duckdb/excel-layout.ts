@@ -39,21 +39,42 @@ function isBlankValue(value: unknown): boolean {
   return value === null || value === undefined || String(value).trim() === "";
 }
 
-export function excelCellToValue(cell: ExcelJS.Cell): unknown {
-  const value = cell.value;
+type ExcelCellScalar = string | number | boolean | Date | null;
+
+function scalarizeExcelCellValue(value: unknown): ExcelCellScalar {
   if (value === null || value === undefined) return null;
-  if (value instanceof Date) return value;
-  if (typeof value === "object") {
-    if ("result" in value) return (value as { result?: unknown }).result ?? null;
-    if ("richText" in value) {
-      return (value as ExcelJS.CellRichTextValue).richText.map((part) => part.text).join("");
-    }
-    if ("text" in value) return (value as { text?: unknown }).text ?? null;
-    if ("hyperlink" in value && "text" in value) {
-      return (value as { text?: unknown }).text ?? null;
-    }
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
   }
-  return value;
+
+  if (typeof value !== "object") return null;
+
+  if ("result" in value) {
+    const result = (value as { result?: unknown }).result;
+    return result === null || result === undefined ? null : scalarizeExcelCellValue(result);
+  }
+
+  if ("richText" in value) {
+    const richText = (value as ExcelJS.CellRichTextValue).richText;
+    return Array.isArray(richText) ? richText.map((part) => part.text ?? "").join("") : null;
+  }
+
+  if ("hyperlink" in value && "text" in value) {
+    return scalarizeExcelCellValue((value as { text?: unknown }).text);
+  }
+
+  if ("text" in value) {
+    return scalarizeExcelCellValue((value as { text?: unknown }).text);
+  }
+
+  if ("error" in value) return null;
+
+  return null;
+}
+
+export function excelCellToValue(cell: ExcelJS.Cell): ExcelCellScalar {
+  return scalarizeExcelCellValue(cell.value);
 }
 
 function stringifyCellValue(value: unknown): string | null {
