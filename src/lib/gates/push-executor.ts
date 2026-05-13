@@ -105,6 +105,7 @@ export interface PushResult {
   rowsInserted: number;
   rowsUpdated: number;
   rowsErrored: number;
+  rowErrors?: GateRowTypeError[];
   blankRowsSkipped: number;
   keyDrift?: KeyDriftDetails;
   duration: number;
@@ -128,6 +129,34 @@ export interface GateKeyDriftPreflightResult {
   blankRowsSkipped: number;
   keyDrift?: KeyDriftDetails;
 }
+
+export interface UpsertBatchSql {
+  countExistingSql: string;
+  updateExistingSql: string | null;
+  insertMissingSql: string;
+}
+
+export interface GateValueCoercionError {
+  column: string;
+  destType: string | null;
+  valuePreview: string;
+  reason: string;
+  rowIndex?: number;
+}
+
+export type GateValueCoercionResult =
+  | {
+      ok: true;
+      value: unknown;
+    }
+  | {
+      ok: false;
+      error: GateValueCoercionError;
+    };
+
+export type GateRowTypeError = GateValueCoercionError & {
+  rowIndex: number;
+};
 
 // ─── Execute Push ───────────────────────────────────
 
@@ -235,7 +264,7 @@ export async function executePush(
           providerConn,
           gate,
           resolvePrimaryKeyDestinationColumns(primaryKeyColumns, effectiveColumnMapping),
-          prepared.mappedRows,
+          prepared.indexedMappedRows,
           effectiveColumnMapping
         );
       }
@@ -335,19 +364,29 @@ async function resolveDestinationColumnMapping(
       gate.targetSchema || "public",
       gate.targetTable
     );
-    const destinationColumns = new Set(
-      schema?.fields.map((field) => field.name.toLowerCase()) ?? []
+    const destinationFields = new Map(
+      schema?.fields.map((field) => [field.name.toLowerCase(), field]) ?? []
     );
-    if (destinationColumns.size === 0) return columnMapping;
+    if (destinationFields.size === 0) return columnMapping;
 
     return columnMapping.map((mapping) => {
-      if (destinationColumns.has(mapping.destinationColumn.toLowerCase())) {
-        return mapping;
+      const directField = destinationFields.get(mapping.destinationColumn.toLowerCase());
+      if (directField) {
+        return {
+          ...mapping,
+          destinationColumn: directField.name,
+          destType: directField.type ?? mapping.destType,
+        };
       }
 
       const normalized = normalizeDestinationColumnName(mapping.sourceColumn);
-      if (destinationColumns.has(normalized.toLowerCase())) {
-        return { ...mapping, destinationColumn: normalized };
+      const normalizedField = destinationFields.get(normalized.toLowerCase());
+      if (normalizedField) {
+        return {
+          ...mapping,
+          destinationColumn: normalizedField.name,
+          destType: normalizedField.type ?? mapping.destType,
+        };
       }
 
       return mapping;
@@ -447,6 +486,344 @@ export function derivePushStatus(input: {
   if (input.rowsErrored <= 0) return "SUCCESS";
   if (input.attemptedRows <= 0 || input.rowsErrored >= input.attemptedRows) return "FAILED";
   return "PARTIAL";
+}
+
+type DestinationTypeKind = "integer" | "numeric" | "boolean" | "date" | "timestamp" | "text";
+
+const INTEGER_STRING_PATTERN = /^[+-]?\d+$/;
+const NUMERIC_STRING_PATTERN = /^[+-]?(?:(?:\d+\.?\d*)|(?:\.\d+))(?:[eE][+-]?\d+)?$/;
+
+function normalizeDestinationType(destType: string | null | undefined): string {
+  return (destType ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function destinationTypeBase(destType: string | null | undefined): string {
+  return normalizeDestinationType(destType).replace(/\([^)]*\)/g, "").trim();
+}
+
+function destinationTypeKind(destType: string | null | undefined): DestinationTypeKind {
+  const normalized = normalizeDestinationType(destType);
+  const base = destinationTypeBase(destType);
+
+  if (
+    [
+      "smallint",
+      "int2",
+      "integer",
+      "int",
+      "int4",
+      "bigint",
+      "int8",
+      "int64",
+      "serial",
+      "smallserial",
+      "bigserial",
+    ].includes(base)
+  ) {
+    return "integer";
+  }
+
+  if (
+    [
+      "float",
+      "float4",
+      "float8",
+      "float64",
+      "real",
+      "double",
+      "double precision",
+      "numeric",
+      "decimal",
+      "number",
+      "money",
+    ].includes(base)
+  ) {
+    return "numeric";
+  }
+
+  if (["boolean", "bool"].includes(base) || normalized === "tinyint(1)") {
+    return "boolean";
+  }
+
+  if (base === "date") {
+    return "date";
+  }
+
+  if (
+    base === "timestamp" ||
+    base === "timestamptz" ||
+    base === "datetime" ||
+    base === "datetime2" ||
+    base === "timestamp without time zone" ||
+    base === "timestamp with time zone"
+  ) {
+    return "timestamp";
+  }
+
+  return "text";
+}
+
+function isBlankCoercionInput(value: unknown): boolean {
+  return value === null || value === undefined || (typeof value === "string" && value.trim() === "");
+}
+
+function safeValuePreview(value: unknown, maxLength = 48): string {
+  let preview: string;
+  if (value instanceof Date) {
+    preview = Number.isNaN(value.getTime()) ? "Invalid Date" : value.toISOString();
+  } else if (typeof value === "string") {
+    preview = value;
+  } else if (value === null) {
+    preview = "null";
+  } else if (value === undefined) {
+    preview = "undefined";
+  } else if (typeof value === "object") {
+    try {
+      preview = JSON.stringify(value);
+    } catch {
+      preview = "[object]";
+    }
+  } else {
+    preview = String(value);
+  }
+
+  preview = preview
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^@\s/]+@/gi, "$1[redacted]@")
+    .replace(/\b(password|pwd|pass|secret|token)=([^&\s]+)/gi, "$1=[redacted]");
+
+  return preview.length > maxLength ? `${preview.slice(0, maxLength)}...` : preview;
+}
+
+function invalidCoercionResult(input: {
+  column: string;
+  destType: string | null;
+  value: unknown;
+  reason: string;
+  rowIndex?: number;
+}): GateValueCoercionResult {
+  return {
+    ok: false,
+    error: {
+      column: input.column,
+      destType: input.destType,
+      valuePreview: safeValuePreview(input.value),
+      reason: input.reason,
+      rowIndex: input.rowIndex,
+    },
+  };
+}
+
+function normalizeNumericString(value: string): string {
+  return value.trim();
+}
+
+function coerceDateLikeValue(input: {
+  value: unknown;
+  destType: string | null;
+  column: string;
+  rowIndex?: number;
+  kind: "date" | "timestamp";
+}): GateValueCoercionResult {
+  if (isBlankCoercionInput(input.value)) {
+    return { ok: true, value: null };
+  }
+
+  const parsed =
+    input.value instanceof Date
+      ? input.value
+      : typeof input.value === "string" || typeof input.value === "number"
+        ? new Date(input.value)
+        : null;
+
+  if (!parsed || Number.isNaN(parsed.getTime())) {
+    return invalidCoercionResult({
+      column: input.column,
+      destType: input.destType,
+      value: input.value,
+      reason: input.kind === "date" ? "Expected date-compatible value" : "Expected timestamp-compatible value",
+      rowIndex: input.rowIndex,
+    });
+  }
+
+  return {
+    ok: true,
+    value: input.kind === "date" ? parsed.toISOString().slice(0, 10) : parsed.toISOString(),
+  };
+}
+
+export function coerceGateValueForDestination(input: {
+  value: unknown;
+  destType: string | null;
+  column: string;
+  rowIndex?: number;
+}): GateValueCoercionResult {
+  const kind = destinationTypeKind(input.destType);
+
+  if (kind === "text") {
+    return { ok: true, value: input.value };
+  }
+
+  if (isBlankCoercionInput(input.value)) {
+    return { ok: true, value: null };
+  }
+
+  if (kind === "integer") {
+    if (typeof input.value === "bigint") {
+      return { ok: true, value: input.value.toString() };
+    }
+
+    if (typeof input.value === "number") {
+      return Number.isFinite(input.value) && Number.isInteger(input.value)
+        ? { ok: true, value: input.value }
+        : invalidCoercionResult({
+            column: input.column,
+            destType: input.destType,
+            value: input.value,
+            reason: "Expected integer-compatible value",
+            rowIndex: input.rowIndex,
+          });
+    }
+
+    if (typeof input.value === "string") {
+      const normalized = normalizeNumericString(input.value);
+      return INTEGER_STRING_PATTERN.test(normalized)
+        ? { ok: true, value: normalized }
+        : invalidCoercionResult({
+            column: input.column,
+            destType: input.destType,
+            value: input.value,
+            reason: "Expected integer-compatible value",
+            rowIndex: input.rowIndex,
+          });
+    }
+
+    return invalidCoercionResult({
+      column: input.column,
+      destType: input.destType,
+      value: input.value,
+      reason: "Expected integer-compatible value",
+      rowIndex: input.rowIndex,
+    });
+  }
+
+  if (kind === "numeric") {
+    if (typeof input.value === "bigint") {
+      return { ok: true, value: input.value.toString() };
+    }
+
+    if (typeof input.value === "number") {
+      return Number.isFinite(input.value)
+        ? { ok: true, value: input.value }
+        : invalidCoercionResult({
+            column: input.column,
+            destType: input.destType,
+            value: input.value,
+            reason: "Expected numeric-compatible value",
+            rowIndex: input.rowIndex,
+          });
+    }
+
+    if (typeof input.value === "string") {
+      const normalized = normalizeNumericString(input.value);
+      return NUMERIC_STRING_PATTERN.test(normalized)
+        ? { ok: true, value: normalized }
+        : invalidCoercionResult({
+            column: input.column,
+            destType: input.destType,
+            value: input.value,
+            reason: "Expected numeric-compatible value",
+            rowIndex: input.rowIndex,
+          });
+    }
+
+    return invalidCoercionResult({
+      column: input.column,
+      destType: input.destType,
+      value: input.value,
+      reason: "Expected numeric-compatible value",
+      rowIndex: input.rowIndex,
+    });
+  }
+
+  if (kind === "boolean") {
+    if (typeof input.value === "boolean") {
+      return { ok: true, value: input.value };
+    }
+
+    if (typeof input.value === "number") {
+      if (input.value === 1) return { ok: true, value: true };
+      if (input.value === 0) return { ok: true, value: false };
+    }
+
+    if (typeof input.value === "string") {
+      const normalized = input.value.trim().toLowerCase();
+      if (["true", "t", "1", "yes", "y"].includes(normalized)) {
+        return { ok: true, value: true };
+      }
+      if (["false", "f", "0", "no", "n"].includes(normalized)) {
+        return { ok: true, value: false };
+      }
+    }
+
+    return invalidCoercionResult({
+      column: input.column,
+      destType: input.destType,
+      value: input.value,
+      reason: "Expected boolean-compatible value",
+      rowIndex: input.rowIndex,
+    });
+  }
+
+  return coerceDateLikeValue({
+    value: input.value,
+    destType: input.destType,
+    column: input.column,
+    rowIndex: input.rowIndex,
+    kind,
+  });
+}
+
+export function coerceGateRowsForDestination(input: {
+  rows: IndexedMappedRow[];
+  columnMapping: ColumnMap[];
+}): { rows: IndexedMappedRow[]; errors: GateRowTypeError[] } {
+  const coercedRows: IndexedMappedRow[] = [];
+  const errors: GateRowTypeError[] = [];
+
+  for (const indexedRow of input.rows) {
+    const coercedRow: Record<string, unknown> = { ...indexedRow.row };
+    const rowErrors: GateRowTypeError[] = [];
+
+    for (const mapping of input.columnMapping) {
+      const column = mapping.destinationColumn;
+      const result = coerceGateValueForDestination({
+        value: indexedRow.row[column],
+        destType: mapping.destType,
+        column,
+        rowIndex: indexedRow.rowIndex,
+      });
+
+      if (result.ok) {
+        coercedRow[column] = result.value;
+      } else {
+        rowErrors.push({
+          ...result.error,
+          rowIndex: indexedRow.rowIndex,
+        });
+      }
+    }
+
+    if (rowErrors.length > 0) {
+      errors.push(...rowErrors);
+    } else {
+      coercedRows.push({
+        rowIndex: indexedRow.rowIndex,
+        row: coercedRow,
+      });
+    }
+  }
+
+  return { rows: coercedRows, errors };
 }
 
 export function preflightUpsertKey(input: {
@@ -693,6 +1070,14 @@ function toSafeKeyValue(value: unknown): string | number | boolean | null {
 
 async function persistPushResult(pushId: string, result: PushResult): Promise<void> {
   const hasRowErrors = result.rowsErrored > 0;
+  const rowErrors = result.rowErrors ?? [];
+  const safeRowErrors = rowErrors.slice(0, 50).map((error) => ({
+    rowIndex: error.rowIndex,
+    column: error.column,
+    destType: error.destType,
+    valuePreview: error.valuePreview,
+    reason: error.reason,
+  }));
 
   await prisma.gatePush.update({
     where: { id: pushId },
@@ -711,7 +1096,9 @@ async function persistPushResult(pushId: string, result: PushResult): Promise<vo
         ? ({
             status: result.status,
             rowsErrored: result.rowsErrored,
-          } as Prisma.InputJsonValue)
+            rowErrors: safeRowErrors,
+            rowErrorsTruncated: rowErrors.length > 50,
+          } as unknown as Prisma.InputJsonValue)
         : Prisma.JsonNull,
       duration: result.duration,
       completedAt: result.status === "KEY_DRIFT" ? null : new Date(),
@@ -801,12 +1188,28 @@ function loadErrorCount(result: LoadResult, attemptedRows: number): number {
   return Math.max(result.errors.length, attemptedRows - result.rowsLoaded);
 }
 
+function buildDestinationColumnTypeMap(columnMapping: ColumnMap[]): Record<string, string | null> {
+  const columnTypes: Record<string, string | null> = {};
+  for (const mapping of columnMapping) {
+    columnTypes[mapping.destinationColumn] = mapping.destType;
+  }
+  return columnTypes;
+}
+
+function safeDatabaseErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message
+    .replace(/'[^']*'/g, "'[redacted]'")
+    .replace(/https?:\/\/\S+/gi, "[url]")
+    .slice(0, 240);
+}
+
 async function upsertRows(
   provider: ReturnType<typeof getProvider>,
   conn: Awaited<ReturnType<ReturnType<typeof getProvider>["connect"]>>,
   gate: { targetSchema: string | null; targetTable: string },
   primaryKeyColumns: string[],
-  rows: Record<string, unknown>[],
+  rows: IndexedMappedRow[],
   columnMapping: ColumnMap[]
 ): Promise<PushResult> {
   if (primaryKeyColumns.length === 0) {
@@ -821,31 +1224,69 @@ async function upsertRows(
   const schema = gate.targetSchema || "public";
   const destColumns = columnMapping.map((m) => m.destinationColumn);
   const pkColumns = primaryKeyColumns;
+  const columnTypes = buildDestinationColumnTypeMap(columnMapping);
 
   let inserted = 0;
   let updated = 0;
   let errored = 0;
+  const rowErrors: GateRowTypeError[] = [];
 
-  // Process in batches of 200 for UPSERT (smaller than append due to ON CONFLICT complexity)
+  // Process in batches of 200 for UPSERT. Each batch updates matched keys first,
+  // then inserts keys that are still missing, so existing-table Gates do not need
+  // a physical UNIQUE/PRIMARY KEY constraint for repeat-file upserts to behave.
   const BATCH_SIZE = 200;
 
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
+    const coercedBatch = coerceGateRowsForDestination({
+      rows: batch,
+      columnMapping,
+    });
+    const invalidRows = new Set(coercedBatch.errors.map((error) => error.rowIndex));
+    errored += invalidRows.size;
+    rowErrors.push(...coercedBatch.errors);
+
+    if (coercedBatch.rows.length === 0) {
+      continue;
+    }
+
+    const batchRows = coercedBatch.rows.map((indexedRow) => indexedRow.row);
 
     try {
-      // Build the upsert SQL based on connection type
       const connType = (provider as { type?: string }).type ?? "POSTGRES";
-      const sql = buildUpsertSql(connType, schema, gate.targetTable, destColumns, pkColumns, batch);
+      const sql = buildUpsertBatchSql(
+        connType,
+        schema,
+        gate.targetTable,
+        destColumns,
+        pkColumns,
+        batchRows,
+        columnTypes
+      );
+      const existingKeyCount = Math.min(
+        batchRows.length,
+        Math.max(0, await countExistingBatchKeys(provider, conn, sql.countExistingSql))
+      );
 
-      await provider.query(conn, sql);
+      if (sql.updateExistingSql) {
+        await provider.query(conn, sql.updateExistingSql);
+      }
+      await provider.query(conn, sql.insertMissingSql);
 
-      // Without RETURNING counts, approximate: assume all succeeded
-      // A real implementation would parse affected rows, but this works for V1
-      inserted += batch.length;
+      updated += existingKeyCount;
+      inserted += batchRows.length - existingKeyCount;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[Gate] Upsert batch ${i}-${i + batch.length} failed: ${message}`);
-      errored += batch.length;
+      console.error(
+        `[Gate] Upsert batch ${i}-${i + batchRows.length} failed: ${safeDatabaseErrorMessage(err)}`
+      );
+      errored += batchRows.length;
+      rowErrors.push({
+        rowIndex: coercedBatch.rows[0]?.rowIndex ?? i,
+        column: "__batch",
+        destType: null,
+        valuePreview: `${batchRows.length} rows`,
+        reason: "UPSERT batch failed",
+      });
     }
   }
 
@@ -855,6 +1296,7 @@ async function upsertRows(
     rowsInserted: inserted,
     rowsUpdated: updated,
     rowsErrored: errored,
+    rowErrors,
     blankRowsSkipped: 0,
     duration: 0,
   };
@@ -862,108 +1304,266 @@ async function upsertRows(
 
 // ─── SQL Builders ───────────────────────────────────
 
-function buildUpsertSql(
+async function countExistingBatchKeys(
+  provider: ReturnType<typeof getProvider>,
+  conn: Awaited<ReturnType<ReturnType<typeof getProvider>["connect"]>>,
+  sql: string
+): Promise<number> {
+  if (!provider.query) throw new Error("Provider does not support query");
+
+  const result = await provider.query(conn, sql);
+  const row = result.rows[0] ?? {};
+  const value = row.existing_count ?? row.EXISTING_COUNT ?? row.existingCount ?? Object.values(row)[0];
+  const count = Number(value ?? 0);
+  return Number.isFinite(count) ? count : 0;
+}
+
+export function buildUpsertBatchSql(
   connType: string,
   schema: string,
   table: string,
   columns: string[],
   pkColumns: string[],
-  rows: Record<string, unknown>[]
-): string {
+  rows: Record<string, unknown>[],
+  columnTypes: Record<string, string | null | undefined> = {}
+): UpsertBatchSql {
   switch (connType) {
     case "POSTGRES":
-      return buildPostgresUpsert(schema, table, columns, pkColumns, rows);
+      return buildPostgresUpsertBatch(schema, table, columns, pkColumns, rows, columnTypes);
     case "MSSQL":
-      return buildMssqlMerge(schema, table, columns, pkColumns, rows);
+      return buildMssqlUpsertBatch(schema, table, columns, pkColumns, rows, columnTypes);
     case "MYSQL":
-      return buildMysqlUpsert(schema, table, columns, pkColumns, rows);
+      return buildMysqlUpsertBatch(schema, table, columns, pkColumns, rows);
     default:
-      return buildPostgresUpsert(schema, table, columns, pkColumns, rows);
+      throw new Error(`UPSERT is not implemented for connection type ${connType}`);
   }
 }
 
-function sqlEscape(value: unknown): string {
-  if (value === null || value === undefined) return "NULL";
-  if (typeof value === "number") return String(value);
-  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
-  return `'${String(value).replace(/'/g, "''")}'`;
+function postgresCastForDestinationType(destType: string | null | undefined): string | null {
+  const kind = destinationTypeKind(destType);
+  const normalized = normalizeDestinationType(destType);
+  const base = destinationTypeBase(destType);
+
+  if (kind === "integer") {
+    if (["smallint", "int2", "smallserial"].includes(base)) return "smallint";
+    return "bigint";
+  }
+
+  if (kind === "numeric") {
+    if (["real", "float4"].includes(base)) return "real";
+    if (["numeric", "decimal", "money", "number"].includes(base)) return "numeric";
+    return "double precision";
+  }
+
+  if (kind === "boolean") return "boolean";
+  if (kind === "date") return "date";
+  if (kind === "timestamp") {
+    return normalized.includes("without time zone") ? "timestamp" : "timestamptz";
+  }
+
+  return null;
 }
 
-function buildPostgresUpsert(
+function sqlEscape(
+  value: unknown,
+  dialect: "postgres" | "mssql" | "mysql",
+  destType?: string | null
+): string {
+  let escaped: string;
+
+  if (value === null || value === undefined) {
+    escaped = "NULL";
+  } else if (typeof value === "number") {
+    escaped = String(value);
+  } else if (typeof value === "boolean") {
+    if (dialect === "mssql" || dialect === "mysql") {
+      escaped = value ? "1" : "0";
+    } else {
+      escaped = value ? "TRUE" : "FALSE";
+    }
+  } else if (value instanceof Date) {
+    escaped = `'${value.toISOString().replace(/'/g, "''")}'`;
+  } else {
+    escaped = `'${String(value).replace(/'/g, "''")}'`;
+  }
+
+  if (dialect !== "postgres") return escaped;
+
+  const cast = postgresCastForDestinationType(destType);
+  return cast ? `${escaped}::${cast}` : escaped;
+}
+
+function buildPostgresUpsertBatch(
   schema: string,
   table: string,
   columns: string[],
   pkColumns: string[],
-  rows: Record<string, unknown>[]
-): string {
+  rows: Record<string, unknown>[],
+  columnTypes: Record<string, string | null | undefined> = {}
+): UpsertBatchSql {
   const fullTable = fullSqlTableRef(schema, table, "postgres");
-  const colList = columns.map((c) => quoteSqlIdentifier(c, "postgres")).join(", ");
-  const pkSet = new Set(pkColumns.map((c) => c.toLowerCase()));
-  const updateCols = columns
-    .filter((c) => !pkSet.has(c.toLowerCase()))
-    .map((c) => `${quoteSqlIdentifier(c, "postgres")} = EXCLUDED.${quoteSqlIdentifier(c, "postgres")}`)
-    .join(", ");
-  const conflictCols = pkColumns.map((c) => quoteSqlIdentifier(c, "postgres")).join(", ");
+  const source = buildValuesSource("postgres", columns, rows, columnTypes);
+  const colList = quotedColumnList(columns, "postgres");
+  const selectCols = selectSourceColumns(columns, "postgres");
+  const match = keyMatchClause("postgres", "T", "S", pkColumns);
+  const updateCols = nonKeyColumns(columns, pkColumns);
+  const setClause = updateSetClause("postgres", updateCols);
 
-  const valueClauses = rows.map((row) => {
-    const vals = columns.map((c) => sqlEscape(row[c]));
-    return `(${vals.join(", ")})`;
-  });
-
-  return `INSERT INTO ${fullTable} (${colList}) VALUES ${valueClauses.join(", ")}
-    ON CONFLICT (${conflictCols}) DO UPDATE SET ${updateCols}`;
+  return {
+    countExistingSql: `SELECT COUNT(*)::int AS existing_count
+FROM ${source}
+WHERE EXISTS (SELECT 1 FROM ${fullTable} AS T WHERE ${match})`,
+    updateExistingSql: setClause
+      ? `UPDATE ${fullTable} AS T
+SET ${setClause}
+FROM ${source}
+WHERE ${match}`
+      : null,
+    insertMissingSql: `INSERT INTO ${fullTable} (${colList})
+SELECT ${selectCols}
+FROM ${source}
+WHERE NOT EXISTS (SELECT 1 FROM ${fullTable} AS T WHERE ${match})`,
+  };
 }
 
-function buildMssqlMerge(
+function buildMssqlUpsertBatch(
   schema: string,
   table: string,
   columns: string[],
   pkColumns: string[],
-  rows: Record<string, unknown>[]
-): string {
+  rows: Record<string, unknown>[],
+  columnTypes: Record<string, string | null | undefined> = {}
+): UpsertBatchSql {
   const fullTable = fullSqlTableRef(schema, table, "mssql");
-  const valueClauses = rows.map((row) => {
-    const vals = columns.map((c) => sqlEscape(row[c]));
-    return `(${vals.join(", ")})`;
-  });
+  const source = buildValuesSource("mssql", columns, rows, columnTypes);
+  const colList = quotedColumnList(columns, "mssql");
+  const selectCols = selectSourceColumns(columns, "mssql");
+  const match = keyMatchClause("mssql", "T", "S", pkColumns);
+  const updateCols = nonKeyColumns(columns, pkColumns);
+  const setClause = updateSetClause("mssql", updateCols);
 
-  const colList = columns.map((c) => quoteSqlIdentifier(c, "mssql")).join(", ");
-  const pkSet = new Set(pkColumns.map((c) => c.toLowerCase()));
-  const updateCols = columns
-    .filter((c) => !pkSet.has(c.toLowerCase()))
-    .map((c) => `T.${quoteSqlIdentifier(c, "mssql")} = S.${quoteSqlIdentifier(c, "mssql")}`)
-    .join(", ");
-  const insertCols = columns.map((c) => quoteSqlIdentifier(c, "mssql")).join(", ");
-  const insertVals = columns.map((c) => `S.${quoteSqlIdentifier(c, "mssql")}`).join(", ");
-  const onClause = pkColumns.map((c) => `T.${quoteSqlIdentifier(c, "mssql")} = S.${quoteSqlIdentifier(c, "mssql")}`).join(" AND ");
-
-  return `MERGE ${fullTable} AS T
-    USING (VALUES ${valueClauses.join(", ")}) AS S (${colList})
-    ON ${onClause}
-    WHEN MATCHED THEN UPDATE SET ${updateCols}
-    WHEN NOT MATCHED THEN INSERT (${insertCols}) VALUES (${insertVals});`;
+  return {
+    countExistingSql: `SELECT COUNT(*) AS existing_count
+FROM ${source}
+WHERE EXISTS (SELECT 1 FROM ${fullTable} AS T WHERE ${match})`,
+    updateExistingSql: setClause
+      ? `UPDATE T
+SET ${setClause}
+FROM ${fullTable} AS T
+JOIN ${source} ON ${match}`
+      : null,
+    insertMissingSql: `INSERT INTO ${fullTable} (${colList})
+SELECT ${selectCols}
+FROM ${source}
+WHERE NOT EXISTS (SELECT 1 FROM ${fullTable} AS T WHERE ${match})`,
+  };
 }
 
-function buildMysqlUpsert(
+function buildMysqlUpsertBatch(
   schema: string,
   table: string,
   columns: string[],
   pkColumns: string[],
   rows: Record<string, unknown>[]
-): string {
+): UpsertBatchSql {
   const fullTable = fullSqlTableRef(schema, table, "mysql");
-  const colList = columns.map((c) => quoteSqlIdentifier(c, "mysql")).join(", ");
-  const pkSet = new Set(pkColumns.map((c) => c.toLowerCase()));
-  const updateCols = columns
-    .filter((c) => !pkSet.has(c.toLowerCase()))
-    .map((c) => `${quoteSqlIdentifier(c, "mysql")} = VALUES(${quoteSqlIdentifier(c, "mysql")})`)
-    .join(", ");
+  const source = buildMysqlSelectSource(columns, rows);
+  const colList = quotedColumnList(columns, "mysql");
+  const selectCols = selectSourceColumns(columns, "mysql");
+  const match = keyMatchClause("mysql", "T", "S", pkColumns);
+  const updateCols = nonKeyColumns(columns, pkColumns);
+  const setClause = updateSetClause("mysql", updateCols);
 
+  return {
+    countExistingSql: `SELECT COUNT(*) AS existing_count
+FROM ${source}
+WHERE EXISTS (SELECT 1 FROM ${fullTable} AS T WHERE ${match})`,
+    updateExistingSql: setClause
+      ? `UPDATE ${fullTable} AS T
+JOIN ${source} ON ${match}
+SET ${setClause}`
+      : null,
+    insertMissingSql: `INSERT INTO ${fullTable} (${colList})
+SELECT ${selectCols}
+FROM ${source}
+WHERE NOT EXISTS (SELECT 1 FROM ${fullTable} AS T WHERE ${match})`,
+  };
+}
+
+function buildValuesSource(
+  dialect: "postgres" | "mssql",
+  columns: string[],
+  rows: Record<string, unknown>[],
+  columnTypes: Record<string, string | null | undefined> = {}
+): string {
   const valueClauses = rows.map((row) => {
-    const vals = columns.map((c) => sqlEscape(row[c]));
+    const vals = columns.map((column) => sqlEscape(row[column], dialect, columnTypes[column]));
     return `(${vals.join(", ")})`;
   });
+  return `(VALUES ${valueClauses.join(", ")}) AS S (${quotedColumnList(columns, dialect)})`;
+}
 
-  return `INSERT INTO ${fullTable} (${colList}) VALUES ${valueClauses.join(", ")}
-    ON DUPLICATE KEY UPDATE ${updateCols}`;
+function buildMysqlSelectSource(
+  columns: string[],
+  rows: Record<string, unknown>[]
+): string {
+  const selects = rows.map((row) => {
+    const values = columns.map((column) => {
+      return `${sqlEscape(row[column], "mysql")} AS ${quoteSqlIdentifier(column, "mysql")}`;
+    });
+    return `SELECT ${values.join(", ")}`;
+  });
+  return `(${selects.join(" UNION ALL ")}) AS S`;
+}
+
+function quotedColumnList(
+  columns: string[],
+  dialect: "postgres" | "mssql" | "mysql"
+): string {
+  return columns.map((column) => quoteSqlIdentifier(column, dialect)).join(", ");
+}
+
+function selectSourceColumns(
+  columns: string[],
+  dialect: "postgres" | "mssql" | "mysql"
+): string {
+  return columns.map((column) => `S.${quoteSqlIdentifier(column, dialect)}`).join(", ");
+}
+
+function nonKeyColumns(columns: string[], pkColumns: string[]): string[] {
+  const pkSet = new Set(pkColumns.map((column) => column.toLowerCase()));
+  return columns.filter((column) => !pkSet.has(column.toLowerCase()));
+}
+
+function updateSetClause(
+  dialect: "postgres" | "mssql" | "mysql",
+  columns: string[]
+): string {
+  return columns
+    .map((column) => {
+      const quoted = quoteSqlIdentifier(column, dialect);
+      if (dialect === "postgres") return `${quoted} = S.${quoted}`;
+      return `T.${quoted} = S.${quoted}`;
+    })
+    .join(", ");
+}
+
+function keyMatchClause(
+  dialect: "postgres" | "mssql" | "mysql",
+  leftAlias: string,
+  rightAlias: string,
+  pkColumns: string[]
+): string {
+  return pkColumns
+    .map((column) => {
+      const quoted = quoteSqlIdentifier(column, dialect);
+      if (dialect === "postgres") {
+        return `${leftAlias}.${quoted} IS NOT DISTINCT FROM ${rightAlias}.${quoted}`;
+      }
+      if (dialect === "mysql") {
+        return `${leftAlias}.${quoted} <=> ${rightAlias}.${quoted}`;
+      }
+      return `${leftAlias}.${quoted} = ${rightAlias}.${quoted}`;
+    })
+    .join(" AND ");
 }

@@ -588,3 +588,45 @@ The final regression pass locks the two LOVES upload paths that exposed the key-
 - `npm run test` passed: 118 files, 1434 tests.
 - `npm run build` passed with existing Next/React lint warnings.
 - `npm run lint` passed with existing warnings.
+
+## Gate UPSERT Type Coercion Fix
+
+The `__cont` upload failure happened because the Gate UPSERT path was building a Postgres `VALUES` source from escaped string literals. When the destination column was `BIGINT`, Postgres saw a text expression being assigned to a bigint column and rejected every batch before any row could load.
+
+### What Changed
+
+- UPSERT rows are now coerced against the effective destination column mapping before SQL is generated.
+- Integer, numeric, boolean, date, and timestamp destinations accept compatible uploaded values and convert blanks to `NULL`.
+- Incompatible typed values are rejected before SQL execution and recorded as row errors with only safe value previews.
+- A batch with invalid typed rows still attempts valid rows; if every row fails validation or SQL execution, the push status becomes `FAILED`, and mixed results become `PARTIAL`.
+- Postgres `VALUES` literals now include explicit casts for typed destinations, such as `'123'::bigint`, `NULL::bigint`, and timestamp/date casts.
+- Existing SQL identifier quoting stays centralized through `quoteSqlIdentifier()` and `fullSqlTableRef()`.
+- MSSQL and MySQL keep the existing SQL generation shape and receive the same pre-SQL value coercion. Provider-specific casts can be added later if those providers surface the same ambiguity.
+
+### Invalid Value Handling
+
+Invalid values are not silently dropped and do not produce `SUCCESS`. Error details include:
+
+- `rowIndex`
+- destination `column`
+- `destType`
+- a short redacted `valuePreview`
+- a safe reason such as `Expected integer-compatible value`
+
+The executor does not store full row payloads, raw environment data, credentials, or connection strings in row-level type errors.
+
+### Tests Added
+
+- `src/__tests__/gates/gate-upsert-type-coercion.test.ts`
+- `src/__tests__/gates/gate-postgres-upsert-sql.test.ts`
+- Updated `src/__tests__/gates/push-executor-status.test.ts`
+
+### Validation Results
+
+- `npx prisma validate` passed.
+- `npx prisma generate` initially hit the documented Windows Prisma locked-DLL `EPERM`; it passed after moving `node_modules/.prisma` aside and regenerating.
+- Focused Gate regression run passed: `npm run test -- gate-upsert-type-coercion gate-postgres-upsert-sql push-executor-status gate-upsert-sql` passed 4 files, 22 tests.
+- Plain `npm run test` hit a Vitest fork-pool worker startup timeout before completion; no assertion failure was reported.
+- Full suite retry passed with constrained workers: `npm run test -- --maxWorkers=2` passed 130 files, 1518 tests.
+- `npm run build` passed with existing Next/React lint warnings.
+- `npm run lint` passed with existing warnings.
