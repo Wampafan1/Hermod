@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 
 const {
   mockRavenFindFirst,
@@ -43,7 +44,7 @@ describe("Raven jobs API", () => {
 
     const { GET } = await import("@/app/api/raven/jobs/route");
     const response = await GET(
-      new Request("http://localhost/api/raven/jobs?ravenId=raven_1&limit=2")
+      new NextRequest("http://localhost/api/raven/jobs?ravenId=raven_1&limit=2")
     );
     const body = await response.json();
 
@@ -80,7 +81,7 @@ describe("Raven jobs API", () => {
 
     const { GET } = await import("@/app/api/raven/jobs/route");
     await GET(
-      new Request("http://localhost/api/raven/jobs?ravenId=raven_1&cursor=job_2")
+      new NextRequest("http://localhost/api/raven/jobs?ravenId=raven_1&cursor=job_2")
     );
 
     expect(mockRavenJobFindMany).toHaveBeenCalledWith(

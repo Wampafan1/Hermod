@@ -97,7 +97,7 @@ const columnMapping: ColumnMap[] = [
 ];
 
 function buildLoves2025Rows(): Record<string, unknown>[] {
-  const rows = Array.from({ length: 40 }, (_, index) => ({
+  const rows: Record<string, unknown>[] = Array.from({ length: 40 }, (_, index) => ({
     job_number: `SNGB${String(index + 1).padStart(7, "0")}`,
     "7501_line_number": String((index % 9) + 1).padStart(4, "0"),
     line_entered_value: `VALUE-${index + 1}`,

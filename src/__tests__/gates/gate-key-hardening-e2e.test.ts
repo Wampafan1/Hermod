@@ -123,7 +123,7 @@ vi.mock("@/lib/pg-boss", () => ({
   ensureBossStarted: mockEnsureBossStarted,
 }));
 
-function csvFromRows(rows: Record<string, unknown>[]): Buffer {
+function csvFromRows(rows: Record<string, unknown>[]): Buffer<ArrayBuffer> {
   const columns = ["job_number", "7501_line_number", "line_entered_value"];
   const body = rows
     .map((row) => columns.map((column) => String(row[column] ?? "")).join(","))

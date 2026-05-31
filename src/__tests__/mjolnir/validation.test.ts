@@ -32,6 +32,7 @@ function makeParsedData(
     sampleRows: rows.slice(0, 50),
     fingerprints,
     headerRowIndex: 1,
+    columnIndices: columns.map((_, i) => i + 1),
   };
 }
 
@@ -370,6 +371,7 @@ describe("validateBlueprint", () => {
       sampleRows: rows.slice(0, 50),
       fingerprints: fingerprintAllColumns(columns, rows),
       headerRowIndex: 1,
+      columnIndices: columns.map((_, i) => i + 1),
     });
 
     const before = makeRealParsed("before", ["ID", "Name", "Status", "Extra"], [
@@ -413,6 +415,7 @@ describe("validateBlueprint", () => {
       sampleRows: rows.slice(0, 50),
       fingerprints: fingerprintAllColumns(columns, rows),
       headerRowIndex: 1,
+      columnIndices: columns.map((_, i) => i + 1),
     });
 
     // Case-insensitive renames: "Product_Id" → "product_id", "Product_Name" → "product_name"

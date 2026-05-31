@@ -31,13 +31,28 @@ const candidateKeys = [
 
 const validationStats = {
   rowCount: 10,
+  inputRowCount: 10,
+  blankRowsSkipped: 0,
   columnsAnalyzed: 2,
   combinationsTested: 3,
   maxWidth: 4,
+  maxColumns: 4,
   maxCombinations: 25_000,
   truncated: false,
   destinationValidated: false,
   destinationValidationMode: "UPLOAD_ONLY" as const,
+  discoveryMode: "THOROUGH" as const,
+  searchExhaustive: true,
+  columnsConsidered: ["customer_id", "line_number"],
+  columnsExcluded: [],
+  discriminatorColumns: [],
+  currentKeyDuplicateGroupCount: 1,
+  candidateSearchLimits: {
+    maxWidth: 4,
+    maxColumns: 4,
+    maxCombinations: 25_000,
+    combinationsTested: 3,
+  },
 };
 
 const currentKeyFailure = {

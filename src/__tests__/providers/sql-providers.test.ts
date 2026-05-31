@@ -460,6 +460,7 @@ describe("MysqlProvider", () => {
         dataset: "warehouse",
         table: "people",
         writeDisposition: "WRITE_APPEND",
+        autoCreateTable: false,
       });
 
       expect(result).toEqual({ rowsLoaded: 2, errors: [] });

@@ -4,6 +4,7 @@ import {
   connectionConfigSchemas,
   connectionCredentialsSchemas,
 } from "@/lib/validations/unified-connections";
+import type { ConnectionType } from "@/lib/providers/types";
 
 describe("unified connection validation", () => {
   describe("POSTGRES", () => {
@@ -35,7 +36,7 @@ describe("unified connection validation", () => {
         credentials: { password: "secret" },
       });
       expect(result.success).toBe(true);
-      if (result.success) {
+      if (result.success && result.data.type === "POSTGRES") {
         expect(result.data.config.port).toBe(5432);
       }
     });
@@ -50,7 +51,7 @@ describe("unified connection validation", () => {
         credentials: { password: "secret" },
       });
       expect(result.success).toBe(true);
-      if (result.success) {
+      if (result.success && result.data.type === "MSSQL") {
         expect(result.data.config.port).toBe(1433);
       }
     });
@@ -65,7 +66,7 @@ describe("unified connection validation", () => {
         credentials: { password: "secret" },
       });
       expect(result.success).toBe(true);
-      if (result.success) {
+      if (result.success && result.data.type === "MYSQL") {
         expect(result.data.config.port).toBe(3306);
       }
     });
@@ -100,7 +101,7 @@ describe("unified connection validation", () => {
         credentials: { serviceAccountKey: { type: "service_account" } },
       });
       expect(result.success).toBe(true);
-      if (result.success) {
+      if (result.success && result.data.type === "BIGQUERY") {
         expect(result.data.config.location).toBe("US");
       }
     });
@@ -163,7 +164,7 @@ describe("unified connection validation", () => {
         credentials: { password: "s" },
       });
       expect(result.success).toBe(true);
-      if (result.success) {
+      if (result.success && result.data.type === "SFTP") {
         expect(result.data.config.port).toBe(2222);
       }
     });
@@ -193,13 +194,13 @@ describe("unified connection validation", () => {
 
   describe("config/credentials schema maps", () => {
     it("has a config schema for each supported type", () => {
-      for (const t of ["POSTGRES", "MSSQL", "MYSQL", "BIGQUERY", "NETSUITE", "SFTP"]) {
+      for (const t of ["POSTGRES", "MSSQL", "MYSQL", "BIGQUERY", "NETSUITE", "SFTP"] as ConnectionType[]) {
         expect(connectionConfigSchemas[t]).toBeDefined();
       }
     });
 
     it("has a credentials schema for each supported type", () => {
-      for (const t of ["POSTGRES", "MSSQL", "MYSQL", "BIGQUERY", "NETSUITE", "SFTP"]) {
+      for (const t of ["POSTGRES", "MSSQL", "MYSQL", "BIGQUERY", "NETSUITE", "SFTP"] as ConnectionType[]) {
         expect(connectionCredentialsSchemas[t]).toBeDefined();
       }
     });

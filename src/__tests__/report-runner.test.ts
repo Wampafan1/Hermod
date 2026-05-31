@@ -786,8 +786,9 @@ describe("generateExcel with BlueprintFormatting", () => {
     expect(views).toHaveLength(1);
     expect(views[0].state).toBe("frozen");
     // freeze stores 1-based; ExcelJS uses 0-based xSplit/ySplit
-    expect(views[0].ySplit).toBe(1);
-    expect(views[0].xSplit).toBe(1);
+    const freeze = views[0] as { xSplit?: number; ySplit?: number };
+    expect(freeze.ySplit).toBe(1);
+    expect(freeze.xSplit).toBe(1);
   });
 
   it("applies borders from BlueprintFormatting", async () => {
@@ -849,7 +850,8 @@ describe("generateExcel with BlueprintFormatting", () => {
     const views = ws.views;
     expect(views).toHaveLength(1);
     expect(views[0].state).toBe("frozen");
-    expect(views[0].ySplit).toBe(1); // headerRowCount = 1
-    expect(views[0].xSplit).toBe(0);
+    const freeze = views[0] as { xSplit?: number; ySplit?: number };
+    expect(freeze.ySplit).toBe(1); // headerRowCount = 1
+    expect(freeze.xSplit).toBe(0);
   });
 });

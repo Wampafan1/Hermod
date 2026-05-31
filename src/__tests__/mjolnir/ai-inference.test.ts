@@ -63,6 +63,7 @@ function makeParsedFile(
     sampleRows: rows.slice(0, 50),
     fingerprints: fingerprintAllColumns(columns, rows),
     headerRowIndex: 1,
+    columnIndices: columns.map((_, i) => i + 1),
   };
 }
 

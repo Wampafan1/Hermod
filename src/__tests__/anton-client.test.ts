@@ -87,11 +87,12 @@ describe("Anton client", () => {
   });
 
   it("detects complete Anton configuration", () => {
-    expect(hasAntonConfig({ ANTON_API_BASE_URL: "", ANTON_API_KEY: "" })).toBe(
-      false
-    );
+    expect(
+      hasAntonConfig({ ...process.env, ANTON_API_BASE_URL: "", ANTON_API_KEY: "" })
+    ).toBe(false);
     expect(
       hasAntonConfig({
+        ...process.env,
         ANTON_API_BASE_URL: "https://anton.test",
         ANTON_API_KEY: "client_id:client_secret",
       })

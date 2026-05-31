@@ -214,7 +214,6 @@ describe("backup API validation", () => {
         sourceConnectionId: "conn_1",
         storageTargetId: "target_1",
         walEnabled: true,
-        replicationSlot: "slot_1",
       },
       { userId: "user_1", tenantId: "tenant_1" } as any
     );

@@ -102,7 +102,7 @@ describe("NetSuiteProvider", () => {
   });
 
   it("does not implement load, getSchema, or createTable (source-only)", () => {
-    const p = provider as Record<string, unknown>;
+    const p: ConnectionProvider = provider;
     expect(p.load).toBeUndefined();
     expect(p.getSchema).toBeUndefined();
     expect(p.createTable).toBeUndefined();
