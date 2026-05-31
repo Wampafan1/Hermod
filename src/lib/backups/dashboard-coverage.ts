@@ -35,6 +35,21 @@ export interface BackupCoveragePolicyInput {
   } | null;
   latestRun?: BackupCoverageRunInput | null;
   latestFailedRun?: BackupCoverageRunInput | null;
+  latestPartialRun?: BackupCoverageRunInput | null;
+  latestProblemRun?: BackupCoverageRunInput | null;
+}
+
+export interface BackupPartialFailures {
+  count: number;
+  databases: string[];
+}
+
+export interface BackupProblemRunSummary {
+  status: string;
+  type: string;
+  startedAt: string;
+  error: string | null;
+  partialFailures: BackupPartialFailures;
 }
 
 export interface BackupCoveragePolicyCard {
@@ -57,6 +72,7 @@ export interface BackupCoveragePolicyCard {
     startedAt: string;
     error: string | null;
   } | null;
+  latestProblemRun: BackupProblemRunSummary | null;
   nextRun: string | null;
   nextRunType: "FULL" | "WAL" | null;
 }
@@ -65,6 +81,8 @@ export interface BackupCoverageDashboard {
   totalPolicies: number;
   healthyPolicies: number;
   recentFailedPolicies: number;
+  recentPartialPolicies: number;
+  recentProblemPolicies: number;
   policiesWithNoSuccessfulFullBackup: number;
   walEnabledPolicies: number;
   policiesMissingRecentWalRun: number;
@@ -76,6 +94,14 @@ export interface BackupCoverageDashboard {
 }
 
 const RECENT_FAILURE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const PARTIAL_FAILURE_PREFIX = "One or more databases failed to back up:";
+const PARTIAL_FAILURE_DATABASE_LIMIT = 6;
+const PARTIAL_FAILURE_LABEL_PATTERN = /^([A-Za-z0-9_.-]{1,128}):\s/;
+
+const EMPTY_PARTIAL_FAILURES: BackupPartialFailures = {
+  count: 0,
+  databases: [],
+};
 
 function toIso(value: Date | string | null | undefined): string | null {
   if (!value) return null;
@@ -138,11 +164,104 @@ function isRecentFailure(
     now.getTime() - startedMs <= RECENT_FAILURE_WINDOW_MS;
 }
 
+function isScheduledPartial(run: BackupCoverageRunInput | null | undefined): run is BackupCoverageRunInput {
+  return run?.status === "PARTIAL" && run.triggeredBy === "schedule";
+}
+
+function isScheduledPartialFull(run: BackupCoverageRunInput | null | undefined): boolean {
+  return isScheduledPartial(run) && run?.type === "FULL_LOGICAL";
+}
+
+function isScheduledProblem(run: BackupCoverageRunInput | null | undefined): run is BackupCoverageRunInput {
+  return run?.triggeredBy === "schedule" && (run.status === "FAILED" || run.status === "PARTIAL");
+}
+
+function isRecentProblem(
+  run: BackupCoverageRunInput | null | undefined,
+  now: Date
+): boolean {
+  const startedMs = dateMs(run?.startedAt);
+  return isScheduledProblem(run) &&
+    startedMs != null &&
+    now.getTime() - startedMs <= RECENT_FAILURE_WINDOW_MS;
+}
+
+function latestByStartedAt(runs: BackupCoverageRunInput[]): BackupCoverageRunInput | null {
+  let latest: BackupCoverageRunInput | null = null;
+  let latestMs: number | null = null;
+  for (const run of runs) {
+    const startedMs = dateMs(run.startedAt);
+    if (startedMs == null) continue;
+    if (latestMs == null || startedMs > latestMs) {
+      latest = run;
+      latestMs = startedMs;
+    }
+  }
+  return latest;
+}
+
+function latestPartialRun(policy: BackupCoveragePolicyInput): BackupCoverageRunInput | null {
+  return latestByStartedAt([
+    policy.latestRun,
+    policy.latestPartialRun,
+    policy.latestProblemRun?.status === "PARTIAL" ? policy.latestProblemRun : null,
+  ].filter(isScheduledPartial));
+}
+
+function latestProblemRun(policy: BackupCoveragePolicyInput): BackupCoverageRunInput | null {
+  return latestByStartedAt([
+    policy.latestRun,
+    policy.latestFailedRun,
+    policy.latestPartialRun,
+    policy.latestProblemRun,
+  ].filter(isScheduledProblem));
+}
+
+export function parsePartialBackupFailures(error: string | null | undefined): BackupPartialFailures {
+  if (!error) return EMPTY_PARTIAL_FAILURES;
+  const prefixIndex = error.indexOf(PARTIAL_FAILURE_PREFIX);
+  if (prefixIndex === -1) return EMPTY_PARTIAL_FAILURES;
+
+  const details = error.slice(prefixIndex + PARTIAL_FAILURE_PREFIX.length);
+  const seen = new Set<string>();
+  const databases: string[] = [];
+  for (const segment of details.split(";")) {
+    const match = segment.trim().match(PARTIAL_FAILURE_LABEL_PATTERN);
+    if (!match) continue;
+    const database = match[1];
+    if (seen.has(database)) continue;
+    seen.add(database);
+    if (databases.length < PARTIAL_FAILURE_DATABASE_LIMIT) {
+      databases.push(database);
+    }
+  }
+
+  return {
+    count: seen.size,
+    databases,
+  };
+}
+
+function summarizeProblemRun(run: BackupCoverageRunInput | null): BackupProblemRunSummary | null {
+  if (!run) return null;
+  return {
+    status: run.status,
+    type: run.type,
+    startedAt: toIso(run.startedAt)!,
+    error: run.error ?? null,
+    partialFailures: run.status === "PARTIAL"
+      ? parsePartialBackupFailures(run.error)
+      : EMPTY_PARTIAL_FAILURES,
+  };
+}
+
 function fullBackupStatus(
   policy: BackupCoveragePolicyInput,
-  fullIsCurrent: boolean
+  fullIsCurrent: boolean,
+  latestRun?: BackupCoverageRunInput | null
 ): BackupCoveragePolicyCard["fullBackupStatus"] {
   if (!policy.lastSuccessfulFullAt) return "CRITICAL";
+  if (isScheduledPartialFull(latestRun)) return "WARNING";
   return fullIsCurrent ? "HEALTHY" : "WARNING";
 }
 
@@ -162,6 +281,7 @@ export function buildBackupCoverageDashboard(
     const coverage = computeBackupCoverage(policy, policy.latestRun ?? null, now);
     const scheduledNextRun = nextRun(policy);
     const latestFailure = policy.latestFailedRun ?? null;
+    const problemRun = latestProblemRun(policy);
 
     return {
       id: policy.id,
@@ -170,7 +290,7 @@ export function buildBackupCoverageDashboard(
       databaseServer: databaseLabel(policy),
       storageProvider: policy.storageTarget?.provider ?? "Unknown",
       storageTarget: policy.storageTarget?.name ?? "Unassigned",
-      fullBackupStatus: fullBackupStatus(policy, coverage.fullIsCurrent),
+      fullBackupStatus: fullBackupStatus(policy, coverage.fullIsCurrent, policy.latestRun),
       walPitrStatus: walPitrStatus(policy, coverage.walIsCurrent),
       coverageStatus: coverage.status,
       coverageReason: coverage.reason,
@@ -185,6 +305,7 @@ export function buildBackupCoverageDashboard(
             error: latestFailure.error ?? null,
           }
         : null,
+      latestProblemRun: summarizeProblemRun(problemRun),
       nextRun: scheduledNextRun.at,
       nextRunType: scheduledNextRun.type,
     } satisfies BackupCoveragePolicyCard;
@@ -198,6 +319,8 @@ export function buildBackupCoverageDashboard(
     totalPolicies: cards.length,
     healthyPolicies: cards.filter((policy) => policy.coverageStatus === "HEALTHY").length,
     recentFailedPolicies: policies.filter((policy) => isRecentFailure(policy.latestFailedRun, now)).length,
+    recentPartialPolicies: policies.filter((policy) => isRecentProblem(latestPartialRun(policy), now)).length,
+    recentProblemPolicies: policies.filter((policy) => isRecentProblem(latestProblemRun(policy), now)).length,
     policiesWithNoSuccessfulFullBackup: policies.filter((policy) => !policy.lastSuccessfulFullAt).length,
     walEnabledPolicies: policies.filter((policy) => policy.walEnabled).length,
     policiesMissingRecentWalRun: cards.filter((policy) => policy.walPitrStatus === "WARNING").length,

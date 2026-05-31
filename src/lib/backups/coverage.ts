@@ -56,6 +56,17 @@ export function computeBackupCoverage(
     };
   }
 
+  if (latestRun?.status === "PARTIAL" && latestRun.triggeredBy === "schedule") {
+    return {
+      status: "DEGRADED",
+      reason: "Latest scheduled backup run was partial",
+      fullIsCurrent: isCurrent(policy.lastSuccessfulFullAt, policy.fullFrequency, now),
+      walIsCurrent: policy.walEnabled
+        ? isCurrent(policy.lastSuccessfulWalAt, policy.walFrequency, now)
+        : null,
+    };
+  }
+
   if (!policy.lastSuccessfulFullAt) {
     return {
       status: "NEVER_RUN",

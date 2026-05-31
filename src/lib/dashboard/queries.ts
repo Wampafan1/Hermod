@@ -299,6 +299,10 @@ export async function getDashboardData(userId: string, tenantId: string): Promis
         storageTarget: policy.storageTarget,
         latestRun: policy.runs[0] ?? null,
         latestFailedRun: policy.runs.find((run) => run.status === "FAILED") ?? null,
+        latestPartialRun: policy.runs.find((run) => run.status === "PARTIAL" && run.triggeredBy === "schedule") ?? null,
+        latestProblemRun: policy.runs.find((run) =>
+          run.triggeredBy === "schedule" && (run.status === "FAILED" || run.status === "PARTIAL")
+        ) ?? null,
       })),
       now
     ),
