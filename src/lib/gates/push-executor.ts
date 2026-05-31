@@ -14,6 +14,7 @@ import type { ConnectionProvider } from "@/lib/providers/provider";
 import type { ProviderConnection } from "@/lib/providers/types";
 import { Prisma } from "@prisma/client";
 import { normalizeDestinationColumnName } from "./alter-generator";
+import { isDateLikeColumnName } from "@/lib/duckdb/schema-diff";
 import { fullSqlTableRef, quoteSqlIdentifier } from "./sql-identifiers";
 import {
   type CandidateKey,
@@ -651,6 +652,74 @@ function coerceDateLikeValue(input: {
   };
 }
 
+// Excel 1900 date system: serial day 0 = 1899-12-30 (the convention the
+// downstream normalization view uses when converting etd back to a date).
+const EXCEL_DATE_EPOCH_UTC = Date.UTC(1899, 11, 30);
+const MS_PER_DAY = 86_400_000;
+const MONTH_ABBREVIATIONS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+function normalizeTwoDigitYear(year: number): number {
+  return year < 100 ? 2000 + year : year;
+}
+
+function parseCalendarDateParts(
+  value: unknown
+): { year: number; month: number; day: number } | null {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return { year: value.getUTCFullYear(), month: value.getUTCMonth() + 1, day: value.getUTCDate() };
+  }
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+
+  let m = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/);
+  if (m) return { year: +m[1], month: +m[2], day: +m[3] };
+
+  m = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (m) return { year: normalizeTwoDigitYear(+m[3]), month: +m[1], day: +m[2] };
+
+  m = trimmed.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/);
+  if (m) {
+    const month = MONTH_ABBREVIATIONS[m[2].toLowerCase()];
+    if (!month) return null;
+    return { year: normalizeTwoDigitYear(+m[3]), month, day: +m[1] };
+  }
+  return null;
+}
+
+/**
+ * Convert a date value into an Excel serial day number, but only for columns
+ * whose name looks like a date — matching the same heuristic the schema-drift
+ * detector (`isExcelSerialDateCompatibility`) uses to treat an integer column
+ * and incoming dates as compatible. These columns store the raw, as-delivered
+ * Excel serial; when the source switches to real dates we convert so rows land
+ * consistently with existing data and the downstream view, instead of failing.
+ * Returns null when the column is not date-named or the value is not a valid
+ * calendar date.
+ */
+function coerceDateToExcelSerial(value: unknown, column: string): number | null {
+  if (!isDateLikeColumnName(column)) return null;
+  const parts = parseCalendarDateParts(value);
+  if (!parts) return null;
+
+  const utc = Date.UTC(parts.year, parts.month - 1, parts.day);
+  if (Number.isNaN(utc)) return null;
+  // Reject impossible calendar dates (e.g., 2024-13-40) — Date.UTC rolls them over.
+  const roundTrip = new Date(utc);
+  if (
+    roundTrip.getUTCFullYear() !== parts.year ||
+    roundTrip.getUTCMonth() + 1 !== parts.month ||
+    roundTrip.getUTCDate() !== parts.day
+  ) {
+    return null;
+  }
+
+  return Math.round((utc - EXCEL_DATE_EPOCH_UTC) / MS_PER_DAY);
+}
+
 export function coerceGateValueForDestination(input: {
   value: unknown;
   destType: string | null;
@@ -672,29 +741,27 @@ export function coerceGateValueForDestination(input: {
       return { ok: true, value: input.value.toString() };
     }
 
-    if (typeof input.value === "number") {
-      return Number.isFinite(input.value) && Number.isInteger(input.value)
-        ? { ok: true, value: input.value }
-        : invalidCoercionResult({
-            column: input.column,
-            destType: input.destType,
-            value: input.value,
-            reason: "Expected integer-compatible value",
-            rowIndex: input.rowIndex,
-          });
+    if (
+      typeof input.value === "number" &&
+      Number.isFinite(input.value) &&
+      Number.isInteger(input.value)
+    ) {
+      return { ok: true, value: input.value };
     }
 
     if (typeof input.value === "string") {
       const normalized = normalizeNumericString(input.value);
-      return INTEGER_STRING_PATTERN.test(normalized)
-        ? { ok: true, value: normalized }
-        : invalidCoercionResult({
-            column: input.column,
-            destType: input.destType,
-            value: input.value,
-            reason: "Expected integer-compatible value",
-            rowIndex: input.rowIndex,
-          });
+      if (INTEGER_STRING_PATTERN.test(normalized)) {
+        return { ok: true, value: normalized };
+      }
+    }
+
+    // Date-named integer columns store Excel serial day numbers. When the source
+    // sends a real date instead of the legacy serial, convert it so the row lands
+    // consistently with existing data and the downstream view, rather than failing.
+    const serial = coerceDateToExcelSerial(input.value, input.column);
+    if (serial !== null) {
+      return { ok: true, value: serial };
     }
 
     return invalidCoercionResult({

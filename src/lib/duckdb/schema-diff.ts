@@ -48,7 +48,7 @@ function isDateOrDateStringDuckdbType(type: string): boolean {
   return hermod === "TIMESTAMP" || hermod === "STRING";
 }
 
-function isDateLikeColumnName(name: string): boolean {
+export function isDateLikeColumnName(name: string): boolean {
   const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   return (
     /\b(date|dt|eta|etd|arrival|departure|departures|posted|shipped|delivered)\b/.test(normalized) ||

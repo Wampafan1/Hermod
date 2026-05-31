@@ -178,6 +178,77 @@ describe("gate UPSERT destination type coercion", () => {
     expect(derivePushStatus({ attemptedRows: 1, rowsErrored: 1 })).toBe("FAILED");
   });
 
+  it("converts date strings to Excel serials for date-named integer columns", () => {
+    // The destination column stores Excel serial day numbers (legacy raw format),
+    // but the source now delivers real dates. Convert so it lands consistently.
+    expect(
+      coerceGateValueForDestination({
+        value: "2024-10-30",
+        destType: "bigint",
+        column: "etd",
+      })
+    ).toEqual({ ok: true, value: 45595 });
+
+    expect(
+      coerceGateValueForDestination({
+        value: "2024-11-01",
+        destType: "bigint",
+        column: "etd",
+      })
+    ).toEqual({ ok: true, value: 45597 });
+  });
+
+  it("converts Date objects to Excel serials for date-named integer columns", () => {
+    expect(
+      coerceGateValueForDestination({
+        value: new Date(Date.UTC(2024, 9, 30)),
+        destType: "INTEGER",
+        column: "ETD",
+      })
+    ).toEqual({ ok: true, value: 45595 });
+  });
+
+  it("converts US-format date strings to Excel serials for date-named integer columns", () => {
+    expect(
+      coerceGateValueForDestination({
+        value: "10/30/2024",
+        destType: "bigint",
+        column: "etd",
+      })
+    ).toEqual({ ok: true, value: 45595 });
+  });
+
+  it("passes existing integer serials through unchanged for date-named integer columns", () => {
+    expect(
+      coerceGateValueForDestination({
+        value: "45595",
+        destType: "bigint",
+        column: "etd",
+      })
+    ).toEqual({ ok: true, value: "45595" });
+  });
+
+  it("does NOT convert dates for integer columns that are not date-named", () => {
+    const result = coerceGateValueForDestination({
+      value: "2024-10-30",
+      destType: "bigint",
+      column: "quantity",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.reason).toBe("Expected integer-compatible value");
+    }
+  });
+
+  it("rejects unparseable values even for date-named integer columns", () => {
+    const result = coerceGateValueForDestination({
+      value: "not-a-date",
+      destType: "bigint",
+      column: "etd",
+    });
+    expect(result.ok).toBe(false);
+  });
+
   it("limits row error value previews", () => {
     const result = coerceGateValueForDestination({
       value: "postgres://user:password@example.com/database".repeat(3),

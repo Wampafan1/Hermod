@@ -61,3 +61,38 @@ describe("Gate SQL identifiers", () => {
     });
   });
 });
+
+describe("Gate drift type-change DDL", () => {
+  const typeChangeDiff = (newType: string, oldType = "VARCHAR") => ({
+    added: [],
+    removed: [],
+    typeChanged: [{ name: "amount", oldType, newType }],
+  });
+
+  it("Postgres type change includes a USING cast clause", () => {
+    const [stmt] = generateAlterStatements("POSTGRES", "public", "t", typeChangeDiff("BIGINT"));
+    expect(stmt.sql).toBe(
+      'ALTER TABLE "public"."t" ALTER COLUMN "amount" TYPE BIGINT USING ("amount"::BIGINT);'
+    );
+    expect(stmt.isComment).toBe(false);
+  });
+
+  it("Postgres type change to a multi-word type casts with that type", () => {
+    const [stmt] = generateAlterStatements("POSTGRES", "public", "t", typeChangeDiff("TIMESTAMP"));
+    expect(stmt.sql).toBe(
+      'ALTER TABLE "public"."t" ALTER COLUMN "amount" TYPE TIMESTAMPTZ USING ("amount"::TIMESTAMPTZ);'
+    );
+  });
+
+  it("MySQL type change uses MODIFY COLUMN without a USING clause", () => {
+    const [stmt] = generateAlterStatements("MYSQL", "db", "t", typeChangeDiff("BIGINT"));
+    expect(stmt.sql).toContain("MODIFY COLUMN");
+    expect(stmt.sql).not.toContain("USING");
+  });
+
+  it("SQL Server type change uses ALTER COLUMN without a USING clause", () => {
+    const [stmt] = generateAlterStatements("MSSQL", "dbo", "t", typeChangeDiff("BIGINT"));
+    expect(stmt.sql).toContain("ALTER COLUMN");
+    expect(stmt.sql).not.toContain("USING");
+  });
+});

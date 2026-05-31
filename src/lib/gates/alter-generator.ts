@@ -218,7 +218,10 @@ export function generateAlterStatements(
         sql = `ALTER TABLE ${tableRef} MODIFY COLUMN ${colRef} ${newDestType};`;
         break;
       default: // postgres
-        sql = `ALTER TABLE ${tableRef} ALTER COLUMN ${colRef} TYPE ${newDestType};`;
+        // Postgres requires a USING clause to recast existing data when there is
+        // no implicit cast (e.g. text→numeric, text→timestamp). MySQL/SQL Server
+        // convert in place and have no USING syntax.
+        sql = `ALTER TABLE ${tableRef} ALTER COLUMN ${colRef} TYPE ${newDestType} USING (${colRef}::${newDestType});`;
         break;
     }
 
