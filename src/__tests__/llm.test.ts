@@ -18,7 +18,9 @@ afterEach(() => {
 import { OpenAICompatibleProvider } from "@/lib/llm/providers/openai-compatible";
 import { AnthropicProvider } from "@/lib/llm/providers/anthropic";
 import { AntonProvider } from "@/lib/llm/providers/anton";
-import { getLlmProvider } from "@/lib/llm";
+import { OllamaProvider } from "@/lib/llm/providers/ollama";
+import { getLlmProvider, runMachineInference } from "@/lib/llm";
+import { resolveOllamaModel, resolveOllamaBaseUrl } from "@/lib/llm/model-policy";
 
 // ─── Helpers ────────────────────────────────────────
 
@@ -511,5 +513,225 @@ describe("getLlmProvider", () => {
     vi.stubEnv("LLM_MODEL", "gpt-4o");
 
     expect(() => getLlmProvider()).toThrow("LLM API key is required");
+  });
+
+  it("creates an Ollama provider when LLM_PROVIDER=ollama (no API key needed)", () => {
+    vi.stubEnv("LLM_PROVIDER", "ollama");
+
+    const provider = getLlmProvider();
+    expect(provider.name).toBe("ollama/qwen3:8b");
+  });
+
+  it("never resolves a cloud model name for ollama even if LLM_MODEL is set", () => {
+    vi.stubEnv("LLM_PROVIDER", "ollama");
+    vi.stubEnv("LLM_MODEL", "claude-sonnet-4-6");
+
+    const provider = getLlmProvider();
+    expect(provider.name).toBe("ollama/qwen3:8b");
+    expect(provider.name).not.toContain("claude");
+  });
+
+  it("does not let LLM_MODEL leak into the anton provider", () => {
+    vi.stubEnv("LLM_PROVIDER", "anton");
+    vi.stubEnv("LLM_MODEL", "claude-sonnet-4-6");
+    vi.stubEnv("ANTON_MODEL", "anton");
+
+    const provider = getLlmProvider();
+    expect(provider.name).toBe("anton/anton");
+  });
+});
+
+// ─── Ollama Provider ────────────────────────────────
+
+describe("OllamaProvider", () => {
+  const provider = new OllamaProvider({
+    model: "qwen3:8b",
+    baseUrl: "http://192.168.1.181:11434",
+  });
+
+  const ollamaSuccess = { message: { content: "Hello from Ollama" } };
+
+  it("posts to /api/chat with think:false and num_predict:-1", async () => {
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(ollamaSuccess));
+
+    const result = await provider.chat({
+      messages: [{ role: "user", content: "Hi" }],
+      temperature: 0,
+    });
+
+    expect(result.content).toBe("Hello from Ollama");
+    expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 0 });
+    expect(result.model).toBe("qwen3:8b");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("http://192.168.1.181:11434/api/chat");
+    expect(opts.method).toBe("POST");
+    const body = JSON.parse(opts.body);
+    expect(body.model).toBe("qwen3:8b");
+    expect(body.stream).toBe(false);
+    expect(body.think).toBe(false);
+    expect(body.options).toEqual({ temperature: 0, num_predict: -1 });
+    expect(body.format).toBeUndefined();
+  });
+
+  it("sets format:json and appends the JSON instruction to the last message only", async () => {
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(ollamaSuccess));
+
+    await provider.chat({
+      messages: [
+        { role: "system", content: "Be precise" },
+        { role: "user", content: "Give me data" },
+      ],
+      responseFormat: { type: "json_object" },
+    });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.format).toBe("json");
+    expect(body.messages[0].content).toBe("Be precise");
+    expect(body.messages[1].content).toContain("Give me data");
+    expect(body.messages[1].content).toContain("ONLY valid JSON");
+  });
+
+  it("defaults temperature to 0 when omitted", async () => {
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(ollamaSuccess));
+    await provider.chat({ messages: [{ role: "user", content: "Hi" }] });
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.options.temperature).toBe(0);
+  });
+
+  it("throws on empty content", async () => {
+    mockFetch.mockResolvedValueOnce(mockJsonResponse({ message: { content: "" } }));
+    await expect(
+      provider.chat({ messages: [{ role: "user", content: "Hi" }] })
+    ).rejects.toThrow("Ollama returned no content");
+  });
+
+  it("throws on a non-ok HTTP status", async () => {
+    mockFetch.mockResolvedValueOnce(mockJsonResponse({ error: "boom" }, 500));
+    await expect(
+      provider.chat({ messages: [{ role: "user", content: "Hi" }] })
+    ).rejects.toThrow("Ollama HTTP 500");
+  });
+
+  it("returns ollama/model as name", () => {
+    expect(provider.name).toBe("ollama/qwen3:8b");
+  });
+});
+
+// ─── Model policy (purpose → model resolution) ──────
+
+describe("model-policy", () => {
+  it("resolveOllamaModel defaults: fast → qwen3:8b, smart → nemotron3:33b", () => {
+    expect(resolveOllamaModel("fast")).toBe("qwen3:8b");
+    expect(resolveOllamaModel("smart")).toBe("nemotron3:33b");
+  });
+
+  it("resolveOllamaModel env override wins for each tier", () => {
+    vi.stubEnv("HERMOD_OLLAMA_MODEL_FAST", "qwen3:14b");
+    vi.stubEnv("HERMOD_OLLAMA_MODEL_SMART", "llama3.3:70b");
+    expect(resolveOllamaModel("fast")).toBe("qwen3:14b");
+    expect(resolveOllamaModel("smart")).toBe("llama3.3:70b");
+  });
+
+  it("resolveOllamaBaseUrl prefers HERMOD_OLLAMA_URL, then OLLAMA_URL, then default", () => {
+    expect(resolveOllamaBaseUrl()).toBe("http://192.168.1.181:11434");
+    vi.stubEnv("OLLAMA_URL", "http://legacy:11434");
+    expect(resolveOllamaBaseUrl()).toBe("http://legacy:11434");
+    vi.stubEnv("HERMOD_OLLAMA_URL", "http://hermod-gpu:11434");
+    expect(resolveOllamaBaseUrl()).toBe("http://hermod-gpu:11434");
+  });
+
+  it("never resolves a cloud model name — LLM_MODEL is ignored", () => {
+    vi.stubEnv("LLM_MODEL", "claude-sonnet-4-6");
+    expect(resolveOllamaModel("fast")).toBe("qwen3:8b");
+    expect(resolveOllamaModel("smart")).toBe("nemotron3:33b");
+  });
+});
+
+// ─── runMachineInference (machinery entry point) ────
+
+describe("runMachineInference", () => {
+  const ollamaJson = { message: { content: '{"ok":true}' } };
+
+  it("runs against local Ollama with the purpose-resolved model", async () => {
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(ollamaJson));
+
+    const result = await runMachineInference(
+      {
+        messages: [{ role: "user", content: "Hi" }],
+        responseFormat: { type: "json_object" },
+      },
+      { purpose: "smart" }
+    );
+
+    expect(result.provider).toBe("ollama");
+    expect(result.content).toBe('{"ok":true}');
+    expect(result.model).toBe("nemotron3:33b");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("http://192.168.1.181:11434/api/chat");
+    expect(JSON.parse(opts.body).model).toBe("nemotron3:33b");
+  });
+
+  it("NEVER sends a claude-* model to Ollama, even when LLM_MODEL is a cloud model", async () => {
+    vi.stubEnv("LLM_MODEL", "claude-sonnet-4-6");
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(ollamaJson));
+
+    const result = await runMachineInference(
+      { messages: [{ role: "user", content: "Hi" }] },
+      { purpose: "fast" }
+    );
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.model).toBe("qwen3:8b");
+    expect(body.model).not.toContain("claude");
+    expect(result.provider).toBe("ollama");
+  });
+
+  it("defaults to the fast purpose when opts is omitted", async () => {
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(ollamaJson));
+    await runMachineInference({ messages: [{ role: "user", content: "Hi" }] });
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.model).toBe("qwen3:8b");
+  });
+
+  it("falls back to Anthropic when Ollama errors and ANTHROPIC_API_KEY is set", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    vi.stubEnv("LLM_MODEL", "claude-sonnet-4-6");
+    mockFetch
+      .mockResolvedValueOnce(mockJsonResponse({ error: "down" }, 500))
+      .mockResolvedValueOnce(mockJsonResponse(anthropicSuccess));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await runMachineInference(
+      { messages: [{ role: "user", content: "Hi" }] },
+      { purpose: "fast" }
+    );
+
+    expect(result.provider).toBe("anthropic");
+    expect(result.content).toBe("Hello from Claude");
+
+    // First fetch = Ollama (failed); second = Anthropic with the cloud model.
+    expect(mockFetch.mock.calls[0][0]).toBe("http://192.168.1.181:11434/api/chat");
+    const [anthUrl, anthOpts] = mockFetch.mock.calls[1];
+    expect(anthUrl).toBe("https://api.anthropic.com/v1/messages");
+    expect(JSON.parse(anthOpts.body).model).toBe("claude-sonnet-4-6");
+
+    warnSpy.mockRestore();
+  });
+
+  it("rethrows the Ollama error when no ANTHROPIC_API_KEY is configured", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    mockFetch.mockResolvedValueOnce(mockJsonResponse({ error: "down" }, 500));
+
+    await expect(
+      runMachineInference(
+        { messages: [{ role: "user", content: "Hi" }] },
+        { purpose: "fast" }
+      )
+    ).rejects.toThrow("Ollama HTTP 500");
+
+    // No cloud fallback attempted.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

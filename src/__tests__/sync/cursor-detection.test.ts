@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ColumnSchema } from "@/lib/sync/types";
 
-// Mock the LLM provider
-const mockChat = vi.fn();
+// Mock the machinery entry point
+const mockRunMachineInference = vi.fn();
 vi.mock("@/lib/llm", () => ({
-  getLlmProvider: () => ({ chat: mockChat, name: "mock" }),
+  runMachineInference: mockRunMachineInference,
 }));
 
 // Import AFTER mock setup
@@ -42,7 +42,7 @@ describe("cursor-detection", () => {
 
   describe("detectCursorStrategy", () => {
     it("parses valid AI response into CursorConfig", async () => {
-      mockChat.mockResolvedValueOnce({
+      mockRunMachineInference.mockResolvedValueOnce({
         content: JSON.stringify({
           strategy: "timestamp_cursor",
           cursorColumn: "lastmodifieddate",
@@ -76,7 +76,7 @@ describe("cursor-detection", () => {
     });
 
     it("falls back to full_refresh on invalid JSON response", async () => {
-      mockChat.mockResolvedValueOnce({
+      mockRunMachineInference.mockResolvedValueOnce({
         content: "I cannot determine a strategy for this table",
         usage: { inputTokens: 100, outputTokens: 50 },
         model: "test",
@@ -95,7 +95,7 @@ describe("cursor-detection", () => {
     });
 
     it("falls back to full_refresh on missing required fields", async () => {
-      mockChat.mockResolvedValueOnce({
+      mockRunMachineInference.mockResolvedValueOnce({
         content: JSON.stringify({ cursorColumn: "foo" }),
         usage: { inputTokens: 100, outputTokens: 50 },
         model: "test",
@@ -113,7 +113,7 @@ describe("cursor-detection", () => {
     });
 
     it("falls back to full_refresh on LLM error", async () => {
-      mockChat.mockRejectedValueOnce(new Error("API rate limit"));
+      mockRunMachineInference.mockRejectedValueOnce(new Error("API rate limit"));
 
       const result = await detectCursorStrategy({
         tableName: "items",
@@ -128,7 +128,7 @@ describe("cursor-detection", () => {
     });
 
     it("sends correct system and user messages to LLM", async () => {
-      mockChat.mockResolvedValueOnce({
+      mockRunMachineInference.mockResolvedValueOnce({
         content: JSON.stringify({
           strategy: "full_refresh",
           cursorColumn: null,
@@ -150,8 +150,8 @@ describe("cursor-detection", () => {
         columns: LOG_COLUMNS,
       });
 
-      expect(mockChat).toHaveBeenCalledOnce();
-      const req = mockChat.mock.calls[0][0];
+      expect(mockRunMachineInference).toHaveBeenCalledOnce();
+      const req = mockRunMachineInference.mock.calls[0][0];
       expect(req.messages).toHaveLength(2);
       expect(req.messages[0].role).toBe("system");
       expect(req.messages[0].content).toContain("timestamp_cursor");

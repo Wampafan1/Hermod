@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { LlmProvider, LlmChatRequest, LlmChatResponse } from "@/lib/llm/types";
+import type { LlmChatRequest, LlmChatResponse } from "@/lib/llm/types";
 import type {
   AmbiguousCase,
   ForgeStep,
@@ -8,34 +8,45 @@ import type {
 } from "@/lib/mjolnir/types";
 import { fingerprintAllColumns } from "@/lib/mjolnir/engine/fingerprint";
 
-// ─── Mock LLM Provider ──────────────────────────────
+// ─── Mock machinery entry point (runMachineInference) ──────
+
+const mockRunMachineInference = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/llm", () => ({
+  runMachineInference: mockRunMachineInference,
+}));
 
 const mockChatResponses = vi.hoisted(() => {
   return {
     responses: [] as LlmChatResponse[],
     callIndex: 0,
     calls: [] as LlmChatRequest[],
+    rejectWith: null as Error | null,
   };
 });
 
-function createMockProvider(): LlmProvider {
-  return {
-    name: "mock",
-    chat: vi.fn(async (request: LlmChatRequest): Promise<LlmChatResponse> => {
+// Drives mockRunMachineInference from the queued responses, recording each
+// request the way the old injected provider's chat() did.
+function installMachineMock() {
+  mockRunMachineInference.mockImplementation(
+    async (request: LlmChatRequest) => {
       mockChatResponses.calls.push(request);
+      if (mockChatResponses.rejectWith) throw mockChatResponses.rejectWith;
       const idx = mockChatResponses.callIndex++;
       if (idx < mockChatResponses.responses.length) {
-        return mockChatResponses.responses[idx];
+        const r = mockChatResponses.responses[idx];
+        return { content: r.content, model: r.model, provider: "ollama" };
       }
       throw new Error("No mock response configured for call index " + idx);
-    }),
-  };
+    }
+  );
 }
 
 function setMockResponses(...responses: LlmChatResponse[]) {
   mockChatResponses.responses = responses;
   mockChatResponses.callIndex = 0;
   mockChatResponses.calls = [];
+  mockChatResponses.rejectWith = null;
 }
 
 function makeMockResponse(content: string): LlmChatResponse {
@@ -86,13 +97,13 @@ function makeDiff(overrides: Partial<StructuralDiffResult> = {}): StructuralDiff
 // ─── Tests ───────────────────────────────────────────
 
 describe("ai-inference", () => {
-  let mockProvider: LlmProvider;
-
   beforeEach(() => {
-    mockProvider = createMockProvider();
+    mockRunMachineInference.mockReset();
+    installMachineMock();
     mockChatResponses.responses = [];
     mockChatResponses.callIndex = 0;
     mockChatResponses.calls = [];
+    mockChatResponses.rejectWith = null;
   });
 
   afterEach(() => {
@@ -106,11 +117,11 @@ describe("ai-inference", () => {
     const before = makeParsedFile(["A"], [{ A: 1 }]);
     const after = makeParsedFile(["A"], [{ A: 1 }]);
 
-    const result = await runAiInference(diff, before, after, undefined, mockProvider);
+    const result = await runAiInference(diff, before, after);
 
     expect(result.steps).toEqual([]);
     expect(result.warnings).toEqual([]);
-    expect(mockProvider.chat).not.toHaveBeenCalled();
+    expect(mockRunMachineInference).not.toHaveBeenCalled();
   });
 
   it("calls LLM with formula inference prompt for new_column cases", async () => {
@@ -156,9 +167,9 @@ describe("ai-inference", () => {
       )
     );
 
-    const result = await runAiInference(diff, before, after, undefined, mockProvider);
+    const result = await runAiInference(diff, before, after);
 
-    expect(mockProvider.chat).toHaveBeenCalledTimes(1);
+    expect(mockRunMachineInference).toHaveBeenCalledTimes(1);
 
     // Verify the system message contains the infer-formula prompt content
     const call = mockChatResponses.calls[0];
@@ -224,9 +235,9 @@ describe("ai-inference", () => {
       )
     );
 
-    const result = await runAiInference(diff, before, after, undefined, mockProvider);
+    const result = await runAiInference(diff, before, after);
 
-    expect(mockProvider.chat).toHaveBeenCalledTimes(1);
+    expect(mockRunMachineInference).toHaveBeenCalledTimes(1);
 
     const call = mockChatResponses.calls[0];
     expect(call.messages[0].role).toBe("system");
@@ -284,9 +295,9 @@ describe("ai-inference", () => {
       )
     );
 
-    const result = await runAiInference(diff, before, after, undefined, mockProvider);
+    const result = await runAiInference(diff, before, after);
 
-    expect(mockProvider.chat).toHaveBeenCalledTimes(1);
+    expect(mockRunMachineInference).toHaveBeenCalledTimes(1);
 
     const call = mockChatResponses.calls[0];
     expect(call.messages[0].content).toContain("data transformation classifier");
@@ -347,10 +358,7 @@ The above step calculates the total [as requested].`;
   it("handles LLM error gracefully (returns empty array, does not throw)", async () => {
     const { runAiInference } = await import("@/lib/mjolnir/engine/ai-inference");
 
-    const errorProvider: LlmProvider = {
-      name: "error-provider",
-      chat: vi.fn().mockRejectedValue(new Error("API rate limit exceeded")),
-    };
+    mockChatResponses.rejectWith = new Error("API rate limit exceeded");
 
     const before = makeParsedFile(["A"], [{ A: 1 }]);
     const after = makeParsedFile(["A", "B"], [{ A: 1, B: 2 }]);
@@ -368,12 +376,12 @@ The above step calculates the total [as requested].`;
     // Suppress console.warn during test
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const result = await runAiInference(diff, before, after, undefined, errorProvider);
+    const result = await runAiInference(diff, before, after);
 
     expect(result.steps).toEqual([]);
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("API rate limit exceeded");
-    expect(errorProvider.chat).toHaveBeenCalledTimes(1);
+    expect(mockRunMachineInference).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalled();
 
     warnSpy.mockRestore();
@@ -399,28 +407,15 @@ The above step calculates the total [as requested].`;
       makeMockResponse("This is not valid JSON at all, sorry I cannot help")
     );
 
-    const result = await runAiInference(diff, before, after, undefined, mockProvider);
+    const result = await runAiInference(diff, before, after);
 
     // Should return empty steps (invalid JSON parsed as no steps)
     expect(result.steps).toEqual([]);
-    expect(mockProvider.chat).toHaveBeenCalledTimes(1);
+    expect(mockRunMachineInference).toHaveBeenCalledTimes(1);
   });
 
-  it("uses injected provider instead of default", async () => {
+  it("routes ambiguous inference through runMachineInference with smart purpose", async () => {
     const { runAiInference } = await import("@/lib/mjolnir/engine/ai-inference");
-
-    const customProvider: LlmProvider = {
-      name: "custom-provider",
-      chat: vi.fn().mockResolvedValue(
-        makeMockResponse(
-          JSON.stringify({
-            formula: "{A} + 1",
-            confidence: 0.8,
-            explanation: "B equals A plus 1",
-          })
-        )
-      ),
-    };
 
     const before = makeParsedFile(["A"], [{ A: 1 }, { A: 2 }]);
     const after = makeParsedFile(["A", "B"], [{ A: 1, B: 2 }, { A: 2, B: 3 }]);
@@ -435,9 +430,21 @@ The above step calculates the total [as requested].`;
       ],
     });
 
-    const result = await runAiInference(diff, before, after, undefined, customProvider);
+    setMockResponses(
+      makeMockResponse(
+        JSON.stringify({
+          formula: "{A} + 1",
+          confidence: 0.8,
+          explanation: "B equals A plus 1",
+        })
+      )
+    );
 
-    expect(customProvider.chat).toHaveBeenCalledTimes(1);
+    const result = await runAiInference(diff, before, after);
+
+    expect(mockRunMachineInference).toHaveBeenCalledTimes(1);
+    // Machinery must request the SMART tier for ambiguous inference.
+    expect(mockRunMachineInference.mock.calls[0][1]).toEqual({ purpose: "smart" });
     expect(result.steps).toHaveLength(1);
     expect(result.steps[0].type).toBe("calculate");
     expect(result.steps[0].config.formula).toBe("{A} + 1");
@@ -469,7 +476,7 @@ The above step calculates the total [as requested].`;
       )
     );
 
-    await runAiInference(diff, before, after, undefined, mockProvider);
+    await runAiInference(diff, before, after);
 
     // The chat request should NOT contain model: "gpt-4o" or any hardcoded model
     const call = mockChatResponses.calls[0];
@@ -515,7 +522,7 @@ The above step calculates the total [as requested].`;
       )
     );
 
-    const result = await runAiInference(diff, before, after, undefined, mockProvider);
+    const result = await runAiInference(diff, before, after);
 
     expect(result.steps).toHaveLength(1);
     // Step validator should have normalized "renames" → "mapping"
@@ -550,7 +557,7 @@ The above step calculates the total [as requested].`;
     );
     setMockResponses(...responses);
 
-    const result = await runAiInference(diff, before, after, undefined, mockProvider);
+    const result = await runAiInference(diff, before, after);
 
     // With >3 new columns, should use bulk analysis (1 call) instead of 11 individual calls
     expect(mockChatResponses.callIndex).toBeLessThanOrEqual(10);
@@ -640,7 +647,7 @@ The above step calculates the total [as requested].`;
       )
     );
 
-    const result = await runAiInference(diff, before, after, undefined, mockProvider);
+    const result = await runAiInference(diff, before, after);
 
     // Should have exactly 5 calculate steps, NOT 6 (no duplicate for Total)
     const calcSteps = result.steps.filter((s) => s.type === "calculate");
@@ -697,7 +704,7 @@ The above step calculates the total [as requested].`;
     );
 
     const userDescription = "I added Price and Tax together to get the Total";
-    await runAiInference(diff, before, after, userDescription, mockProvider);
+    await runAiInference(diff, before, after, userDescription);
 
     // Verify user description is included in the context sent to LLM
     const call = mockChatResponses.calls[0];
@@ -744,7 +751,7 @@ The above step calculates the total [as requested].`;
       )
     );
 
-    await runAiInference(diff, before, after, undefined, mockProvider);
+    await runAiInference(diff, before, after);
 
     const prompt = mockChatResponses.calls[0].messages[1].content;
     expect(prompt).toContain("[REDACTED_SAMPLE]");
@@ -787,7 +794,7 @@ The above step calculates the total [as requested].`;
       )
     );
 
-    await runAiInference(diff, before, after, undefined, mockProvider);
+    await runAiInference(diff, before, after);
 
     const prompt = mockChatResponses.calls[0].messages[1].content;
     expect(prompt).toContain("beforeColumns");

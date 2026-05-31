@@ -8,7 +8,7 @@
  * NEVER sends row data to any AI provider — only column metadata.
  */
 
-import { runAI } from "@/lib/ai/router";
+import { runMachineInference } from "@/lib/llm";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -163,8 +163,8 @@ function parseAIResponse(
  * Prune columns to identify primary key candidates.
  *
  * Three-layer fallback:
- *   1. Local Ollama GPU (gemma4:31b)
- *   2. Anthropic API (claude-sonnet-4)
+ *   1. Local Ollama GPU via runMachineInference (fast tier)
+ *   2. Anthropic API (best-effort cloud fallback, if ANTHROPIC_API_KEY is set)
  *   3. Heuristic regex + cardinality rules
  *
  * Never fails — always returns a result.
@@ -175,12 +175,12 @@ export async function pruneColumns(
   const start = Date.now();
   const allNames = columns.map((c) => c.name);
 
-  // Try AI pruning (Ollama → Anthropic, handled by runAI)
+  // Try AI pruning (local Ollama primary, Anthropic best-effort fallback)
   try {
-    const result = await runAI({
+    const result = await runMachineInference({
       messages: [{ role: "user", content: buildPruningPrompt(columns) }],
-      responseFormat: "json",
-    });
+      responseFormat: { type: "json_object" },
+    }, { purpose: "fast" });
 
     const candidates = parseAIResponse(result.content, allNames);
 

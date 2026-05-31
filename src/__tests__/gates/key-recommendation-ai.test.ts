@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockRunAI } = vi.hoisted(() => ({
-  mockRunAI: vi.fn(),
+const { mockRunMachineInference } = vi.hoisted(() => ({
+  mockRunMachineInference: vi.fn(),
 }));
 
-vi.mock("@/lib/ai/router", () => ({
-  runAI: mockRunAI,
+vi.mock("@/lib/llm", () => ({
+  runMachineInference: mockRunMachineInference,
 }));
 
 const candidateKeys = [
@@ -68,7 +68,7 @@ describe("Gate key recommendation AI", () => {
   });
 
   it("does not allow AI to recommend a candidate outside the verified list", async () => {
-    mockRunAI.mockResolvedValue({
+    mockRunMachineInference.mockResolvedValue({
       content: JSON.stringify({
         columns: ["invented_key"],
         explanation: "Use the invented key.",
@@ -92,7 +92,7 @@ describe("Gate key recommendation AI", () => {
   });
 
   it("falls back to deterministic ranking when AI fails", async () => {
-    mockRunAI.mockRejectedValue(new Error("offline"));
+    mockRunMachineInference.mockRejectedValue(new Error("offline"));
 
     const { recommendGateKey } = await import("@/lib/gates/key-recommendation-ai");
     const result = await recommendGateKey({

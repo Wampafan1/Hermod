@@ -6,8 +6,7 @@
  * by type and dispatches to the appropriate prompt template.
  */
 
-import type { LlmProvider } from "@/lib/llm/types";
-import { getLlmProvider } from "@/lib/llm";
+import { runMachineInference } from "@/lib/llm";
 import type {
   AmbiguousCase,
   ForgeStep,
@@ -475,24 +474,13 @@ export async function runAiInference(
   diff: StructuralDiffResult,
   before: ParsedFileData,
   after: ParsedFileData,
-  description?: string,
-  provider?: LlmProvider
+  description?: string
 ): Promise<AiInferenceResult> {
   const warnings: string[] = [];
   const aiSamplePolicy = describeAiSamplePolicyForUi();
 
   // If no ambiguous cases, nothing to do
   if (!shouldUseAiForSampleAnalysis({ ambiguousCaseCount: diff.ambiguousCases.length })) {
-    return { steps: [], warnings, aiSamplePolicy };
-  }
-
-  // Resolve LLM provider
-  let llm: LlmProvider;
-  try {
-    llm = provider ?? getLlmProvider();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    warnings.push(`LLM provider not configured: ${msg}`);
     return { steps: [], warnings, aiSamplePolicy };
   }
 
@@ -564,7 +552,7 @@ export async function runAiInference(
         const columns = unresolvedNewCols.map((nc) => nc.context.column as string);
         const context = buildBulkColumnContext(columns, diff, before, after, description);
 
-        const response = await llm.chat({
+        const response = await runMachineInference({
           messages: [
             { role: "system", content: ANALYZE_COLUMNS_PROMPT },
             { role: "user", content: context },
@@ -572,7 +560,7 @@ export async function runAiInference(
           temperature: DEFAULT_TEMPERATURE,
           responseFormat: { type: "json_object" },
           maxTokens: DEFAULT_MAX_TOKENS,
-        });
+        }, { purpose: "smart" });
         aiCallCount++;
 
         const steps = parseStepsFromResponse(response.content, nextOrder);
@@ -612,7 +600,7 @@ export async function runAiInference(
       try {
         const context = buildFormulaContext(column, before, after, description);
 
-        const response = await llm.chat({
+        const response = await runMachineInference({
           messages: [
             { role: "system", content: INFER_FORMULA_PROMPT },
             { role: "user", content: context },
@@ -620,7 +608,7 @@ export async function runAiInference(
           temperature: DEFAULT_TEMPERATURE,
           responseFormat: { type: "json_object" },
           maxTokens: DEFAULT_MAX_TOKENS,
-        });
+        }, { purpose: "smart" });
         aiCallCount++;
 
         const steps = parseFormulaFromResponse(response.content, column, nextOrder);
@@ -658,7 +646,7 @@ export async function runAiInference(
       try {
         const context = buildFilterContext(diff, before, after, description);
 
-        const response = await llm.chat({
+        const response = await runMachineInference({
           messages: [
             { role: "system", content: DETECT_FILTERS_PROMPT },
             { role: "user", content: context },
@@ -666,7 +654,7 @@ export async function runAiInference(
           temperature: DEFAULT_TEMPERATURE,
           responseFormat: { type: "json_object" },
           maxTokens: DEFAULT_MAX_TOKENS,
-        });
+        }, { purpose: "smart" });
         aiCallCount++;
 
         const steps = parseFilterFromResponse(response.content, nextOrder);
@@ -698,7 +686,7 @@ export async function runAiInference(
         contextObj.ambiguousCases = otherCases;
         const contextWithCases = stringifyAiContext(contextObj);
 
-        const response = await llm.chat({
+        const response = await runMachineInference({
           messages: [
             { role: "system", content: CLASSIFY_AMBIGUOUS_PROMPT },
             { role: "user", content: contextWithCases },
@@ -706,7 +694,7 @@ export async function runAiInference(
           temperature: DEFAULT_TEMPERATURE,
           responseFormat: { type: "json_object" },
           maxTokens: DEFAULT_MAX_TOKENS,
-        });
+        }, { purpose: "smart" });
         aiCallCount++;
 
         const steps = parseStepsFromResponse(response.content, nextOrder);

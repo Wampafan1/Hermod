@@ -2,7 +2,7 @@
 // Alfheim Discovery — AI-powered schema inference via LLM
 // ---------------------------------------------------------------------------
 
-import { getLlmProvider } from "../../llm";
+import { runMachineInference } from "../../llm";
 import type { LlmMessage } from "../../llm";
 import { inferSchema } from "../schema-mapper";
 import type { SchemaMapping, ColumnMapping, PaginationType } from "../types";
@@ -125,18 +125,17 @@ export async function inferSchemaWithAI(input: {
   const userContent = buildUserPrompt(endpoint, responseRoot, samples, documentationContext);
 
   try {
-    const llm = getLlmProvider();
     const messages: LlmMessage[] = [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userContent },
     ];
 
-    const response = await llm.chat({
+    const response = await runMachineInference({
       messages,
       temperature: 0.1,
       responseFormat: { type: "json_object" },
       maxTokens: 4_000,
-    });
+    }, { purpose: "smart" });
 
     const parsed = JSON.parse(response.content);
     return validateAndNormalize(parsed, sampleRecords);

@@ -3,10 +3,10 @@
  * the best incremental sync strategy.
  *
  * Called ONCE at pipeline creation time, never during execution.
- * Uses the existing LLM abstraction (getLlmProvider).
+ * Uses the local machinery entry point (runMachineInference).
  */
 
-import { getLlmProvider } from "@/lib/llm";
+import { runMachineInference } from "@/lib/llm";
 import type { ColumnSchema, CursorConfig } from "./types";
 
 // ─── Detection Input ─────────────────────────────────
@@ -75,8 +75,7 @@ export async function detectCursorStrategy(input: DetectionInput): Promise<Curso
   const userMessage = buildDetectionPrompt(input);
 
   try {
-    const llm = getLlmProvider();
-    const response = await llm.chat({
+    const response = await runMachineInference({
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
@@ -84,7 +83,7 @@ export async function detectCursorStrategy(input: DetectionInput): Promise<Curso
       responseFormat: { type: "json_object" },
       maxTokens: 1024,
       temperature: 0,
-    });
+    }, { purpose: "fast" });
 
     const parsed = JSON.parse(response.content) as CursorConfig;
 

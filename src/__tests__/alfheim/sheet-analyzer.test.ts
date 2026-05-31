@@ -12,16 +12,9 @@ const mockResponses = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/llm", () => ({
-  getLlmProvider: () => ({
-    name: "mock",
-    chat: vi.fn(async () => {
-      const content = mockResponses.queue.shift() ?? "{}";
-      return {
-        content,
-        usage: { inputTokens: 100, outputTokens: 200 },
-        model: "mock-model",
-      };
-    }),
+  runMachineInference: vi.fn(async () => {
+    const content = mockResponses.queue.shift() ?? "{}";
+    return { content, model: "mock-model", provider: "ollama" };
   }),
 }));
 

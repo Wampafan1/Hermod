@@ -1,4 +1,4 @@
-import { runAI } from "@/lib/ai/router";
+import { runMachineInference } from "@/lib/llm";
 import {
   buildKeyDriftRecommendation,
   type CandidateKey,
@@ -40,7 +40,7 @@ export async function recommendGateKey(input: KeyRecommendationAiInput): Promise
 
   try {
     const prompt = buildKeyRecommendationPrompt(input);
-    const response = await runAI({
+    const response = await runMachineInference({
       messages: [
         {
           role: "system",
@@ -49,11 +49,9 @@ export async function recommendGateKey(input: KeyRecommendationAiInput): Promise
         },
         { role: "user", content: prompt },
       ],
-      responseFormat: "json",
+      responseFormat: { type: "json_object" },
       temperature: 0,
-      thinking: false,
-      timeout: 15_000,
-    });
+    }, { purpose: "smart" });
 
     const parsed = parseRecommendationResponse(response.content);
     const selected = findVerifiedCandidate(input.candidateKeys, parsed.columns);

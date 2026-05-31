@@ -26,7 +26,7 @@ import type {
   FormulaInfo,
 } from "./types";
 import { fingerprintAllColumns } from "./engine/fingerprint";
-import { getLlmProvider } from "@/lib/llm";
+import { runMachineInference } from "@/lib/llm";
 
 /** Maximum file size: 50 MB */
 export const MAX_FILE_SIZE = 50 * 1024 * 1024;
@@ -223,15 +223,13 @@ async function detectHeaderRowWithAI(
   rawRows: { rowIndex: number; cells: (string | null)[] }[],
 ): Promise<AiHeaderResult | null> {
   try {
-    const provider = getLlmProvider();
-
     // Format rows — show row numbers and cell values as JSON arrays
     const formatted = rawRows.map((r) => {
       const cells = r.cells.map((c) => c ?? null);
       return `Row ${r.rowIndex}: ${JSON.stringify(cells)}`;
     }).join("\n");
 
-    const response = await provider.chat({
+    const response = await runMachineInference({
       messages: [
         { role: "system", content: HEADER_DETECT_SYSTEM },
         { role: "user", content: `Here are the first ${rawRows.length} rows of the file:\n\n${formatted}` },
@@ -239,7 +237,7 @@ async function detectHeaderRowWithAI(
       temperature: 0,
       maxTokens: 200,
       responseFormat: { type: "json_object" },
-    });
+    }, { purpose: "fast" });
 
     const parsed = JSON.parse(response.content);
     const headerRow = parsed?.headerRow;

@@ -4,7 +4,7 @@
  */
 
 import type { LlmMessage } from "@/lib/llm/types";
-import { getLlmProvider } from "@/lib/llm";
+import { runMachineInference } from "@/lib/llm";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -217,19 +217,17 @@ export async function analyzeSheetWithAI(input: {
   totalRows: number;
   totalColumns: number;
 }): Promise<AISheetAnalysisResult> {
-  const llm = getLlmProvider();
-
   const messages: LlmMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: buildUserPrompt(input) },
   ];
 
-  const response = await llm.chat({
+  const response = await runMachineInference({
     messages,
     temperature: DEFAULT_TEMPERATURE,
     responseFormat: { type: "json_object" },
     maxTokens: DEFAULT_MAX_TOKENS,
-  });
+  }, { purpose: "fast" });
 
   const parsed = JSON.parse(response.content);
   return validateAndNormalize(parsed);
